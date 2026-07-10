@@ -43,6 +43,7 @@ input[type=number]{-moz-appearance:textfield;}
         <span style="color:#fff;font-size:48px;font-weight:900;letter-spacing:-0.03em;">Stock</span><span style="color:#00C805;font-size:48px;font-weight:900;letter-spacing:-0.03em;">IQ</span>
       </div>
       <div style="color:#3E4355;font-size:14px;margin-bottom:52px;">Your personal stock playbook</div>
+      <div id="redirect-loading" style="display:none;color:#3E4355;font-size:13px;margin-bottom:12px;" class="pulse">Completing sign in...</div>
       <button id="btn-signin" onclick="signIn()" style="width:100%;padding:16px;background:#fff;color:#0A0C10;border:none;border-radius:16px;font-size:16px;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;">
         <svg width="20" height="20" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.6 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.1 7.9 3L37 9.8C33.5 6.5 29 4.5 24 4.5 13.2 4.5 4.5 13.2 4.5 24S13.2 43.5 24 43.5c10.5 0 19.5-8.5 19.5-19.5 0-1.3-.1-2.7-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.5 16 19 13 24 13c3.1 0 5.8 1.1 7.9 3L37 9.8C33.5 6.5 29 4.5 24 4.5c-7.7 0-14.3 4.4-17.7 10.2z"/><path fill="#4CAF50" d="M24 43.5c4.9 0 9.3-1.9 12.7-4.9l-5.9-5c-2 1.4-4.5 2.2-7.2 2.2-5.1 0-9.5-3.3-11.1-7.9l-6.5 5C9.5 39 16.3 43.5 24 43.5z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.3 4.1-4.2 5.5l5.9 5c-.4.4 6.5-4.7 6.5-14.5 0-1.3-.1-2.7-.4-3.5z"/></svg>
         Sign in with Google
@@ -288,16 +289,43 @@ function getSignal(s) {
 // AUTH
 // ═══════════════════════════════════════════════════════════════════════════════
 function signIn() {
-  document.getElementById('btn-signin').textContent = 'Signing in...';
-  auth.signInWithPopup(googleProvider).catch(e => {
-    console.error(e);
-    document.getElementById('btn-signin').innerHTML = 'Sign in with Google';
-  });
+  const btn = document.getElementById('btn-signin');
+  if(btn) btn.textContent = 'Signing in...';
+  auth.signInWithPopup(googleProvider)
+    .then(() => {
+      if(btn) btn.textContent = 'Signed in!';
+    })
+    .catch(e => {
+      console.error('Popup sign-in error:', e.code, e.message);
+      if(e.code === 'auth/popup-blocked' || e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request') {
+        if(btn) btn.textContent = 'Popup blocked — trying redirect...';
+        auth.signInWithRedirect(googleProvider);
+      } else {
+        if(btn) btn.textContent = 'Sign in failed: ' + e.message;
+        console.error('Sign in error:', e);
+      }
+    });
 }
 function signOut() {
   if(unsubStocks) unsubStocks();
   auth.signOut();
 }
+
+// Handle redirect result (mobile Safari fallback)
+// Show loading state while processing redirect
+const redirectLoading = document.getElementById('redirect-loading');
+if(redirectLoading) redirectLoading.style.display = 'block';
+auth.getRedirectResult().then(result => {
+  if(redirectLoading) redirectLoading.style.display = 'none';
+  if(result && result.user) {
+    console.log('Redirect sign-in successful:', result.user.email);
+  }
+}).catch(e => {
+  if(redirectLoading) redirectLoading.style.display = 'none';
+  console.error('Redirect result error:', e);
+  const btn = document.getElementById('btn-signin');
+  if(btn) btn.textContent = 'Sign in failed: ' + e.message;
+});
 
 auth.onAuthStateChanged(user => {
   currentUser = user;
