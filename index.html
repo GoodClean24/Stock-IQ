@@ -667,7 +667,10 @@ function renderDetail(s) {
           <span style="background:${cfg.dim};color:${cfg.color};border:1px solid ${cfg.color}44;border-radius:20px;padding:5px 14px;font-size:12px;font-weight:800;letter-spacing:0.05em;">${cfg.label}</span>
           <span style="background:${s.type==='Swing'?C.blueDim:C.purpleDim};color:${s.type==='Swing'?C.blue:C.purple};border-radius:20px;padding:5px 14px;font-size:12px;font-weight:700;">${s.type||'—'}</span>
         </div>
-        <button onclick="showDailyUpdate('${s.id}')" style="background:${C.teal};color:#000;border:none;border-radius:20px;padding:7px 16px;font-size:12px;font-weight:800;cursor:pointer;">↻ Update</button>
+        <div style="display:flex;gap:8px;">
+          <button onclick="showImportFlow('${s.id}')" style="background:${C.cardHigh};color:${C.teal};border:1px solid ${C.teal}44;border-radius:20px;padding:7px 14px;font-size:12px;font-weight:800;cursor:pointer;">📂 Import</button>
+          <button onclick="showDailyUpdate('${s.id}')" style="background:${C.teal};color:#000;border:none;border-radius:20px;padding:7px 16px;font-size:12px;font-weight:800;cursor:pointer;">↻ Update</button>
+        </div>
       </div>
     </div>
     <!-- Tabs -->
@@ -962,9 +965,31 @@ function renderTabNotes(s) {
     const f=snaps[0],l=snaps[snaps.length-1];
     const rd=l.rsi<f.rsi?'dropped':'climbed';
     const pd=l.price>f.price?'moved up':'moved down';
-    traj=`Over the last ${snaps.length} updates, the price has ${pd} from ${fmtP(f.price)} to ${fmtP(l.price)} and RSI has ${rd} from ${f.rsi} to ${l.rsi}. ${l.rsi<35?'RSI is getting into buy territory — keep watching closely.':l.rsi>65?'RSI is elevated — not the right time to chase.':'RSI is in neutral territory — no strong signal yet.'}`;
+    const days=snaps.length;
+    const weeks=Math.round(days/5);
+    const timeLabel=days>=20?`${weeks} weeks`:days>=5?`${Math.round(days/5)} week`:`${days} days`;
+
+    // RSI trend over last 10 days
+    const recent=snaps.slice(-10);
+    const rsiVals=recent.map(r=>r.rsi).filter(v=>v!=null);
+    const rsiTrend=rsiVals.length>=2?(rsiVals[rsiVals.length-1]-rsiVals[0]).toFixed(1):null;
+    const rsiTrendStr=rsiTrend?parseFloat(rsiTrend)>0?`RSI has been rising ${rsiTrend} points over the last 10 days — momentum building.`:`RSI has dropped ${Math.abs(rsiTrend)} points recently — sellers in control short term.`:'';
+
+    // Volume trend
+    const volVals=recent.map(r=>r.vol).filter(v=>v!=null);
+    const avgRecent=volVals.length?volVals.reduce((a,b)=>a+b,0)/volVals.length:null;
+    const allVols=snaps.map(r=>r.vol).filter(v=>v!=null);
+    const avgAll=allVols.length?allVols.reduce((a,b)=>a+b,0)/allVols.length:null;
+    const volTrendStr=avgRecent&&avgAll?(avgRecent>avgAll*1.2?'Volume has been above average recently — institutional interest is elevated.'
+      :avgRecent<avgAll*0.8?'Volume has been below average recently — quiet period with lower conviction.'
+      :'Volume is running near its historical average — normal trading conditions.'):'';
+
+    // Price vs MA trends
+    const maNote=l.ma200&&l.price?(l.price>l.ma200?'Price is holding above the long-term support line — the big picture trend is still healthy.':'Price has dropped below the long-term support line — worth being cautious.'):'';
+
+    traj=`Over the past ${timeLabel} (${days} trading days), ${s.ticker} has ${pd} from ${fmtP(f.price)} to ${fmtP(l.price)} and RSI has ${rd} from ${f.rsi?.toFixed(0)||'—'} to ${l.rsi?.toFixed(0)||'—'}. ${rsiTrendStr} ${volTrendStr} ${maNote}`.trim();
   } else {
-    traj=`You have ${snaps.length} update${snaps.length===1?'':'s'} saved. Keep entering daily data — after 3 updates the app will start showing you how this stock is trending.`;
+    traj=`You have ${snaps.length} update${snaps.length===1?'':'s'} saved. Import a CSV from ThinkorSwim or keep entering daily data — after 3 updates the app will start showing you how this stock is trending.`;
   }
 
   const snapRows = [...snaps].reverse().map((snap,i)=>`
@@ -1420,6 +1445,223 @@ async function doAddStock() {
     showSaveStatus('error');
     console.error(e);
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CSV HISTORICAL IMPORT
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function showImportFlow(stockId) {
+  showModal(`
+    <div style="background:${C.card};border-radius:20px;padding:24px;border:1px solid ${C.teal}44;">
+      <div style="color:${C.text};font-size:20px;font-weight:900;margin-bottom:6px;">Import History</div>
+      <div style="color:${C.textSub};font-size:13px;line-height:1.6;margin-bottom:20px;">
+        Select the CSV file you exported from ThinkorSwim. The app will automatically read your historical data and populate the analysis.
+      </div>
+      <div style="background:${C.cardHigh};border-radius:10px;padding:12px 14px;margin-bottom:20px;">
+        <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:8px;">Expected columns</div>
+        <div style="color:${C.teal};font-size:11px;line-height:1.8;">Date · Close · Volume · RSI_14<br>MACD_12_26_9 · MACDs_12_26_9<br>ATRr_14 · SMA_50 · SMA_200 · EMA_20</div>
+      </div>
+      <input type="file" id="csv-file-input" accept=".csv,.txt,.tsv" onchange="previewCSV('${stockId}',this)" style="display:none;">
+      <button onclick="document.getElementById('csv-file-input').click()" style="width:100%;padding:14px;background:${C.teal};color:#000;border:none;border-radius:12px;font-size:15px;font-weight:800;cursor:pointer;margin-bottom:10px;">📂 Select CSV File</button>
+      <button onclick="closeAllOverlays()" style="width:100%;padding:12px;background:none;border:1px solid ${C.border};border-radius:12px;font-size:14px;font-weight:600;color:${C.textSub};cursor:pointer;">Cancel</button>
+    </div>`);
+}
+
+function parseCSVDate(str) {
+  if(!str) return null;
+  str = str.trim();
+  // Handle M/D/YY and M/D/YYYY
+  const parts = str.split('/');
+  if(parts.length === 3) {
+    let [m, d, y] = parts;
+    if(y.length === 2) y = '20' + y;
+    const date = new Date(parseInt(y), parseInt(m)-1, parseInt(d));
+    return date.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+  }
+  // Handle YYYY-MM-DD
+  const iso = str.split('-');
+  if(iso.length === 3) {
+    const date = new Date(parseInt(iso[0]), parseInt(iso[1])-1, parseInt(iso[2]));
+    return date.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+  }
+  return str;
+}
+
+function parseCSV(text) {
+  const lines = text.trim().split('\n');
+  if(lines.length < 2) return [];
+
+  // Detect delimiter - tab or comma
+  const delim = lines[0].includes('\t') ? '\t' : ',';
+  const headers = lines[0].split(delim).map(h => h.trim());
+
+  // Map column indices
+  const idx = {};
+  const colMap = {
+    date:      ['date','Date','DATE'],
+    close:     ['close','Close','CLOSE'],
+    open:      ['open','Open','OPEN'],
+    high:      ['high','High','HIGH'],
+    low:       ['low','Low','LOW'],
+    vol:       ['volume','Volume','VOLUME','vol','VOL'],
+    rsi:       ['RSI_14','rsi_14','RSI','rsi'],
+    macdLine:  ['MACD_12_26_9','macd_12_26_9','MACD','macd'],
+    signalLine:['MACDs_12_26_9','macds_12_26_9','MACDs','macds','SIGNAL'],
+    atr:       ['ATRr_14','atr_14','ATR','atr','ATRr'],
+    ma50:      ['SMA_50','sma_50','SMA50','MA50'],
+    ma200:     ['SMA_200','sma_200','SMA200','MA200'],
+    ma20:      ['EMA_20','ema_20','EMA20','MA20'],
+  };
+
+  Object.keys(colMap).forEach(key => {
+    const match = colMap[key].find(name => headers.includes(name));
+    if(match !== undefined) idx[key] = headers.indexOf(match);
+  });
+
+  const rows = [];
+  for(let i = 1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if(!line) continue;
+    const cols = line.split(delim).map(c => c.trim());
+
+    const pf = (k) => {
+      if(idx[k] === undefined || idx[k] < 0) return null;
+      const v = parseFloat(cols[idx[k]]);
+      return isNaN(v) ? null : v;
+    };
+
+    const dateStr = idx.date !== undefined ? cols[idx.date]?.trim() : null;
+    if(!dateStr) continue;
+
+    rows.push({
+      date:       parseCSVDate(dateStr),
+      price:      pf('close'),
+      open:       pf('open'),
+      high:       pf('high'),
+      low:        pf('low'),
+      vol:        pf('vol'),
+      rsi:        pf('rsi'),
+      macdLine:   pf('macdLine'),
+      signalLine: pf('signalLine'),
+      atr:        pf('atr'),
+      ma50:       pf('ma50'),
+      ma200:      pf('ma200'),
+      ma20:       pf('ma20'),
+    });
+  }
+
+  // Sort oldest to newest
+  return rows.reverse();
+}
+
+let pendingImportRows = null;
+let pendingImportStockId = null;
+
+function previewCSV(stockId, input) {
+  const file = input.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const rows = parseCSV(e.target.result);
+    if(!rows.length) {
+      showModal(`
+        <div style="background:${C.card};border-radius:20px;padding:24px;border:1px solid ${C.red}44;text-align:center;">
+          <div style="font-size:32px;margin-bottom:12px;">⚠️</div>
+          <div style="color:${C.text};font-size:18px;font-weight:900;margin-bottom:8px;">Could not read file</div>
+          <div style="color:${C.textSub};font-size:13px;margin-bottom:20px;">Make sure the file is a ThinkorSwim export with the expected columns.</div>
+          <button onclick="closeAllOverlays()" style="width:100%;padding:13px;border-radius:12px;border:none;background:${C.text};color:${C.bg};font-size:14px;font-weight:800;cursor:pointer;">OK</button>
+        </div>`);
+      return;
+    }
+
+    pendingImportRows = rows;
+    pendingImportStockId = stockId;
+    const first = rows[0];
+    const last  = rows[rows.length-1];
+    const withData = rows.filter(r => r.price && r.rsi).length;
+
+    // Preview the most recent 3 rows
+    const preview = rows.slice(-3).reverse().map(r => `
+      <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid ${C.border};">
+        <span style="color:${C.textSub};font-size:12px;">${r.date}</span>
+        <div style="display:flex;gap:12px;">
+          <span style="color:${C.text};font-size:12px;font-weight:700;">${r.price?'$'+r.price.toFixed(2):'—'}</span>
+          <span style="color:${r.rsi<30?C.green:r.rsi>70?C.red:C.yellow};font-size:12px;">RSI ${r.rsi?.toFixed(1)||'—'}</span>
+          <span style="color:${C.textSub};font-size:12px;">ATR ${r.atr?'$'+r.atr.toFixed(2):'—'}</span>
+        </div>
+      </div>`).join('');
+
+    showModal(`
+      <div style="background:${C.card};border-radius:20px;padding:24px;border:1px solid ${C.teal}44;">
+        <div style="color:${C.text};font-size:20px;font-weight:900;margin-bottom:16px;">Ready to Import</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;">
+          ${[
+            {label:'Total Rows', val:rows.length+' days', color:C.teal},
+            {label:'With Full Data', val:withData+' days', color:C.green},
+            {label:'From', val:first.date||'—', color:C.textSub},
+            {label:'To', val:last.date||'—', color:C.textSub},
+          ].map(item=>`
+          <div style="background:${C.cardHigh};border-radius:10px;padding:10px 12px;">
+            <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:4px;">${item.label}</div>
+            <div style="color:${item.color};font-size:13px;font-weight:800;">${item.val}</div>
+          </div>`).join('')}
+        </div>
+        <div style="background:${C.cardHigh};border-radius:10px;padding:12px;margin-bottom:16px;">
+          <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:8px;">Most Recent Data</div>
+          ${preview}
+        </div>
+        <div style="background:${C.yellowDim};border-radius:10px;padding:12px;margin-bottom:16px;border:1px solid ${C.yellow}33;">
+          <span style="color:${C.textSub};font-size:12px;line-height:1.5;">This will replace any existing snapshot history for this stock with the imported data.</span>
+        </div>
+        <div style="display:flex;gap:10px;">
+          <button onclick="closeAllOverlays()" style="flex:1;padding:13px;border-radius:12px;border:1px solid ${C.border};background:none;color:${C.textSub};font-size:14px;font-weight:700;cursor:pointer;">Cancel</button>
+          <button onclick="doImportCSV('${stockId}')" style="flex:2;padding:13px;border-radius:12px;border:none;background:${C.teal};color:#000;font-size:14px;font-weight:900;cursor:pointer;">Import ${rows.length} Days ✓</button>
+        </div>
+      </div>`);
+  };
+  reader.readAsText(file);
+}
+
+async function doImportCSV(stockId) {
+  const rows = pendingImportRows;
+  if(!rows||!rows.length) return;
+  const s = stocks.find(x=>String(x.id)===String(stockId));
+  if(!s) return;
+
+  // Use the most recent row to update current stock values
+  const latest = rows[rows.length-1];
+
+  const updated = {
+    ...s,
+    price:      latest.price || s.price,
+    rsi:        latest.rsi || s.rsi,
+    vol:        latest.vol || s.vol,
+    ma20:       latest.ma20 || s.ma20,
+    ma50:       latest.ma50 || s.ma50,
+    ma200:      latest.ma200 || s.ma200,
+    macdLine:   latest.macdLine || s.macdLine,
+    signalLine: latest.signalLine || s.signalLine,
+    atr:        latest.atr || s.atr,
+    analyzed:   latest.date || s.analyzed,
+    snapshots:  rows,
+  };
+
+  stocks = stocks.map(x=>String(x.id)===String(stockId)?updated:x);
+  closeAllOverlays();
+  showSaveStatus('saving');
+
+  try {
+    await fbSaveStock(updated);
+    showSaveStatus('saved');
+    setTimeout(()=>showSaveStatus('ready'),2000);
+  } catch(e) {
+    showSaveStatus('error');
+    console.error(e);
+  }
+
+  renderDetail(updated);
+  renderHome();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
