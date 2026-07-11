@@ -56,15 +56,25 @@ input[type=number]{-moz-appearance:textfield;}
 <!-- HOME -->
 <div id="screen-home" class="screen">
   <!-- Header -->
-  <div style="background:#11141C;border-bottom:1px solid #1E2230;padding:18px 20px 14px;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:10;">
+  <div style="background:#11141C;border-bottom:1px solid #1E2230;padding:16px 20px 14px;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:10;">
     <div>
-      <div><span style="color:#fff;font-size:26px;font-weight:900;letter-spacing:-0.03em;">Stock</span><span style="color:#00C805;font-size:26px;font-weight:900;letter-spacing:-0.03em;">IQ</span></div>
+      <div><span style="color:#fff;font-size:24px;font-weight:900;letter-spacing:-0.03em;">Stock</span><span style="color:#00C805;font-size:24px;font-weight:900;letter-spacing:-0.03em;">IQ</span></div>
       <div id="user-name" style="color:#3E4355;font-size:11px;margin-top:1px;"></div>
     </div>
     <div style="display:flex;gap:8px;align-items:center;">
-      <button onclick="showAddFlow()" style="background:#fff;color:#0A0C10;border:none;border-radius:22px;padding:10px 18px;font-size:13px;font-weight:800;cursor:pointer;display:flex;align-items:center;gap:5px;"><span style="font-size:16px;">+</span> Add</button>
-      <button onclick="signOut()" style="background:none;border:1px solid #1E2230;border-radius:18px;padding:7px 12px;font-size:11px;font-weight:600;color:#7A8099;cursor:pointer;">Out</button>
+      <button onclick="toggleSearch()" style="background:#181D27;border:1px solid #252A3A;border-radius:50%;width:36px;height:36px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:#7A8099;" aria-label="Search">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      </button>
+      <button onclick="comingSoon('Notifications')" style="position:relative;background:#181D27;border:1px solid #252A3A;border-radius:50%;width:36px;height:36px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:#7A8099;" aria-label="Notifications">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+      </button>
+      <button onclick="showAddFlow()" style="background:#00C805;color:#000;border:none;border-radius:22px;padding:10px 16px;font-size:13px;font-weight:800;cursor:pointer;display:flex;align-items:center;gap:5px;white-space:nowrap;"><span style="font-size:16px;">+</span> Add Stock</button>
+      <button onclick="signOut()" style="background:none;border:1px solid #1E2230;border-radius:18px;padding:7px 10px;font-size:11px;font-weight:600;color:#7A8099;cursor:pointer;">Out</button>
     </div>
+  </div>
+  <!-- Search bar (hidden by default) -->
+  <div id="search-bar" style="display:none;background:#11141C;border-bottom:1px solid #1E2230;padding:10px 20px;">
+    <input id="search-input" type="text" placeholder="Search your watchlist..." oninput="setSearchQuery(this.value)" style="width:100%;background:#181D27;border:1px solid #252A3A;border-radius:12px;color:#fff;font-size:14px;padding:10px 14px;outline:none;box-sizing:border-box;">
   </div>
   <!-- Save status -->
   <div id="save-status" style="display:none;background:#11141C;border-bottom:1px solid #1E2230;padding:5px 20px;text-align:center;font-size:11px;font-weight:700;"></div>
@@ -75,13 +85,18 @@ input[type=number]{-moz-appearance:textfield;}
   </div>
   <!-- Portfolio box -->
   <div id="portfolio-box"></div>
-  <!-- Filter tags -->
-  <div style="background:#11141C;border-bottom:1px solid #1E2230;padding:9px 20px;display:flex;gap:7px;overflow-x:auto;" id="filter-tags"></div>
-  <!-- Rank label -->
-  <div style="padding:9px 20px 0;"><span style="color:#3E4355;font-size:11px;">Best opportunities ranked at the top. Updates every time you refresh stock data.</span></div>
+  <!-- Filter tags + sort -->
+  <div id="filter-bar" style="background:#11141C;border-bottom:1px solid #1E2230;padding:9px 20px;"></div>
+  <!-- List header -->
+  <div id="list-header" style="padding:10px 20px 4px;"></div>
   <!-- Stock list -->
-  <div id="stock-list" style="padding:12px 16px 120px;display:flex;flex-direction:column;gap:14px;"></div>
+  <div id="stock-list" style="padding:8px 16px 4px;display:flex;flex-direction:column;gap:14px;"></div>
+  <!-- Quick action tiles -->
+  <div id="quick-actions" style="padding:16px 16px 120px;"></div>
 </div>
+
+<!-- BOTTOM NAV -->
+<div id="bottom-nav" style="display:none;position:fixed;bottom:0;left:0;right:0;max-width:680px;margin:0 auto;background:#0A0C10;border-top:1px solid #1E2230;padding:8px 4px calc(8px + env(safe-area-inset-bottom));z-index:20;"></div>
 
 <!-- DETAIL -->
 <div id="screen-detail" class="screen">
@@ -199,6 +214,9 @@ let addVals  = {};
 let updateStep = 0;
 let updateVals = {};
 let updateStockId = null;
+let searchQuery = '';
+let sortMode = 'score'; // 'score' | 'price' | 'pct' | 'name'
+let portfolioHidden = false;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // HELPERS
@@ -266,12 +284,13 @@ function computeGamePlan(s) {
   else if(atr && s.price) profit = `${fmtP(s.price + atr*3)} (3× ATR extension)`;
 
   let stopRule = 'Set once you have an ATR reading.';
+  let stopPrice = null;
   if(atr && s.price) {
-    const stopPrice = (s.price - atr*1.5).toFixed(2);
-    stopRule = `Exit if price closes below $${stopPrice} (1.5× ATR below entry). Objective, no-emotion stop, not a gut call.`;
+    stopPrice = s.price - atr*1.5;
+    stopRule = `Exit if price closes below ${fmtP(stopPrice)} (1.5× ATR below entry). Objective, no-emotion stop, not a gut call.`;
   }
 
-  return {buyZone, profit, stopRule};
+  return {buyZone, profit, stopRule, stopPrice};
 }
 
 
@@ -511,11 +530,39 @@ function closeAllOverlays() {
 const TAGS = ['All','★ Favorites','Buy Zone','Watch','Wait','Pass','Swing','Long Term'];
 const TAG_COLORS = {'Buy Zone':C.green,'Watch':C.yellow,'Wait':C.orange,'Pass':C.red};
 
+// Generic "not built yet" notice — used for nav items / tiles that are visual
+// placeholders so we never pretend a feature exists when it doesn't.
+function comingSoon(feature) {
+  showModal(`
+    <div style="background:${C.card};border-radius:20px;padding:26px 22px;border:1px solid ${C.border};text-align:center;">
+      <div style="font-size:30px;margin-bottom:10px;">🚧</div>
+      <div style="color:${C.text};font-size:16px;font-weight:800;margin-bottom:6px;">${feature} — Coming Soon</div>
+      <div style="color:${C.textSub};font-size:13px;line-height:1.6;margin-bottom:18px;">This isn't built yet. Just showing you where it'll live.</div>
+      <button onclick="closeAllOverlays()" style="width:100%;padding:12px;border-radius:12px;border:none;background:${C.text};color:${C.bg};font-size:14px;font-weight:800;cursor:pointer;">Got it</button>
+    </div>`);
+}
+
+function toggleSearch() {
+  const bar = document.getElementById('search-bar');
+  if(!bar) return;
+  const showing = bar.style.display==='block';
+  bar.style.display = showing?'none':'block';
+  if(showing){ searchQuery=''; const inp=document.getElementById('search-input'); if(inp) inp.value=''; renderStockList(); }
+  else setTimeout(()=>{ const inp=document.getElementById('search-input'); if(inp) inp.focus(); },50);
+}
+function setSearchQuery(v) { searchQuery = v.trim().toLowerCase(); renderStockList(); }
+
+function togglePortfolioVisibility() { portfolioHidden = !portfolioHidden; renderPortfolioBox(); }
+function setSortMode(v) { sortMode = v; renderStockList(); }
+
 function renderHome() {
   renderMarket();
   renderPortfolioBox();
-  renderTags();
+  renderFilterBar();
+  renderListHeader();
   renderStockList();
+  renderQuickActions();
+  renderBottomNav();
 }
 
 function renderMarket() {
@@ -544,54 +591,122 @@ function renderPortfolioBox() {
   const gl = totalVal-totalCost;
   const glPct = totalCost>0?(gl/totalCost)*100:0;
   const isUp = gl>=0;
+  // Day gain — sum of each position's per-share price change (from the last
+  // update you logged) times shares held. Real, not simulated — but it only
+  // reflects movement since your last daily update, not live market time.
+  const dayGain = allFilled.reduce((a,t)=>a+((t.stock.change||0)*(t.shares||0)),0);
+  const dayUp = dayGain>=0;
 
-  const byStock = {};
-  allFilled.forEach(t=>{
-    if(!byStock[t.stock.id]) byStock[t.stock.id]={stock:t.stock,tranches:[]};
-    byStock[t.stock.id].tranches.push(t);
-  });
-
-  const chips = Object.values(byStock).map(({stock,tranches})=>{
-    const v = tranches.reduce((a,t)=>a+stock.price*(t.shares||0),0);
-    const c = tranches.reduce((a,t)=>a+(t.entryPrice||0)*(t.shares||0),0);
-    const cgl=v-c; const cup=cgl>=0;
-    const cfg=vCfg(stock.verdict);
-    return `<button onclick="openQuickView('${stock.id}')" style="background:${C.cardHigh};border:1px solid ${cfg.color}44;border-radius:14px;padding:10px 14px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;min-width:80px;flex-shrink:0;">
-      <span style="color:${C.text};font-size:14px;font-weight:900;">${stock.ticker}</span>
-      <span style="color:${cup?C.green:C.red};font-size:12px;font-weight:700;">${cup?'+':''}${cgl.toFixed(2)}</span>
-      <span style="color:${C.textMuted};font-size:10px;">${fmtP(v)}</span>
-    </button>`;
-  }).join('');
+  const mask = (txt) => portfolioHidden ? '••••••' : txt;
 
   el.innerHTML = `
     <div style="margin:14px 16px;">
-      <div style="background:${C.card};border:1.5px solid ${isUp?C.green:C.red};border-radius:20px;padding:20px;box-shadow:0 0 32px ${isUp?C.greenGlow:C.redGlow};text-align:center;">
-        <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.12em;margin-bottom:8px;">Portfolio Value</div>
-        <div style="color:${C.text};font-size:38px;font-weight:900;letter-spacing:-0.03em;margin-bottom:6px;">${fmtP(totalVal)}</div>
-        <div style="display:flex;justify-content:center;align-items:center;gap:8px;margin-bottom:16px;">
-          <span style="color:${isUp?C.green:C.red};font-size:17px;font-weight:800;">${isUp?'▲':'▼'} ${isUp?'+':''}${gl.toFixed(2)}</span>
-          <span style="color:${C.textMuted};font-size:13px;">(${glPct.toFixed(2)}%)</span>
+      <div style="background:${C.card};border:1.5px solid ${C.border};border-radius:20px;padding:18px 20px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <span style="color:${C.textMuted};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.1em;">My Portfolio</span>
+          <button onclick="togglePortfolioVisibility()" style="background:none;border:none;color:${C.textMuted};cursor:pointer;padding:2px;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${portfolioHidden?'<path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a18.5 18.5 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>':'<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>'}</svg>
+          </button>
+        </div>
+        <div style="color:${C.text};font-size:32px;font-weight:900;letter-spacing:-0.02em;margin-bottom:5px;">${mask(fmtP(totalVal))}</div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;">
+          <span style="color:${dayUp?C.green:C.red};font-size:14px;font-weight:800;">${dayUp?'▲':'▼'} ${mask((dayUp?'+':'')+fmtP(dayGain))}</span>
+          <span style="color:${C.textMuted};font-size:12px;">Today</span>
         </div>
         <div style="height:1px;background:${C.border};margin-bottom:14px;"></div>
-        <div style="display:flex;gap:10px;overflow-x:auto;padding-bottom:2px;justify-content:${Object.keys(byStock).length<=3?'center':'flex-start'};">
-          ${chips}
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
+          <div>
+            <div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">Invested</div>
+            <div style="color:${C.text};font-size:13px;font-weight:800;">${mask(fmtP(totalCost))}</div>
+          </div>
+          <div>
+            <div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">Day Gain</div>
+            <div style="color:${dayUp?C.green:C.red};font-size:13px;font-weight:800;">${mask((dayUp?'+':'')+fmtP(dayGain))}</div>
+          </div>
+          <div>
+            <div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">Total Gain</div>
+            <div style="color:${isUp?C.green:C.red};font-size:13px;font-weight:800;">${mask((isUp?'+':'')+fmtP(gl)+` (${glPct.toFixed(1)}%)`)}</div>
+          </div>
         </div>
       </div>
     </div>`;
 }
 
-function renderTags() {
-  document.getElementById('filter-tags').innerHTML = TAGS.map(t => {
+function renderFilterBar() {
+  const el = document.getElementById('filter-bar');
+  const tags = TAGS.map(t => {
     const active = t===activeTag;
     const tc = TAG_COLORS[t]||null;
-    return `<button onclick="setTag('${t}')" style="padding:7px 16px;border-radius:22px;font-size:12px;font-weight:700;border:1px solid ${active?(tc||C.text):C.border};background:${active?(tc?tc+'22':C.cardHigh):'none'};color:${active?(tc||C.text):C.textSub};cursor:pointer;white-space:nowrap;flex-shrink:0;transition:all 0.15s;">${t}</button>`;
+    return `<button onclick="setTag('${t}')" style="padding:7px 15px;border-radius:22px;font-size:12px;font-weight:700;border:1px solid ${active?(tc||C.green):C.border};background:${active?(tc?tc+'22':C.greenDim):'none'};color:${active?(tc||C.green):C.textSub};cursor:pointer;white-space:nowrap;flex-shrink:0;transition:all 0.15s;">${t}</button>`;
   }).join('');
+  el.innerHTML = `
+    <div style="display:flex;gap:7px;overflow-x:auto;margin-bottom:9px;">${tags}</div>
+    <div style="display:flex;justify-content:flex-end;align-items:center;">
+      <span style="color:${C.textMuted};font-size:11px;margin-right:6px;">Sort by:</span>
+      <select onchange="setSortMode(this.value)" style="background:${C.cardHigh};border:1px solid ${C.borderLight};border-radius:8px;color:${C.textSub};font-size:11px;font-weight:700;padding:5px 8px;outline:none;">
+        <option value="score" ${sortMode==='score'?'selected':''}>Score</option>
+        <option value="price" ${sortMode==='price'?'selected':''}>Price</option>
+        <option value="pct" ${sortMode==='pct'?'selected':''}>% Change</option>
+        <option value="name" ${sortMode==='name'?'selected':''}>Name</option>
+      </select>
+    </div>`;
 }
 
-function setTag(t) { activeTag=t; renderTags(); renderStockList(); }
+function setTag(t) { activeTag=t; renderFilterBar(); renderStockList(); }
+
+function renderListHeader() {
+  const el = document.getElementById('list-header');
+  const n = stocks.length;
+  el.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <span style="color:${C.textMuted};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.06em;">My Watchlist (${n})</span>
+      <span style="color:${C.textMuted};font-size:10px;">Best opportunities ranked at the top</span>
+    </div>`;
+}
+
+// Compact 2-line trend label ("Uptrend / Strong", "Bottoming / Building", etc.)
+function computeTrendLabel(s) {
+  const setup = analyzeSetup(s);
+  const {rz, dz, trendUp, trendBroken} = setup;
+  if(trendBroken) return {line1:'Downtrend', line2:'Weak', color:C.red};
+  if(trendUp) {
+    if(dz && dz.zone==='extended') return {line1:'Uptrend', line2:'Extended', color:C.yellow};
+    if(rz && (rz.zone==='healthy'||rz.zone==='strong')) return {line1:'Uptrend', line2:'Strong', color:C.green};
+    return {line1:'Uptrend', line2:'Moderate', color:C.green};
+  }
+  if(rz && (rz.zone==='panic'||rz.zone==='weak')) return {line1:'Bottoming', line2:'Building', color:C.yellow};
+  return {line1:'Mixed', line2:'Watching', color:C.textSub};
+}
+
+// Small inline sparkline — price only, no axis/labels, sized for a list row.
+function miniSparkline(s, color) {
+  const snaps = (s.snapshots||[]).filter(sn=>sn.price!=null).slice(-30);
+  if(snaps.length<2) return `<div style="width:100%;height:36px;display:flex;align-items:center;justify-content:center;"><span style="color:${C.textMuted};font-size:9px;">No history yet</span></div>`;
+  const W=110,H=36,pad=3;
+  const vals = snaps.map(sn=>sn.price);
+  const min=Math.min(...vals), max=Math.max(...vals), range=(max-min)||1;
+  const xStep=(W-pad*2)/(snaps.length-1);
+  const pts = snaps.map((sn,i)=>`${pad+i*xStep},${H-pad-((sn.price-min)/range)*(H-pad*2)}`).join(' ');
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:36px;display:block;"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+}
+
+// Game-plan status chip for the list row — icon + short label + color.
+function computeGamePlanStatus(s, narrative, hasPos) {
+  if(hasPos) return {icon:'🛡', label:'Core Holding', color:C.teal};
+  if(narrative.verdict==='BUY NOW') return {icon:'🎯', label:'Ready to Act', color:C.green};
+  if(narrative.verdict==='AVOID') return {icon:'⏰', label:'Extended', color:C.red};
+  const missing = narrative.waitingOn.length;
+  if(missing<=2) return {icon:'📶', label:`${4-missing} of 4 Signals Lining Up`, color:C.yellow};
+  return {icon:'👁', label:'Watching', color:C.textSub};
+}
 
 function renderStockList() {
-  const ranked = getRanked();
+  let ranked = getRanked();
+
+  if(searchQuery) {
+    ranked = ranked.filter(s => s.ticker.toLowerCase().includes(searchQuery) || (s.name||'').toLowerCase().includes(searchQuery));
+  }
+
   const filtered = ranked.filter(s => {
     if(activeTag==='All') return true;
     if(activeTag==='★ Favorites') return s.starred;
@@ -600,12 +715,24 @@ function renderStockList() {
     return s.verdict===activeTag;
   });
 
+  // Secondary sort on top of the starred-first ranking, per the Sort by control
+  if(sortMode!=='score') {
+    filtered.sort((a,b) => {
+      if(a.starred&&!b.starred) return -1;
+      if(!a.starred&&b.starred) return 1;
+      if(sortMode==='price') return (b.price||0)-(a.price||0);
+      if(sortMode==='pct') return (b.pct||0)-(a.pct||0);
+      if(sortMode==='name') return (a.ticker||'').localeCompare(b.ticker||'');
+      return 0;
+    });
+  }
+
   const el = document.getElementById('stock-list');
   if(filtered.length===0) {
     el.innerHTML=`<div style="text-align:center;padding:60px 0;">
       <div style="font-size:40px;margin-bottom:14px;">📋</div>
-      <div style="color:${C.textSub};font-size:16px;font-weight:700;margin-bottom:6px;">No stocks here yet</div>
-      <div style="color:${C.textMuted};font-size:13px;">Tap + Add to start building your playbook</div>
+      <div style="color:${C.textSub};font-size:16px;font-weight:700;margin-bottom:6px;">${searchQuery?'No matches':'No stocks here yet'}</div>
+      <div style="color:${C.textMuted};font-size:13px;">${searchQuery?'Try a different ticker or name':'Tap + Add Stock to start building your playbook'}</div>
     </div>`;
     return;
   }
@@ -613,76 +740,124 @@ function renderStockList() {
   el.innerHTML = filtered.map((s,i)=>renderStockCard(s,i+1)).join('');
 }
 
+function showRowMenu(id) {
+  const s = stocks.find(x=>String(x.id)===String(id));
+  if(!s) return;
+  showSheet(`
+    <div style="width:36px;height:4px;border-radius:2px;background:${C.border};margin:0 auto 18px;"></div>
+    <div style="color:${C.text};font-size:16px;font-weight:800;margin-bottom:16px;">${s.ticker}</div>
+    <div style="display:flex;flex-direction:column;gap:10px;">
+      <button onclick="closeAllOverlays();toggleStar('${s.id}')" style="padding:14px 16px;border-radius:12px;border:1px solid ${C.border};background:none;color:${C.text};font-size:14px;font-weight:600;cursor:pointer;text-align:left;">${s.starred?'☆ Remove from Favorites':'★ Add to Favorites'}</button>
+      <button onclick="closeAllOverlays();openDetail('${s.id}')" style="padding:14px 16px;border-radius:12px;border:1px solid ${C.border};background:none;color:${C.text};font-size:14px;font-weight:600;cursor:pointer;text-align:left;">Open Full Analysis</button>
+      <button onclick="closeAllOverlays();confirmDelete('${s.id}')" style="padding:14px 16px;border-radius:12px;border:1px solid ${C.red}44;background:none;color:${C.red};font-size:14px;font-weight:600;cursor:pointer;text-align:left;">Delete Stock</button>
+    </div>`);
+}
+
 function renderStockCard(s, rank) {
   const cfg = vCfg(s.verdict);
   const gp = computeGamePlan(s);
+  const setup = analyzeSetup(s);
+  const narrative = brokerRead(s, setup, computeTrajectory(s));
   const filled = (s.tranche||[]).filter(t=>t.status==='filled').length;
-  const showRank = rank<=3;
   const filledTr = (s.tranche||[]).filter(t=>t.status==='filled');
   const hasPos = filledTr.length>0;
-
-  const rankPill = showRank ? `
-    <div style="position:absolute;top:12px;right:14px;display:flex;align-items:center;gap:5px;background:${C.cardPop};border-radius:20px;padding:4px 10px 4px 4px;border:1px solid ${C.borderLight};">
-      <div style="width:20px;height:20px;border-radius:50%;background:${rank===1?C.yellowDim:C.cardHigh};border:1.5px solid ${rank===1?C.yellow:C.textMuted};display:flex;align-items:center;justify-content:center;">
-        <span style="color:${rank===1?C.yellow:C.textMuted};font-size:10px;font-weight:900;">${rank}</span>
-      </div>
-      <span style="color:${C.textMuted};font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;white-space:nowrap;">${s.reason||''}</span>
-    </div>` : '';
+  const trend = computeTrendLabel(s);
+  const gpStatus = computeGamePlanStatus(s, narrative, hasPos);
+  const initials = (s.ticker||'??').slice(0,2);
+  const avatarHue = Array.from(s.ticker||'XX').reduce((a,c)=>a+c.charCodeAt(0),0)%360;
 
   const setupScore = computeSetupScore(s);
   const scoreColor = setupScore.color;
   const r=19,circ=2*Math.PI*r,dash=(setupScore.score/100)*circ;
-  const scoreRing = `<div style="position:relative;width:44px;height:44px;flex-shrink:0;">
-    <svg width="44" height="44" style="transform:rotate(-90deg);">
-      <circle cx="22" cy="22" r="${r}" fill="none" stroke="${C.border}" stroke-width="5"/>
-      <circle cx="22" cy="22" r="${r}" fill="none" stroke="${scoreColor}" stroke-width="5" stroke-dasharray="${dash} ${circ}" stroke-linecap="round"/>
+  const scoreRing = `<div style="position:relative;width:46px;height:46px;flex-shrink:0;">
+    <svg width="46" height="46" style="transform:rotate(-90deg);">
+      <circle cx="23" cy="23" r="${r}" fill="none" stroke="${C.border}" stroke-width="5"/>
+      <circle cx="23" cy="23" r="${r}" fill="none" stroke="${scoreColor}" stroke-width="5" stroke-dasharray="${dash} ${circ}" stroke-linecap="round"/>
     </svg>
-    <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;"><span style="color:${scoreColor};font-size:12px;font-weight:900;">${setupScore.score}</span></div>
+    <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;"><span style="color:${scoreColor};font-size:13px;font-weight:900;">${setupScore.score}</span></div>
   </div>`;
 
-  const posRow = hasPos ? `
-    <div style="margin-top:10px;display:flex;align-items:center;gap:6px;">
-      <div style="width:7px;height:7px;border-radius:50%;background:${C.green};box-shadow:0 0 6px ${C.green};"></div>
-      <span style="color:${C.textSub};font-size:12px;">${filled} of ${s.tranche.length} tranches filled</span>
-    </div>` : '';
-
   return `
-    <div class="fade-in" style="background:${C.card};border-radius:20px;border:1px solid ${C.border};padding:18px 18px 16px;cursor:pointer;position:relative;overflow:hidden;" onclick="openQuickView('${s.id}')">
+    <div class="fade-in" style="background:${C.card};border-radius:20px;border:1px solid ${C.border};padding:16px;cursor:pointer;position:relative;overflow:hidden;" onclick="openQuickView('${s.id}')">
       <div style="position:absolute;top:0;left:0;right:0;height:3px;background:${cfg.color};opacity:0.85;"></div>
-      <button onclick="event.stopPropagation();confirmDelete('${s.id}')" style="position:absolute;top:10px;left:12px;background:${C.cardHigh};border:1px solid ${C.borderLight};border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:${C.textMuted};font-size:12px;font-weight:900;z-index:2;">✕</button>
-      ${rankPill}
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;margin-top:${showRank?'28':'6'}px;padding-left:28px;">
-        <div>
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
-            <span style="color:${C.text};font-size:22px;font-weight:900;letter-spacing:-0.01em;">${s.ticker}</span>
-            <span style="background:${cfg.dim};color:${cfg.color};border:1px solid ${cfg.color}44;border-radius:20px;padding:3px 10px;font-size:11px;font-weight:800;letter-spacing:0.04em;">${cfg.label}</span>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;">
+        <div style="display:flex;gap:10px;align-items:center;min-width:0;">
+          <div style="width:38px;height:38px;border-radius:50%;background:hsl(${avatarHue},45%,22%);border:1px solid hsl(${avatarHue},45%,38%);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+            <span style="color:hsl(${avatarHue},70%,75%);font-size:12px;font-weight:900;">${initials}</span>
           </div>
-          <span style="color:${C.textMuted};font-size:12px;">${s.name}</span>
+          <div style="min-width:0;">
+            <div style="display:flex;align-items:center;gap:6px;">
+              <span style="color:${C.text};font-size:16px;font-weight:900;letter-spacing:-0.01em;">${s.ticker}</span>
+              <button onclick="event.stopPropagation();toggleStar('${s.id}')" style="background:none;border:none;cursor:pointer;font-size:14px;color:${s.starred?C.yellow:C.textMuted};padding:0;">${s.starred?'★':'☆'}</button>
+            </div>
+            <div style="color:${C.textMuted};font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px;">${s.name}</div>
+            <span style="display:inline-block;margin-top:3px;background:${s.type==='Swing'?C.blueDim:C.purpleDim};color:${s.type==='Swing'?C.blue:C.purple};font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;">${s.type||'—'}</span>
+          </div>
         </div>
-        <div style="display:flex;align-items:center;gap:8px;">
-          ${scoreRing}
-          <button onclick="event.stopPropagation();toggleStar('${s.id}')" style="background:none;border:none;cursor:pointer;font-size:18px;color:${s.starred?C.yellow:C.textMuted};padding:0;">${s.starred?'★':'☆'}</button>
+        <button onclick="event.stopPropagation();showRowMenu('${s.id}')" style="background:none;border:none;color:${C.textMuted};cursor:pointer;padding:4px;flex-shrink:0;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+        </button>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
+        <div style="flex:1;min-width:0;">
+          ${miniSparkline(s, trend.color)}
+          <div style="color:${trend.color};font-size:10px;font-weight:800;margin-top:2px;">${trend.line1}<br>${trend.line2}</div>
+        </div>
+        ${scoreRing}
+        <div style="text-align:right;flex-shrink:0;">
+          <div style="color:${C.text};font-size:19px;font-weight:900;letter-spacing:-0.01em;">${fmtP(s.price)}</div>
+          <div style="color:${(s.pct||0)>=0?C.green:C.red};font-size:12px;font-weight:700;">${(s.pct||0)>=0?'▲':'▼'} ${Math.abs(s.pct||0).toFixed(2)}%</div>
         </div>
       </div>
-      <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px;">
-        <div style="display:flex;align-items:baseline;gap:8px;">
-          <span style="color:${C.text};font-size:28px;font-weight:900;letter-spacing:-0.02em;">${fmtP(s.price)}</span>
-          <span style="color:${(s.pct||0)>=0?C.green:C.red};font-size:13px;font-weight:700;">${(s.pct||0)>=0?'▲':'▼'} ${Math.abs(s.pct||0).toFixed(2)}%</span>
-        </div>
-        <span style="color:${s.type==='Swing'?C.blue:C.purple};background:${s.type==='Swing'?C.blueDim:C.purpleDim};font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;">${s.type||'—'}</span>
-      </div>
-      <div style="background:${C.cardHigh};border-radius:12px;padding:10px 14px;display:flex;justify-content:space-between;align-items:center;">
-        <div>
-          <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:3px;">Buy Zone</div>
-          <div style="color:${C.teal};font-size:14px;font-weight:800;">${gp.buyZone||'—'}</div>
-        </div>
-        <div style="text-align:right;">
-          <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:3px;">Last Updated</div>
-          <div style="color:${C.textSub};font-size:12px;font-weight:600;">${s.analyzed||'—'}</div>
+
+      <div style="background:${C.cardHigh};border-radius:12px;padding:10px 14px;">
+        <div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:3px;">Game Plan</div>
+        <div style="color:${C.text};font-size:13px;font-weight:800;margin-bottom:2px;">${narrative.headline.split(' — ')[0]}</div>
+        <div style="color:${C.teal};font-size:12px;font-weight:700;margin-bottom:5px;">${gp.buyZone}</div>
+        <div style="display:flex;align-items:center;gap:5px;">
+          <span style="font-size:11px;">${gpStatus.icon}</span>
+          <span style="color:${gpStatus.color};font-size:11px;font-weight:700;">${gpStatus.label}</span>
         </div>
       </div>
-      ${posRow}
     </div>`;
+}
+
+function renderQuickActions() {
+  const el = document.getElementById('quick-actions');
+  const tiles = [
+    {icon:'🔍', title:'Scan New Stock', sub:'Find high quality opportunities', action:"showAddFlow()"},
+    {icon:'📈', title:'Market Overview', sub:'See what the market is telling us', action:"comingSoon('Market Overview')"},
+    {icon:'📓', title:'My Journal', sub:'Review your trades and notes', action:"comingSoon('Journal')"},
+    {icon:'🔔', title:'Set Alerts', sub:'Get notified when levels are hit', action:"comingSoon('Alerts')"},
+  ];
+  el.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+      ${tiles.map(t=>`
+      <button onclick="${t.action}" style="background:${C.card};border:1px solid ${C.border};border-radius:14px;padding:14px;text-align:left;cursor:pointer;">
+        <div style="font-size:18px;margin-bottom:8px;">${t.icon}</div>
+        <div style="color:${C.text};font-size:12px;font-weight:800;margin-bottom:3px;">${t.title}</div>
+        <div style="color:${C.textMuted};font-size:10px;line-height:1.4;">${t.sub}</div>
+      </button>`).join('')}
+    </div>`;
+}
+
+function renderBottomNav() {
+  const el = document.getElementById('bottom-nav');
+  const items = [
+    {icon:'🏠', label:'Dashboard', action:"showScreen('home');renderHome();", active:true},
+    {icon:'☆', label:'Watchlist', action:"showScreen('home');renderHome();"},
+    {icon:'🥧', label:'Portfolio', action:"comingSoon('Portfolio')"},
+    {icon:'🔍', label:'Scanner', action:"comingSoon('Scanner')"},
+    {icon:'📓', label:'Journal', action:"comingSoon('Journal')"},
+    {icon:'⋯', label:'More', action:"comingSoon('More')"},
+  ];
+  el.style.display = 'flex';
+  el.innerHTML = items.map(it=>`
+    <button onclick="${it.action}" style="flex:1;background:none;border:none;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 2px;color:${it.active?C.green:C.textMuted};">
+      <span style="font-size:16px;">${it.icon}</span>
+      <span style="font-size:9px;font-weight:700;">${it.label}</span>
+    </button>`).join('');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1177,6 +1352,61 @@ function computeMASlope(s) {
   return {rising50, rising200};
 }
 
+// Price line chart from your snapshot history, with 50/200-day SMA overlays
+// when that data is present. Plain SVG — no chart library, matches app style.
+function renderPriceChart(s) {
+  const snaps = (s.snapshots||[]).filter(sn=>sn.price!=null);
+  if(snaps.length<2) {
+    return `
+    <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
+      <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">Price Trend</div>
+      <div style="color:${C.textSub};font-size:13px;text-align:center;padding:26px 0;">Not enough history yet. Keep logging daily updates, or import a CSV, to see the chart.</div>
+    </div>`;
+  }
+
+  const W=320, H=150, padL=4, padR=4, padT=10, padB=6;
+  const has50 = snaps.some(sn=>sn.ma50!=null);
+  const has200 = snaps.some(sn=>sn.ma200!=null);
+  const allVals = [
+    ...snaps.map(sn=>sn.price),
+    ...(has50?snaps.filter(sn=>sn.ma50!=null).map(sn=>sn.ma50):[]),
+    ...(has200?snaps.filter(sn=>sn.ma200!=null).map(sn=>sn.ma200):[])
+  ];
+  const min = Math.min(...allVals), max = Math.max(...allVals);
+  const range = (max-min)||1;
+  const xStep = (W-padL-padR)/(snaps.length-1);
+  const yFor = v => H-padB-((v-min)/range)*(H-padT-padB);
+  const xFor = i => padL+i*xStep;
+
+  const pricePts = snaps.map((sn,i)=>`${xFor(i)},${yFor(sn.price)}`).join(' ');
+  const ma50Pts  = has50 ? snaps.map((sn,i)=> sn.ma50!=null?`${xFor(i)},${yFor(sn.ma50)}`:null).filter(Boolean).join(' ') : '';
+  const ma200Pts = has200 ? snaps.map((sn,i)=> sn.ma200!=null?`${xFor(i)},${yFor(sn.ma200)}`:null).filter(Boolean).join(' ') : '';
+
+  const first = snaps[0], last = snaps[snaps.length-1];
+
+  return `
+  <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+      <span style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;">Price Trend</span>
+      <div style="display:flex;gap:12px;">
+        <span style="color:${C.green};font-size:10px;font-weight:700;">● Price</span>
+        ${ma50Pts?`<span style="color:${C.blue};font-size:10px;font-weight:700;">● 50 SMA</span>`:''}
+        ${ma200Pts?`<span style="color:${C.purple};font-size:10px;font-weight:700;">● 200 SMA</span>`:''}
+      </div>
+    </div>
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:140px;display:block;">
+      <polyline points="${pricePts}" fill="none" stroke="${C.green}" stroke-width="2"/>
+      ${ma50Pts?`<polyline points="${ma50Pts}" fill="none" stroke="${C.blue}" stroke-width="1.5" opacity="0.85"/>`:''}
+      ${ma200Pts?`<polyline points="${ma200Pts}" fill="none" stroke="${C.purple}" stroke-width="1.5" opacity="0.85"/>`:''}
+    </svg>
+    <div style="display:flex;justify-content:space-between;margin-top:6px;">
+      <span style="color:${C.textMuted};font-size:10px;">${first.date}</span>
+      <span style="color:${C.textMuted};font-size:10px;">${last.date}</span>
+    </div>
+    ${(!has50||!has200)?`<div style="color:${C.textMuted};font-size:10px;margin-top:8px;line-height:1.5;">${!has50&&!has200?'50 & 200-day lines need a CSV import — the daily update wizard doesn\'t collect those.':!has50?'50-day line needs a CSV import to appear.':'200-day line needs a CSV import to appear.'}</div>`:''}
+  </div>`;
+}
+
 function renderTabOverview(s) {
   const setup = analyzeSetup(s);
   const traj = computeTrajectory(s);
@@ -1265,7 +1495,7 @@ function renderTabOverview(s) {
         </div>
         <div style="background:${C.cardHigh};border-radius:10px;padding:10px 12px;">
           <div style="color:${C.red};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">Stop Loss</div>
-          <div style="color:${C.text};font-size:12px;font-weight:700;">1.5× ATR below entry</div>
+          <div style="color:${C.text};font-size:13px;font-weight:800;">${gp.stopPrice!=null?fmtP(gp.stopPrice):'—'}</div>
         </div>
         <div style="background:${C.cardHigh};border-radius:10px;padding:10px 12px;">
           <div style="color:${C.yellow};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">Time Limit</div>
@@ -1278,6 +1508,7 @@ function renderTabOverview(s) {
     <div style="display:flex;flex-direction:column;gap:14px;">
       ${takeCard}
       ${glanceGrid}
+      ${renderPriceChart(s)}
       ${keyLevelsCard}
       ${gamePlanPreview}
     </div>`;
@@ -1319,15 +1550,15 @@ function renderTabAnalysis(s) {
 
   // Shared row renderer for the grouped category cards below
   const row = (icon, label, detail, statusLabel, statusColor) => `
-    <div style="display:flex;justify-content:space-between;align-items:center;padding:11px 0;border-bottom:1px solid ${C.border};">
-      <div style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;">
-        <span style="font-size:16px;flex-shrink:0;">${icon}</span>
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 0;border-bottom:1px solid ${C.border};gap:10px;">
+      <div style="display:flex;align-items:flex-start;gap:12px;flex:1;min-width:0;">
+        <span style="font-size:17px;flex-shrink:0;margin-top:1px;">${icon}</span>
         <div style="min-width:0;">
-          <div style="color:${C.text};font-size:13px;font-weight:700;">${label}</div>
-          <div style="color:${C.textMuted};font-size:11px;line-height:1.4;">${detail}</div>
+          <div style="color:${C.text};font-size:13.5px;font-weight:700;margin-bottom:5px;">${label}</div>
+          <div style="color:${C.textSub};font-size:12.5px;line-height:1.5;">${detail}</div>
         </div>
       </div>
-      <span style="color:${statusColor};font-size:11px;font-weight:800;flex-shrink:0;margin-left:10px;">${statusLabel}</span>
+      <span style="color:${statusColor};font-size:11px;font-weight:800;flex-shrink:0;white-space:nowrap;">${statusLabel}</span>
     </div>`;
 
   const categoryCard = (title, summary, rows) => `
@@ -1380,6 +1611,19 @@ function renderTabAnalysis(s) {
   }
   const riskCard = riskRows.length ? categoryCard('Risk & Volatility', s.atr ? `${s.ticker} moves about ${fmtP(s.atr)} a day on average. That's normal — just size your position right.` : 'Add an ATR reading to see risk sizing.', riskRows) : '';
 
+  const bottomLineCard = `
+    <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
+      <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">Bottom Line</div>
+      <div style="display:flex;gap:14px;align-items:flex-start;margin-bottom:16px;">
+        <p style="flex:1;color:${C.text};font-size:13px;line-height:1.7;margin:0;">${narrative.read}</p>
+        <div style="flex-shrink:0;text-align:center;min-width:74px;">
+          <div style="color:${narrative.color};font-size:15px;font-weight:900;letter-spacing:0.02em;">${narrative.verdict}</div>
+          <div style="color:${C.textMuted};font-size:10px;margin-top:2px;line-height:1.4;">${narrative.verdictSub}</div>
+        </div>
+      </div>
+      <button onclick="showTab('plan','${s.id}')" style="width:100%;padding:14px;background:${C.green};color:#000;border:none;border-radius:14px;font-size:14px;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">See My Game Plan <span>→</span></button>
+    </div>`;
+
   return `
     <div style="display:flex;flex-direction:column;gap:14px;">
       ${narrativeBlock}
@@ -1388,6 +1632,7 @@ function renderTabAnalysis(s) {
       ${momCard}
       ${volCard}
       ${riskCard}
+      ${bottomLineCard}
     </div>`;
 }
 
