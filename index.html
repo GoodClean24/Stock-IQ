@@ -778,7 +778,7 @@ function renderStockCard(s, rank) {
   </div>`;
 
   return `
-    <div class="fade-in" style="background:${C.card};border-radius:20px;border:1px solid ${C.border};padding:16px;cursor:pointer;position:relative;overflow:hidden;" onclick="openQuickView('${s.id}')">
+    <div class="fade-in" style="background:${C.card};border-radius:20px;border:1px solid ${C.border};padding:16px;cursor:pointer;position:relative;overflow:hidden;" onclick="openDetail('${s.id}')">
       <div style="position:absolute;top:0;left:0;right:0;height:3px;background:${cfg.color};opacity:0.85;"></div>
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;">
         <div style="display:flex;gap:10px;align-items:center;min-width:0;">
