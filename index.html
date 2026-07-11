@@ -247,7 +247,38 @@ function distanceZone(price, ma50) {
   return {dist:d, zone, label, color, note};
 }
 
-function oppScore(s) {
+// Turns the raw indicators into an actual game plan — buy zone, target, stop —
+// instead of the static placeholder text typed in at add-time.
+function computeGamePlan(s) {
+  const dz = distanceZone(s.price, s.ma50);
+  const atr = s.atr;
+
+  let buyZone = 'Waiting on more data';
+  if(s.ma50 && s.price) {
+    const lo = s.ma50*0.98, hi = s.ma50*1.03;
+    if(dz && (dz.zone==='buy'||dz.zone==='healthy')) buyZone = `${fmtP(lo)} - ${fmtP(hi)}`;
+    else if(dz && (dz.zone==='extended'||dz.zone==='wait')) buyZone = `Wait for pullback to ~${fmtP(s.ma50)}`;
+    else if(dz && dz.zone==='broken') buyZone = `Below support — wait for trend to repair`;
+  }
+
+  let profit = '—';
+  if(s.hi52 && s.price && s.price < s.hi52) profit = `${fmtP(s.hi52)} (52-week high)`;
+  else if(atr && s.price) profit = `${fmtP(s.price + atr*3)} (3× ATR extension)`;
+
+  let stopRule = 'Set once you have an ATR reading.';
+  if(atr && s.price) {
+    const stopPrice = (s.price - atr*1.5).toFixed(2);
+    stopRule = `Exit if price closes below $${stopPrice} (1.5× ATR below entry). Objective, no-emotion stop, not a gut call.`;
+  }
+
+  return {buyZone, profit, stopRule};
+}
+
+
+// Single source of truth for "what's actually going on" — both the ranking
+// math (oppScore) and the plain-English narrative read from this, so they
+// never disagree with each other.
+function analyzeSetup(s) {
   const rz = rsiZone(s.rsi);
   const dz = distanceZone(s.price, s.ma50);
   const volRatio = s.vol&&s.avgvol ? s.vol/s.avgvol : null;
@@ -255,17 +286,22 @@ function oppScore(s) {
   const trendUp = s.ma50&&s.ma200&&s.price ? (s.price>s.ma50 && s.price>s.ma200) : false;
   const trendBroken = s.ma200&&s.price ? s.price < s.ma200*0.97 : false;
   const nearMA200 = s.ma200&&s.price ? Math.abs((s.price-s.ma200)/s.ma200)<0.05 : false;
+  const macdBull = s.macdLine!=null&&s.signalLine!=null&&s.macdLine>s.signalLine;
+
+  const reversalAligned = nearMA200 && rz && (rz.zone==='panic'||rz.zone==='weak') && volConfirmed;
+  const pullbackAligned = trendUp && dz && (dz.zone==='buy'||dz.zone==='healthy') && rz && (rz.zone==='caution'||rz.zone==='healthy') && volConfirmed;
+
+  return {rz, dz, volRatio, volConfirmed, trendUp, trendBroken, nearMA200, macdBull, reversalAligned, pullbackAligned};
+}
+
+function oppScore(s) {
+  const {rz, dz, volConfirmed, trendUp, trendBroken, reversalAligned, pullbackAligned} = analyzeSetup(s);
 
   let score=0, reason='Monitoring', signals=0;
 
   if(s.verdict==='Buy Zone') score+=15;
   else if(s.verdict==='Watch') score+=8;
   else if(s.verdict==='Pass') score-=15;
-
-  // Setup A — Reversal: near long-term support, RSI panic/weak, volume confirms the bounce
-  const reversalAligned = nearMA200 && rz && (rz.zone==='panic'||rz.zone==='weak') && volConfirmed;
-  // Setup B — Pullback in an uptrend: trend intact, price back near the 50-day, RSI cooled off (not crashed), volume confirms
-  const pullbackAligned = trendUp && dz && (dz.zone==='buy'||dz.zone==='healthy') && rz && (rz.zone==='caution'||rz.zone==='healthy') && volConfirmed;
 
   if(reversalAligned){ score+=50; signals=4; reason='Reversal setup — signals aligned'; }
   else if(pullbackAligned){ score+=50; signals=4; reason='Pullback in uptrend — signals aligned'; }
@@ -534,6 +570,7 @@ function renderStockList() {
 
 function renderStockCard(s, rank) {
   const cfg = vCfg(s.verdict);
+  const gp = computeGamePlan(s);
   const filled = (s.tranche||[]).filter(t=>t.status==='filled').length;
   const showRank = rank<=3;
   const filledTr = (s.tranche||[]).filter(t=>t.status==='filled');
@@ -591,7 +628,7 @@ function renderStockCard(s, rank) {
       <div style="background:${C.cardHigh};border-radius:12px;padding:10px 14px;display:flex;justify-content:space-between;align-items:center;">
         <div>
           <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:3px;">Buy Zone</div>
-          <div style="color:${C.teal};font-size:14px;font-weight:800;">${s.buyZone||'—'}</div>
+          <div style="color:${C.teal};font-size:14px;font-weight:800;">${gp.buyZone||'—'}</div>
         </div>
         <div style="text-align:right;">
           <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:3px;">Last Updated</div>
@@ -609,6 +646,7 @@ function openQuickView(id) {
   const s = stocks.find(x=>String(x.id)===String(id));
   if(!s) return;
   const cfg = vCfg(s.verdict);
+  const gp = computeGamePlan(s);
   const filled = (s.tranche||[]).filter(t=>t.status==='filled');
   const inv = filled.reduce((a,t)=>a+(t.entryPrice||0)*(t.shares||0),0);
   const val = filled.reduce((a,t)=>a+s.price*(t.shares||0),0);
@@ -644,7 +682,7 @@ function openQuickView(id) {
         <span style="color:${(s.pct||0)>=0?C.green:C.red};font-size:14px;font-weight:700;">${(s.pct||0)>=0?'▲':'▼'} ${Math.abs(s.pct||0).toFixed(2)}% today</span>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">
-        ${[{label:'Buy Zone',val:s.buyZone||'—',color:C.teal},{label:'Target',val:s.profit||'—',color:C.green},{label:'Type',val:s.type||'—',color:C.blue},{label:'RSI',val:s.rsi??'—',color:(s.rsi||50)<35?C.green:(s.rsi||50)>65?C.red:C.yellow}].map(item=>`
+        ${[{label:'Buy Zone',val:gp.buyZone||'—',color:C.teal},{label:'Target',val:gp.profit||'—',color:C.green},{label:'Type',val:s.type||'—',color:C.blue},{label:'RSI',val:s.rsi??'—',color:(s.rsi||50)<35?C.green:(s.rsi||50)>65?C.red:C.yellow}].map(item=>`
         <div style="background:${C.cardHigh};border-radius:10px;padding:10px 12px;">
           <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:4px;">${item.label}</div>
           <div style="color:${item.color};font-size:13px;font-weight:800;">${item.val}</div>
@@ -752,6 +790,7 @@ function renderTabPlan(s) {
       </div>`;
   }
   const splits = splitBudget(s.invested||0, (s.tranche||[]).length);
+  const gp = computeGamePlan(s);
 
   const tranches = (s.tranche||[]).map((t,i) => {
     const isFilled = t.status==='filled';
@@ -833,12 +872,12 @@ function renderTabPlan(s) {
         </div>
         ${tranches}
       </div>
-      ${s.profit&&s.profit!=='—'?`
+      ${gp.profit&&gp.profit!=='—'?`
       <div style="background:${C.greenDim};border-radius:16px;border:1px solid ${C.green}33;padding:16px;display:flex;align-items:center;gap:14px;">
         <span style="font-size:26px;">🎯</span>
         <div>
           <div style="color:${C.green};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">Take Profit</div>
-          <div style="color:${C.text};font-size:18px;font-weight:900;">${s.profit}</div>
+          <div style="color:${C.text};font-size:18px;font-weight:900;">${gp.profit}</div>
           <div style="color:${C.textSub};font-size:12px;margin-top:3px;">Sell half here. Move your exit to what you paid. Let the rest ride.</div>
         </div>
       </div>`:''}
@@ -846,7 +885,7 @@ function renderTabPlan(s) {
         <span style="font-size:26px;flex-shrink:0;">🛑</span>
         <div>
           <div style="color:${C.red};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">When to Get Out</div>
-          <div style="color:${C.textSub};font-size:13px;line-height:1.6;">${s.stopRule||'Define your exit rule.'}</div>
+          <div style="color:${C.textSub};font-size:13px;line-height:1.6;">${gp.stopRule||'Define your exit rule.'}</div>
         </div>
       </div>
       ${watchOuts?`<div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
@@ -882,7 +921,76 @@ function renderSlider(label, lo, hi, current, leftLabel, rightLabel, colorOverri
     </div>`;
 }
 
+// The "seasoned broker" summary — ties every indicator into one narrative
+// instead of five separate cards you have to piece together yourself.
+function brokerRead(s, setup) {
+  const {rz, dz, volConfirmed, trendUp, trendBroken, nearMA200, macdBull, reversalAligned, pullbackAligned} = setup;
+
+  if(pullbackAligned) {
+    return {
+      headline: 'Textbook Pullback — Signals Aligned',
+      icon: '🎯', color: C.green,
+      read: `${s.ticker} is in a confirmed uptrend, sitting in a healthy buy zone off its 50-day average. RSI has cooled to a reasonable level without breaking down, and volume is confirming real buying interest. This is the kind of setup worth acting on.${macdBull?' Momentum agrees too.':' MACD hasn\'t flipped bullish yet — a nice-to-have, not a dealbreaker.'}`,
+      waitingOn: []
+    };
+  }
+  if(reversalAligned) {
+    return {
+      headline: 'Reversal Setup — Signals Aligned',
+      icon: '🔄', color: C.green,
+      read: `${s.ticker} is sitting near its long-term support, RSI shows real selling exhaustion, and volume is picking up — the combination that usually marks a turn. This is higher risk than a trend pullback since the bigger trend isn't confirmed yet, so size it accordingly.`,
+      waitingOn: []
+    };
+  }
+  if(trendBroken) {
+    return {
+      headline: 'Trend Is Broken — Stand Down',
+      icon: '🔴', color: C.red,
+      read: `${s.ticker} has dropped meaningfully below its 200-day average — the line separating a healthy long-term trend from a broken one. Don't treat this as a discount. Wait for the trend to repair before considering an entry.`,
+      waitingOn: []
+    };
+  }
+
+  const pullbackMissing = [];
+  if(!trendUp) pullbackMissing.push('Price needs to trade above both the 50-day and 200-day averages to confirm the uptrend.');
+  if(!(dz&&(dz.zone==='buy'||dz.zone==='healthy'))) pullbackMissing.push(`Price needs to pull back closer to the 50-day average — right now it's ${dz?dz.label.toLowerCase():'unclear'}.`);
+  if(!(rz&&(rz.zone==='caution'||rz.zone==='healthy'))) pullbackMissing.push(`RSI needs to settle into the 40-65 range — right now it's ${rz?rz.label.toLowerCase():'unknown'}.`);
+  if(!volConfirmed) pullbackMissing.push('Volume needs to rise above 1.2x average to confirm buyers are actually stepping in.');
+
+  const reversalMissing = [];
+  if(!nearMA200) reversalMissing.push('Price needs to be within about 5% of the 200-day average.');
+  if(!(rz&&(rz.zone==='panic'||rz.zone==='weak'))) reversalMissing.push('RSI needs to drop under 40 to show real selling exhaustion.');
+  if(!volConfirmed) reversalMissing.push('Volume needs to rise above 1.2x average to confirm the bounce has support.');
+
+  const useReversal = reversalMissing.length < pullbackMissing.length;
+  const missing = useReversal ? reversalMissing : pullbackMissing;
+  const setupName = useReversal ? 'a reversal off support' : 'a pullback entry in an uptrend';
+
+  return {
+    headline: 'Not Ready Yet',
+    icon: '📊', color: C.yellow,
+    read: `${s.ticker} isn't lined up for a clean entry right now. The closest fit is ${setupName} — here's what still needs to happen before this is worth acting on.`,
+    waitingOn: missing.length?missing:['Keep watching daily — nothing stands out yet in either direction.']
+  };
+}
+
 function renderTabAnalysis(s) {
+  const setup = analyzeSetup(s);
+  const narrative = brokerRead(s, setup);
+  const narrativeBlock = `
+    <div style="background:${C.card};border-radius:16px;border:2px solid ${narrative.color}44;padding:18px;margin-bottom:14px;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+        <span style="font-size:22px;">${narrative.icon}</span>
+        <span style="color:${narrative.color};font-size:15px;font-weight:800;">${narrative.headline}</span>
+      </div>
+      <div style="color:${C.text};font-size:13px;line-height:1.7;margin-bottom:${narrative.waitingOn.length?'14px':'0'};">${narrative.read}</div>
+      ${narrative.waitingOn.length?`
+      <div style="background:${C.cardHigh};border-radius:10px;padding:12px 14px;">
+        <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:8px;">What This Stock Is Waiting For</div>
+        ${narrative.waitingOn.map(w=>`<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:6px;"><span style="color:${C.textMuted};font-size:12px;">○</span><span style="color:${C.textSub};font-size:12px;line-height:1.5;">${w}</span></div>`).join('')}
+      </div>`:''}
+    </div>`;
+
   const sig = getSignal(s);
   const signalBlock = sig ? `
     <div style="background:${C.card};border-radius:16px;border:2px solid ${sig.color}44;padding:18px;margin-bottom:14px;">
@@ -1021,6 +1129,7 @@ function renderTabAnalysis(s) {
 
   return `
     <div style="display:flex;flex-direction:column;gap:14px;">
+      ${narrativeBlock}
       ${signalBlock}
       <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:20px;">
         <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:20px;">Technical Picture</div>
@@ -1210,11 +1319,12 @@ async function doBuildPlan(stockId, count) {
     'Add if it pulls back further. Confirms the dip is being bought, not just falling.',
     'Final add — only if your thesis still holds and this level gets tested.'
   ];
+  const gp = computeGamePlan(s);
   const tranche = Array.from({length:count}).map((_,i) => {
     const zonePrice = s.price - (step*1.5*i); // each tranche a bit lower than the last
     return {
       label: labels[i],
-      zone: i===0 ? (s.buyZone && s.buyZone!=='Run full analysis' ? s.buyZone : `Around ${fmtP(zonePrice)}`) : `Around ${fmtP(zonePrice)}`,
+      zone: i===0 ? gp.buyZone : `Around ${fmtP(zonePrice)}`,
       note: notes[i],
       status: i===0 ? 'ready' : 'waiting',
     };
@@ -1401,9 +1511,12 @@ async function doSaveUpdate() {
     signalLine: parseFloat(updateVals.signalLine)||null,
     atr:   parseFloat(updateVals.atr)||null,
   };
+  const prevPrice = s.price; // price before this update — the "yesterday" for % change
   const updated = {
     ...s,
     price:      snap.price,
+    change:     snap.price - prevPrice,
+    pct:        prevPrice ? ((snap.price - prevPrice)/prevPrice)*100 : 0,
     rsi:        snap.rsi,
     vol:        snap.vol,
     avgvol:     snap.avgvol ?? s.avgvol,
@@ -1439,7 +1552,6 @@ const ADD_STEPS = [
   {key:'hi52',    label:'52-week high',           hint:'e.g. 236.54',        inputmode:'decimal', prefix:'$'},
   {key:'lo52',    label:'52-week low',            hint:'e.g. 158.39',        inputmode:'decimal', prefix:'$'},
   {key:'holdtype',label:'How long will you hold?',hint:'',                   type:'choice', choices:['Swing — days to weeks','Long Term — months to years']},
-  {key:'why',     label:'Why are you looking at this?', hint:'Your thesis in one sentence', inputmode:'text'},
 ];
 
 function showAddFlow() {
@@ -1792,10 +1904,14 @@ async function doImportCSV(stockId) {
 
   // Use the most recent row to update current stock values
   const latest = cleanRows[cleanRows.length - 1];
+  const prevRow = cleanRows.length>1 ? cleanRows[cleanRows.length - 2] : null;
+  const prevPrice = prevRow?.price ?? null;
 
   const updated = {
     ...s,
     price:      latest.price      ?? s.price,
+    change:     prevPrice ? (latest.price - prevPrice) : s.change,
+    pct:        prevPrice ? ((latest.price - prevPrice)/prevPrice)*100 : s.pct,
     rsi:        latest.rsi        ?? s.rsi,
     vol:        latest.vol        ?? s.vol,
     ma20:       latest.ma20       ?? s.ma20,
