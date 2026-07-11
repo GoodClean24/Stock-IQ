@@ -294,6 +294,51 @@ function analyzeSetup(s) {
   return {rz, dz, volRatio, volConfirmed, trendUp, trendBroken, nearMA200, macdBull, reversalAligned, pullbackAligned};
 }
 
+// The overall 0-100 setup score shown on the ring (stock card, quick view, detail header).
+// This replaces the old hardcoded "score: 70" that never changed after a stock was added.
+// NOTE: this is the one overall score — deliberately NOT four separate category
+// sub-scores. Those are too easy to dress up as precise when they're really just
+// the same signal relabeled as a number.
+function computeSetupScore(s) {
+  const setup = analyzeSetup(s);
+  const {rz, dz, volConfirmed, trendUp, trendBroken} = setup;
+
+  let trendPts = 0;
+  if(trendBroken) trendPts = 0;
+  else if(trendUp) trendPts = 30;
+  else if(s.ma200&&s.price&&s.price>s.ma200) trendPts = 15;
+
+  let momPts = 8;
+  if(rz) {
+    if(rz.zone==='healthy') momPts = 25;
+    else if(rz.zone==='strong') momPts = 20;
+    else if(rz.zone==='panic') momPts = 15;
+    else if(rz.zone==='weak') momPts = 10;
+    else if(rz.zone==='caution') momPts = 12;
+    else if(rz.zone==='hot') momPts = 8;
+  }
+
+  const volPts = volConfirmed ? 20 : (setup.volRatio!=null && setup.volRatio>=0.8 ? 10 : 4);
+
+  let riskPts = 10;
+  if(dz) {
+    if(dz.zone==='buy') riskPts = 25;
+    else if(dz.zone==='healthy') riskPts = 18;
+    else if(dz.zone==='extended') riskPts = 10;
+    else if(dz.zone==='wait') riskPts = 4;
+    else if(dz.zone==='broken') riskPts = 0;
+  }
+
+  const score = Math.max(0, Math.min(100, Math.round(trendPts+momPts+volPts+riskPts)));
+  let label, color;
+  if(score>=75){label='STRONG SETUP';color=C.green;}
+  else if(score>=55){label='GOOD SETUP';color=C.green;}
+  else if(score>=35){label='WEAK SETUP';color=C.yellow;}
+  else {label='AVOID SETUP';color=C.red;}
+
+  return {score, label, color};
+}
+
 function oppScore(s) {
   const {rz, dz, volConfirmed, trendUp, trendBroken, reversalAligned, pullbackAligned} = analyzeSetup(s);
 
@@ -584,14 +629,15 @@ function renderStockCard(s, rank) {
       <span style="color:${C.textMuted};font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;white-space:nowrap;">${s.reason||''}</span>
     </div>` : '';
 
-  const scoreColor = s.score>=80?C.green:s.score>=65?C.yellow:s.score>=50?C.orange:C.red;
-  const r=19,circ=2*Math.PI*r,dash=(s.score/100)*circ;
+  const setupScore = computeSetupScore(s);
+  const scoreColor = setupScore.color;
+  const r=19,circ=2*Math.PI*r,dash=(setupScore.score/100)*circ;
   const scoreRing = `<div style="position:relative;width:44px;height:44px;flex-shrink:0;">
     <svg width="44" height="44" style="transform:rotate(-90deg);">
       <circle cx="22" cy="22" r="${r}" fill="none" stroke="${C.border}" stroke-width="5"/>
       <circle cx="22" cy="22" r="${r}" fill="none" stroke="${scoreColor}" stroke-width="5" stroke-dasharray="${dash} ${circ}" stroke-linecap="round"/>
     </svg>
-    <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;"><span style="color:${scoreColor};font-size:12px;font-weight:900;">${s.score}</span></div>
+    <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;"><span style="color:${scoreColor};font-size:12px;font-weight:900;">${setupScore.score}</span></div>
   </div>`;
 
   const posRow = hasPos ? `
@@ -679,7 +725,7 @@ function openQuickView(id) {
       </div>
       <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:16px;">
         <span style="color:${C.text};font-size:30px;font-weight:900;letter-spacing:-0.02em;">${fmtP(s.price)}</span>
-        <span style="color:${(s.pct||0)>=0?C.green:C.red};font-size:14px;font-weight:700;">${(s.pct||0)>=0?'▲':'▼'} ${Math.abs(s.pct||0).toFixed(2)}% today</span>
+        <span style="color:${(s.pct||0)>=0?C.green:C.red};font-size:14px;font-weight:700;">${(s.pct||0)>=0?'▲':'▼'} ${Math.abs(s.pct||0).toFixed(2)}% since last update</span>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">
         ${[{label:'Buy Zone',val:gp.buyZone||'—',color:C.teal},{label:'Target',val:gp.profit||'—',color:C.green},{label:'Type',val:s.type||'—',color:C.blue},{label:'RSI',val:s.rsi??'—',color:(s.rsi||50)<35?C.green:(s.rsi||50)>65?C.red:C.yellow}].map(item=>`
@@ -713,8 +759,9 @@ function renderDetail(s) {
   const totalInv = filled.reduce((a,t)=>a+(t.entryPrice||0)*(t.shares||0),0);
   const totalVal = filled.reduce((a,t)=>a+s.price*(t.shares||0),0);
   const gl = totalVal-totalInv;
-  const scoreColor = s.score>=80?C.green:s.score>=65?C.yellow:s.score>=50?C.orange:C.red;
-  const r=23,circ=2*Math.PI*r,dash=(s.score/100)*circ;
+  const setupScore = computeSetupScore(s);
+  const scoreColor = setupScore.color;
+  const r=23,circ=2*Math.PI*r,dash=(setupScore.score/100)*circ;
 
   document.getElementById('detail-content').innerHTML = `
     <!-- Header -->
@@ -730,7 +777,7 @@ function renderDetail(s) {
             <circle cx="26" cy="26" r="${r}" fill="none" stroke="${C.border}" stroke-width="5"/>
             <circle cx="26" cy="26" r="${r}" fill="none" stroke="${scoreColor}" stroke-width="5" stroke-dasharray="${dash} ${circ}" stroke-linecap="round"/>
           </svg>
-          <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;"><span style="color:${scoreColor};font-size:13px;font-weight:900;">${s.score}</span></div>
+          <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;"><span style="color:${scoreColor};font-size:13px;font-weight:900;">${setupScore.score}</span></div>
         </div>
       </div>
       <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:12px;">
@@ -750,24 +797,25 @@ function renderDetail(s) {
       </div>
     </div>
     <!-- Tabs -->
-    <div style="display:flex;background:${C.card};border-bottom:1px solid ${C.border};">
-      <button id="tab-btn-plan" onclick="showTab('plan','${s.id}')" style="flex:1;padding:14px 0;background:none;border:none;cursor:pointer;font-size:13px;font-weight:700;color:${C.text};border-bottom:2px solid ${C.text};">Game Plan</button>
-      <button id="tab-btn-analysis" onclick="showTab('analysis','${s.id}')" style="flex:1;padding:14px 0;background:none;border:none;cursor:pointer;font-size:13px;font-weight:700;color:${C.textSub};border-bottom:2px solid transparent;">Analysis</button>
-      <button id="tab-btn-notes" onclick="showTab('notes','${s.id}')" style="flex:1;padding:14px 0;background:none;border:none;cursor:pointer;font-size:13px;font-weight:700;color:${C.textSub};border-bottom:2px solid transparent;">Notes</button>
+    <div style="display:flex;background:${C.card};border-bottom:1px solid ${C.border};overflow-x:auto;">
+      <button id="tab-btn-overview" onclick="showTab('overview','${s.id}')" style="flex:1;padding:14px 0;background:none;border:none;cursor:pointer;font-size:13px;font-weight:700;color:${C.text};border-bottom:2px solid ${C.text};white-space:nowrap;">Overview</button>
+      <button id="tab-btn-analysis" onclick="showTab('analysis','${s.id}')" style="flex:1;padding:14px 0;background:none;border:none;cursor:pointer;font-size:13px;font-weight:700;color:${C.textSub};border-bottom:2px solid transparent;white-space:nowrap;">Analysis</button>
+      <button id="tab-btn-plan" onclick="showTab('plan','${s.id}')" style="flex:1;padding:14px 0;background:none;border:none;cursor:pointer;font-size:13px;font-weight:700;color:${C.textSub};border-bottom:2px solid transparent;white-space:nowrap;">Game Plan</button>
+      <button id="tab-btn-notes" onclick="showTab('notes','${s.id}')" style="flex:1;padding:14px 0;background:none;border:none;cursor:pointer;font-size:13px;font-weight:700;color:${C.textSub};border-bottom:2px solid transparent;white-space:nowrap;">Notes</button>
     </div>
     <div id="tab-content" style="padding:20px;">
-      ${renderTabPlan(s)}
+      ${renderTabOverview(s)}
     </div>`;
 }
 
 function showTab(tab, id) {
   const s = stocks.find(x=>String(x.id)===String(id));
   if(!s) return;
-  ['plan','analysis','notes'].forEach(t => {
+  ['overview','plan','analysis','notes'].forEach(t => {
     const btn = document.getElementById(`tab-btn-${t}`);
     if(btn) { btn.style.color = t===tab?C.text:C.textSub; btn.style.borderBottom = t===tab?`2px solid ${C.text}`:'2px solid transparent'; }
   });
-  const map = {plan:renderTabPlan,analysis:renderTabAnalysis,notes:renderTabNotes};
+  const map = {overview:renderTabOverview,plan:renderTabPlan,analysis:renderTabAnalysis,notes:renderTabNotes};
   const el = document.getElementById('tab-content');
   if(el&&map[tab]) el.innerHTML = map[tab](s);
 }
@@ -923,11 +971,12 @@ function renderSlider(label, lo, hi, current, leftLabel, rightLabel, colorOverri
 
 // The "seasoned broker" summary — ties every indicator into one narrative
 // instead of five separate cards you have to piece together yourself.
-function brokerRead(s, setup) {
+function brokerRead(s, setup, traj) {
   const {rz, dz, volConfirmed, trendUp, trendBroken, nearMA200, macdBull, reversalAligned, pullbackAligned} = setup;
 
   if(pullbackAligned) {
     return {
+      verdict: 'BUY NOW', verdictSub: 'Setup is here',
       headline: 'Textbook Pullback — Signals Aligned',
       icon: '🎯', color: C.green,
       read: `${s.ticker} is in a confirmed uptrend, sitting in a healthy buy zone off its 50-day average. RSI has cooled to a reasonable level without breaking down, and volume is confirming real buying interest. This is the kind of setup worth acting on.${macdBull?' Momentum agrees too.':' MACD hasn\'t flipped bullish yet — a nice-to-have, not a dealbreaker.'}`,
@@ -936,6 +985,7 @@ function brokerRead(s, setup) {
   }
   if(reversalAligned) {
     return {
+      verdict: 'BUY NOW', verdictSub: 'Higher risk — size it small',
       headline: 'Reversal Setup — Signals Aligned',
       icon: '🔄', color: C.green,
       read: `${s.ticker} is sitting near its long-term support, RSI shows real selling exhaustion, and volume is picking up — the combination that usually marks a turn. This is higher risk than a trend pullback since the bigger trend isn't confirmed yet, so size it accordingly.`,
@@ -944,6 +994,7 @@ function brokerRead(s, setup) {
   }
   if(trendBroken) {
     return {
+      verdict: 'AVOID', verdictSub: 'Until the trend repairs',
       headline: 'Trend Is Broken — Stand Down',
       icon: '🔴', color: C.red,
       read: `${s.ticker} has dropped meaningfully below its 200-day average — the line separating a healthy long-term trend from a broken one. Don't treat this as a discount. Wait for the trend to repair before considering an entry.`,
@@ -966,19 +1017,288 @@ function brokerRead(s, setup) {
   const missing = useReversal ? reversalMissing : pullbackMissing;
   const setupName = useReversal ? 'a reversal off support' : 'a pullback entry in an uptrend';
 
+  // Use trend history, if you have it, to say whether this is getting closer or further away —
+  // this is the "now vs. future vs. never" call, not just a snapshot of today.
+  let trajLine = '';
+  if(traj && traj.enough) {
+    if(traj.rsiTrend!=null) {
+      if(useReversal && traj.rsiTrend<0) trajLine = ` RSI has been falling over the last 10 days, which is the right direction for a reversal setup — this could be close.`;
+      else if(!useReversal && traj.rsiTrend>0) trajLine = ` RSI has been climbing over the last 10 days, moving the right direction for a pullback setup — worth checking back soon.`;
+      else if(useReversal && traj.rsiTrend>0) trajLine = ` RSI has actually been climbing recently, which works against a reversal setup — this may not be close.`;
+      else if(!useReversal && traj.rsiTrend<0) trajLine = ` RSI has been falling recently, moving away from a healthy pullback range — this may take longer.`;
+    }
+  }
+
   return {
+    verdict: 'WAIT', verdictSub: missing.length>2 ? 'Not close yet' : 'Getting closer',
     headline: 'Not Ready Yet',
     icon: '📊', color: C.yellow,
-    read: `${s.ticker} isn't lined up for a clean entry right now. The closest fit is ${setupName} — here's what still needs to happen before this is worth acting on.`,
+    read: `${s.ticker} isn't lined up for a clean entry right now. The closest fit is ${setupName} — here's what still needs to happen before this is worth acting on.${trajLine}`,
     waitingOn: missing.length?missing:['Keep watching daily — nothing stands out yet in either direction.']
   };
 }
 
+// Turns snapshot history into a plain-English trend read — shared so both
+// the Analysis tab and the verdict logic can use the same trajectory data.
+function computeTrajectory(s) {
+  const snaps = s.snapshots||[];
+  if(snaps.length<3) {
+    return {
+      text: `You have ${snaps.length} update${snaps.length===1?'':'s'} saved. Import a CSV from ThinkorSwim or keep entering daily data — after 3 updates the app will start showing you how this stock is trending.`,
+      rsiTrend: null, volTrendUp: null, enough: false
+    };
+  }
+  const f=snaps[0],l=snaps[snaps.length-1];
+  const rd=l.rsi<f.rsi?'dropped':'climbed';
+  const pd=l.price>f.price?'moved up':'moved down';
+  const days=snaps.length;
+  const weeks=Math.round(days/5);
+  const timeLabel=days>=20?`${weeks} weeks`:days>=5?`${Math.round(days/5)} week`:`${days} days`;
+
+  const recent=snaps.slice(-10);
+  const rsiVals=recent.map(r=>r.rsi).filter(v=>v!=null);
+  const rsiTrend=rsiVals.length>=2?(rsiVals[rsiVals.length-1]-rsiVals[0]).toFixed(1):null;
+  const rsiTrendStr=rsiTrend?parseFloat(rsiTrend)>0?`RSI has been rising ${rsiTrend} points over the last 10 days — momentum building.`:`RSI has dropped ${Math.abs(rsiTrend)} points recently — sellers in control short term.`:'';
+
+  const volVals=recent.map(r=>r.vol).filter(v=>v!=null);
+  const avgRecent=volVals.length?volVals.reduce((a,b)=>a+b,0)/volVals.length:null;
+  const allVols=snaps.map(r=>r.vol).filter(v=>v!=null);
+  const avgAll=allVols.length?allVols.reduce((a,b)=>a+b,0)/allVols.length:null;
+  const volTrendUp = avgRecent&&avgAll ? avgRecent>avgAll*1.2 : null;
+  const volTrendStr=avgRecent&&avgAll?(volTrendUp?'Volume has been above average recently — institutional interest is elevated.'
+    :avgRecent<avgAll*0.8?'Volume has been below average recently — quiet period with lower conviction.'
+    :'Volume is running near its historical average — normal trading conditions.'):'';
+
+  const maNote=l.ma200&&l.price?(l.price>l.ma200?'Price is holding above the long-term support line — the big picture trend is still healthy.':'Price has dropped below the long-term support line — worth being cautious.'):'';
+
+  return {
+    text: `Over the past ${timeLabel} (${days} trading days), ${s.ticker} has ${pd} from ${fmtP(f.price)} to ${fmtP(l.price)} and RSI has ${rd} from ${f.rsi?.toFixed(0)||'—'} to ${l.rsi?.toFixed(0)||'—'}. ${rsiTrendStr} ${volTrendStr} ${maNote}`.trim(),
+    rsiTrend: rsiTrend!=null?parseFloat(rsiTrend):null,
+    volTrendUp, enough: true
+  };
+}
+
+// Support/resistance approximated from the data we actually have — moving
+// averages, 52-week range, and any highs seen in imported snapshot history.
+// This is an approximation, not true swing-structure detection.
+function computeKeyLevels(s) {
+  const price = s.price;
+  const levels = {support:null, nextSupport:null, resistance:null, nextResistance:null};
+  if(!price) return levels;
+
+  const supportCandidates = [];
+  if(s.ma50 && s.ma50<price) supportCandidates.push({price:s.ma50, label:'Near 50-day average'});
+  if(s.ma200 && s.ma200<price) supportCandidates.push({price:s.ma200, label:'Near 200-day average'});
+  if(s.lo52 && s.lo52<price) supportCandidates.push({price:s.lo52, label:'52-week low'});
+  supportCandidates.sort((a,b)=>b.price-a.price);
+  if(supportCandidates.length){ levels.support = supportCandidates[0]; if(supportCandidates.length>1) levels.nextSupport = supportCandidates[1]; }
+
+  const resistanceCandidates = [];
+  const highs = (s.snapshots||[]).map(sn=>sn.high).filter(h=>h!=null && h>price);
+  if(highs.length) resistanceCandidates.push({price:Math.max(...highs), label:'Recent high'});
+  if(s.hi52 && s.hi52>price) resistanceCandidates.push({price:s.hi52, label:'52-week high'});
+  resistanceCandidates.sort((a,b)=>a.price-b.price);
+  if(resistanceCandidates.length){ levels.resistance = resistanceCandidates[0]; if(resistanceCandidates.length>1) levels.nextResistance = resistanceCandidates[1]; }
+
+  return levels;
+}
+
+// Six-cell summary grid — Trend, Momentum, Volume, Risk Level, Position Size, Overall.
+function computeAtAGlance(s) {
+  const setup = analyzeSetup(s);
+  const {rz, dz, volConfirmed, trendUp, trendBroken} = setup;
+  const narrative = brokerRead(s, setup, computeTrajectory(s));
+
+  const trend = trendBroken ? {label:'Broken', color:C.red, sub:'Below long-term support'}
+              : trendUp ? {label:'Long-term uptrend', color:C.green, sub:'Price above 50 & 200-day'}
+              : {label:'Mixed', color:C.yellow, sub:'Not fully confirmed'};
+
+  const momentum = rz ? {label:rz.label, color:rz.color, sub:`RSI ${s.rsi}`} : {label:'Unknown', color:C.textMuted, sub:'No RSI yet'};
+
+  const volume = setup.volRatio!=null
+    ? {label: volConfirmed?'Above Average':(setup.volRatio<0.8?'Below Average':'Normal'), color: volConfirmed?C.green:(setup.volRatio<0.8?C.red:C.yellow), sub:`${setup.volRatio.toFixed(1)}x avg`}
+    : {label:'Unknown', color:C.textMuted, sub:'No volume data'};
+
+  let riskLevel = {label:'Unknown', color:C.textMuted, sub:''};
+  if(s.atr && s.price) {
+    const pctMove = (s.atr/s.price)*100;
+    if(pctMove<2) riskLevel = {label:'Low', color:C.green, sub:`ATR ${fmtP(s.atr)}`};
+    else if(pctMove<4) riskLevel = {label:'Moderate', color:C.yellow, sub:`ATR ${fmtP(s.atr)}`};
+    else riskLevel = {label:'High', color:C.orange, sub:`ATR ${fmtP(s.atr)}`};
+  }
+
+  let posSize = {label:'Unknown', color:C.textMuted, sub:''};
+  if(s.atr && s.price){
+    const budget = s.invested || 150;
+    const approxShares = budget/s.price;
+    const dollarRisk = approxShares*(s.atr*1.5);
+    const riskPct = budget>0 ? (dollarRisk/budget)*100 : null;
+    if(riskPct!=null) posSize = riskPct<15 ? {label:'Good', color:C.green, sub:'Fits your risk'} : {label:'Tight', color:C.yellow, sub:'Stop is close to noise'};
+  }
+
+  const overall = {label:narrative.verdict, color:narrative.color, sub:narrative.verdictSub};
+
+  return {trend, momentum, volume, riskLevel, posSize, overall};
+}
+
+// Are buyers actually showing up on up days, or is volume heavier on down days?
+function computeVolumeOnUpDays(s) {
+  const snaps = s.snapshots||[];
+  if(snaps.length<4) return null;
+  const recent = snaps.slice(-10);
+  let upVol=0, upN=0, downVol=0, downN=0;
+  for(let i=1;i<recent.length;i++){
+    const prev=recent[i-1], cur=recent[i];
+    if(cur.price==null||prev.price==null||cur.vol==null) continue;
+    if(cur.price>prev.price){ upVol+=cur.vol; upN++; }
+    else if(cur.price<prev.price){ downVol+=cur.vol; downN++; }
+  }
+  if(upN===0||downN===0) return null;
+  const ratio = (upVol/upN)/(downVol/downN);
+  return {
+    ratio,
+    label: ratio>1.15?'Buyers Showing Up':ratio<0.85?'Needs Work':'Neutral',
+    color: ratio>1.15?C.green:ratio<0.85?C.red:C.yellow,
+    text: ratio>1.15 ? 'Buyers are showing up with real volume on up days — a healthy sign.' : ratio<0.85 ? "Volume is heavier on down days than up days — sellers are more active than buyers right now." : 'Volume is fairly even between up and down days. No clear signal yet.'
+  };
+}
+
+// Is the 50/200-day average itself trending up, flat, or down — needs CSV-imported
+// history with ma50/ma200 per row, since the daily-update wizard only asks for
+// today's snapshot, not the moving average's own trend.
+function computeMASlope(s) {
+  const s50 = (s.snapshots||[]).filter(sn=>sn.ma50!=null);
+  const s200 = (s.snapshots||[]).filter(sn=>sn.ma200!=null);
+  if(s50.length<5) return null;
+  const r50 = s50.slice(-10);
+  const rising50 = r50[r50.length-1].ma50 > r50[0].ma50;
+  let rising200 = null;
+  if(s200.length>=5){ const r200=s200.slice(-10); rising200 = r200[r200.length-1].ma200 > r200[0].ma200; }
+  return {rising50, rising200};
+}
+
+function renderTabOverview(s) {
+  const setup = analyzeSetup(s);
+  const traj = computeTrajectory(s);
+  const narrative = brokerRead(s, setup, traj);
+  const setupScore = computeSetupScore(s);
+  const glance = computeAtAGlance(s);
+  const levels = computeKeyLevels(s);
+  const gp = computeGamePlan(s);
+  const r=27,circ=2*Math.PI*r,dash=(setupScore.score/100)*circ;
+
+  const takeCard = `
+    <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
+      <div style="display:flex;gap:16px;align-items:center;">
+        <div style="position:relative;width:66px;height:66px;flex-shrink:0;">
+          <svg width="66" height="66" style="transform:rotate(-90deg);">
+            <circle cx="33" cy="33" r="${r}" fill="none" stroke="${C.border}" stroke-width="6"/>
+            <circle cx="33" cy="33" r="${r}" fill="none" stroke="${setupScore.color}" stroke-width="6" stroke-dasharray="${dash} ${circ}" stroke-linecap="round"/>
+          </svg>
+          <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;">
+            <span style="color:${setupScore.color};font-size:17px;font-weight:900;">${setupScore.score}</span>
+          </div>
+        </div>
+        <div style="flex:1;">
+          <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:3px;">Today's Take</div>
+          <div style="color:${narrative.color};font-size:17px;font-weight:900;margin-bottom:3px;">${narrative.verdict}</div>
+          <div style="color:${C.textSub};font-size:12px;">${setupScore.label} · ${narrative.verdictSub}</div>
+        </div>
+      </div>
+    </div>`;
+
+  const glanceCell = (label, cell) => `
+    <div style="background:${C.cardHigh};border-radius:12px;padding:12px;">
+      <div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px;">${label}</div>
+      <div style="color:${cell.color};font-size:13px;font-weight:800;margin-bottom:2px;">${cell.label}</div>
+      <div style="color:${C.textMuted};font-size:10px;">${cell.sub}</div>
+    </div>`;
+
+  const glanceGrid = `
+    <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
+      <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">At A Glance</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
+        ${glanceCell('Trend', glance.trend)}
+        ${glanceCell('Momentum', glance.momentum)}
+        ${glanceCell('Volume', glance.volume)}
+        ${glanceCell('Risk Level', glance.riskLevel)}
+        ${glanceCell('Position Size', glance.posSize)}
+        ${glanceCell('Overall View', glance.overall)}
+      </div>
+    </div>`;
+
+  const levelCell = (label, lvl, color) => `
+    <div style="background:${C.cardHigh};border-radius:10px;padding:12px 14px;">
+      <div style="color:${color};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">${label}</div>
+      <div style="color:${C.text};font-size:14px;font-weight:800;margin-bottom:2px;">${lvl?fmtP(lvl.price):'—'}</div>
+      <div style="color:${C.textMuted};font-size:10px;">${lvl?lvl.label:'Not enough data'}</div>
+    </div>`;
+
+  const keyLevelsCard = `
+    <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
+      <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">Key Levels</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        ${levelCell('Support', levels.support, C.green)}
+        ${levelCell('Next Support', levels.nextSupport, C.green)}
+        ${levelCell('Resistance', levels.resistance, C.red)}
+        ${levelCell('Next Resistance', levels.nextResistance, C.red)}
+      </div>
+      <div style="color:${C.textMuted};font-size:10px;margin-top:10px;line-height:1.5;">Approximated from moving averages and the 52-week range — not exact swing highs/lows.</div>
+    </div>`;
+
+  const hasPlan = s.tranche && s.tranche.length>0;
+  const gamePlanPreview = `
+    <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <span style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;">Game Plan</span>
+        <button onclick="showTab('plan','${s.id}')" style="background:none;border:none;color:${C.teal};font-size:12px;font-weight:700;cursor:pointer;">View Full Plan →</button>
+      </div>
+      ${hasPlan ? `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div style="background:${C.cardHigh};border-radius:10px;padding:10px 12px;">
+          <div style="color:${C.teal};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">Best Entry Zone</div>
+          <div style="color:${C.text};font-size:13px;font-weight:800;">${gp.buyZone}</div>
+        </div>
+        <div style="background:${C.cardHigh};border-radius:10px;padding:10px 12px;">
+          <div style="color:${C.green};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">Take Profit</div>
+          <div style="color:${C.text};font-size:13px;font-weight:800;">${gp.profit}</div>
+        </div>
+        <div style="background:${C.cardHigh};border-radius:10px;padding:10px 12px;">
+          <div style="color:${C.red};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">Stop Loss</div>
+          <div style="color:${C.text};font-size:12px;font-weight:700;">1.5× ATR below entry</div>
+        </div>
+        <div style="background:${C.cardHigh};border-radius:10px;padding:10px 12px;">
+          <div style="color:${C.yellow};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">Time Limit</div>
+          <div style="color:${C.text};font-size:13px;font-weight:800;">${s.expiry||'90 days'}</div>
+        </div>
+      </div>` : `<div style="color:${C.textSub};font-size:12px;line-height:1.6;">No buy plan set up yet. <span onclick="showTab('plan','${s.id}')" style="color:${C.teal};cursor:pointer;font-weight:700;">Build one →</span></div>`}
+    </div>`;
+
+  return `
+    <div style="display:flex;flex-direction:column;gap:14px;">
+      ${takeCard}
+      ${glanceGrid}
+      ${keyLevelsCard}
+      ${gamePlanPreview}
+    </div>`;
+}
+
 function renderTabAnalysis(s) {
   const setup = analyzeSetup(s);
-  const narrative = brokerRead(s, setup);
+  const traj = computeTrajectory(s);
+  const narrative = brokerRead(s, setup, traj);
+  const dz = distanceZone(s.price, s.ma50);
+  const rz = rsiZone(s.rsi);
+  const volRatio = s.vol&&s.avgvol ? s.vol/s.avgvol : null;
+  const slope = computeMASlope(s);
+  const upDayVol = computeVolumeOnUpDays(s);
+
   const narrativeBlock = `
-    <div style="background:${C.card};border-radius:16px;border:2px solid ${narrative.color}44;padding:18px;margin-bottom:14px;">
+    <div style="background:${C.card};border-radius:16px;border:2px solid ${narrative.color}44;padding:18px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+        <span style="background:${narrative.color}22;color:${narrative.color};border:1.5px solid ${narrative.color};border-radius:10px;padding:8px 16px;font-size:16px;font-weight:900;letter-spacing:0.04em;">${narrative.verdict}</span>
+        <span style="color:${C.textMuted};font-size:11px;font-weight:600;text-align:right;">${narrative.verdictSub}</span>
+      </div>
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
         <span style="font-size:22px;">${narrative.icon}</span>
         <span style="color:${narrative.color};font-size:15px;font-weight:800;">${narrative.headline}</span>
@@ -991,193 +1311,90 @@ function renderTabAnalysis(s) {
       </div>`:''}
     </div>`;
 
-  const sig = getSignal(s);
-  const signalBlock = sig ? `
-    <div style="background:${C.card};border-radius:16px;border:2px solid ${sig.color}44;padding:18px;margin-bottom:14px;">
-      <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">What the Indicators Are Saying</div>
-      <div style="display:flex;align-items:flex-start;gap:14px;">
-        <span style="font-size:30px;flex-shrink:0;">${sig.icon}</span>
-        <div>
-          <div style="color:${sig.color};font-size:16px;font-weight:800;margin-bottom:8px;">${sig.signal}</div>
-          <div style="color:${C.text};font-size:13px;line-height:1.7;">${sig.read}</div>
+  const trajBox = `
+    <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
+      <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">History & Trend</div>
+      <p style="color:${C.text};font-size:13px;line-height:1.7;margin:0;">${traj.text}</p>
+    </div>`;
+
+  // Shared row renderer for the grouped category cards below
+  const row = (icon, label, detail, statusLabel, statusColor) => `
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:11px 0;border-bottom:1px solid ${C.border};">
+      <div style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;">
+        <span style="font-size:16px;flex-shrink:0;">${icon}</span>
+        <div style="min-width:0;">
+          <div style="color:${C.text};font-size:13px;font-weight:700;">${label}</div>
+          <div style="color:${C.textMuted};font-size:11px;line-height:1.4;">${detail}</div>
         </div>
       </div>
-    </div>` : '';
+      <span style="color:${statusColor};font-size:11px;font-weight:800;flex-shrink:0;margin-left:10px;">${statusLabel}</span>
+    </div>`;
 
-  const dz = distanceZone(s.price, s.ma50);
-  const ma50note = dz ? `
-    <div style="background:${C.cardHigh};border-radius:10px;padding:12px 14px;margin-top:-14px;margin-bottom:20px;border:1px solid ${dz.color}33;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-        <span style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.07em;">Distance from 50-Day</span>
-        <div style="display:flex;align-items:center;gap:8px;">
-          <span style="background:${dz.color}22;color:${dz.color};border:1px solid ${dz.color}44;border-radius:20px;padding:2px 9px;font-size:10px;font-weight:800;">${dz.label}</span>
-          <span style="color:${dz.color};font-size:13px;font-weight:800;">${dz.dist>=0?'+':''}${dz.dist.toFixed(1)}%</span>
-        </div>
-      </div>
-      <span style="color:${C.textSub};font-size:12px;line-height:1.6;">${dz.note}</span>
-    </div>` : '';
+  const categoryCard = (title, summary, rows) => `
+    <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
+      <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;">${title}</div>
+      <div style="color:${C.textSub};font-size:12px;line-height:1.6;margin-bottom:6px;">${summary}</div>
+      <div>${rows.join('')}</div>
+    </div>`;
 
-  const ma200note = s.ma200 ? `
-    <div style="background:${C.cardHigh};border-radius:10px;padding:10px 14px;margin-top:-14px;margin-bottom:20px;">
-      <span style="color:${C.textSub};font-size:12px;">Price is <span style="color:${s.price>s.ma200?C.green:C.red};font-weight:700;">${Math.abs(((s.price-s.ma200)/s.ma200)*100).toFixed(1)}% ${s.price>s.ma200?'above':'below'}</span> the long-term support line. ${s.price>s.ma200?'Long-term trend is healthy.':'Long-term trend is broken.'}</span>
-    </div>` : '';
+  // ── TREND ──────────────────────────────────────────────────────────────
+  const trendRows = [];
+  if(s.ma50&&s.ma200&&s.price) {
+    const above50 = s.price>s.ma50, above200 = s.price>s.ma200;
+    trendRows.push(row('📈','Price vs. Moving Averages', `Price is ${above50?'above':'below'} the 50-day and ${above200?'above':'below'} the 200-day.`,
+      (above50&&above200)?'Bullish':(!above50&&!above200)?'Bearish':'Neutral', (above50&&above200)?C.green:(!above50&&!above200)?C.red:C.yellow));
+    trendRows.push(row('📊','Trend Strength (50 vs 200)', `50-day is ${s.ma50>s.ma200?'above':'below'} 200-day.`, s.ma50>s.ma200?'Bullish':'Bearish', s.ma50>s.ma200?C.green:C.red));
+  }
+  if(s.ma20&&s.price) {
+    trendRows.push(row('📉','20-Day Avg vs Price', `Price is ${s.price>s.ma20?'above':'below'} the 20-day average.`, s.price>s.ma20?'Bullish':'Neutral', s.price>s.ma20?C.green:C.yellow));
+  }
+  trendRows.push(row('📐','Slope of 50 & 200 MA', slope ? `50-day is ${slope.rising50?'rising':'falling'}.${slope.rising200!=null?` 200-day is ${slope.rising200?'rising':'falling'}.`:''}` : 'Needs more CSV-imported history to compute.',
+    slope ? (slope.rising50?'Bullish':'Bearish') : 'No Data', slope ? (slope.rising50?C.green:C.red) : C.textMuted));
+  const trendCard = trendRows.length ? categoryCard('Trend', traj.enough ? `${s.ticker} ${setup.trendUp?'is in a confirmed uptrend':setup.trendBroken?'has broken its long-term trend':'has a mixed trend picture'}. We prefer entries on pullbacks, not chases.` : 'Add price and moving average data to see the trend picture.', trendRows) : '';
 
-  const rz = rsiZone(s.rsi);
-  const rsiColor = rz?rz.color:C.textMuted;
-  const rsiPct = Math.max(0,Math.min(100,s.rsi||0));
-  const rsiGauge = s.rsi!=null ? `
-    <div style="margin-bottom:20px;">
-      <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
-        <span style="color:${C.textSub};font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;">RSI (14)</span>
-        <div style="display:flex;align-items:center;gap:8px;">
-          <span style="background:${rsiColor}22;color:${rsiColor};border:1px solid ${rsiColor}44;border-radius:20px;padding:2px 9px;font-size:10px;font-weight:800;">${rz?rz.label:'—'}</span>
-          <span style="color:${rsiColor};font-size:13px;font-weight:800;">${s.rsi}</span>
-        </div>
-      </div>
-      <div style="position:relative;height:6px;border-radius:3px;overflow:hidden;margin-bottom:2px;">
-        <div style="position:absolute;inset:0;background:linear-gradient(90deg,${C.green} 0%,${C.green} 30%,${C.yellow} 30%,${C.green} 50%,${C.green} 65%,${C.teal} 65%,${C.teal} 75%,${C.red} 75%,${C.red} 100%);opacity:0.25;"></div>
-        <div style="position:absolute;top:50%;left:${rsiPct}%;transform:translate(-50%,-50%);width:16px;height:16px;border-radius:50%;background:${rsiColor};border:2.5px solid ${C.bg};box-shadow:0 0 10px ${rsiColor}99;"></div>
-      </div>
-      <div style="display:flex;justify-content:space-between;margin-top:6px;">
-        <span style="color:${C.textMuted};font-size:11px;">0 — Panic</span>
-        <span style="color:${C.textMuted};font-size:11px;">100 — Overbought</span>
-      </div>
-      <div style="color:${rsiColor};font-size:12px;margin-top:8px;font-weight:600;line-height:1.5;">${rz?rz.note:''}</div>
-    </div>` : '';
-
-  const volRatio = s.vol&&s.avgvol?s.vol/s.avgvol:null;
-  const volColor = volRatio?volRatio>1.2?C.green:volRatio<0.8?C.red:C.yellow:C.textMuted;
-  const volNote  = volRatio?volRatio>1.2?'More people than usual are trading this stock today. The move has real backing.':volRatio<0.8?'Trading is quieter than usual. Moves on low volume can reverse easily.':'Volume is about normal today. Nothing unusual to flag.':'';
-  const volPct   = volRatio?Math.min(100,(volRatio/2.5)*100):0;
-  const volBar = s.vol&&s.avgvol ? `
-    <div style="margin-bottom:20px;">
-      <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
-        <span style="color:${C.textSub};font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;">Volume vs Average</span>
-        <span style="color:${volColor};font-size:13px;font-weight:800;">${volRatio?.toFixed(1)}x avg</span>
-      </div>
-      <div style="position:relative;height:6px;background:${C.border};border-radius:3px;margin-bottom:6px;">
-        <div style="position:absolute;left:40%;top:-2px;bottom:-2px;width:2px;background:${C.textMuted};opacity:0.4;border-radius:1px;"></div>
-        <div style="position:absolute;left:0;top:0;height:100%;width:${volPct}%;background:${volColor};opacity:0.5;border-radius:3px;"></div>
-        <div style="position:absolute;top:50%;left:${volPct}%;transform:translate(-50%,-50%);width:16px;height:16px;border-radius:50%;background:${volColor};border:2.5px solid ${C.bg};box-shadow:0 0 10px ${volColor}99;"></div>
-      </div>
-      <div style="display:flex;justify-content:space-between;">
-        <span style="color:${C.textMuted};font-size:11px;">${fmtVol(s.vol)} today</span>
-        <span style="color:${C.textMuted};font-size:11px;">${fmtVol(s.avgvol)} avg</span>
-      </div>
-      <div style="color:${volColor};font-size:12px;margin-top:8px;font-weight:600;line-height:1.5;">${volNote}</div>
-    </div>` : '';
-
-  const macdBlock = s.macdLine!=null&&s.signalLine!=null ? (() => {
+  // ── MOMENTUM ───────────────────────────────────────────────────────────
+  const momRows = [];
+  if(s.rsi!=null && rz) momRows.push(row('🌀','RSI (14)', `${s.rsi} — ${rz.label}.`, rz.zone==='healthy'||rz.zone==='panic'?'Healthy':rz.zone==='strong'?'Strong':rz.zone==='hot'?'Overbought':'Neutral', rz.color));
+  if(s.macdLine!=null&&s.signalLine!=null) {
     const bull = s.macdLine>s.signalLine;
-    const color = bull?C.green:C.red;
-    const gap = Math.abs(s.macdLine-s.signalLine).toFixed(3);
-    const plain = bull?`The momentum indicator is pointing up — buyers are gaining strength. The gap between the two lines is ${gap}.`:`The momentum indicator is pointing down — sellers are in control. Gap is ${gap}. Watch for this to flip before entering.`;
-    return `
-      <div style="margin-bottom:20px;">
-        <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
-          <span style="color:${C.textSub};font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;">MACD (Momentum)</span>
-          <span style="color:${color};font-size:12px;font-weight:800;">${bull?'▲ Bullish':'▼ Bearish'}</span>
-        </div>
-        <div style="display:flex;gap:10px;margin-bottom:10px;">
-          <div style="flex:1;background:${C.cardHigh};border-radius:10px;padding:10px 12px;">
-            <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">MACD Line</div>
-            <div style="color:${C.blue};font-size:14px;font-weight:800;">${parseFloat(s.macdLine).toFixed(3)}</div>
-          </div>
-          <div style="flex:1;background:${C.cardHigh};border-radius:10px;padding:10px 12px;">
-            <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">Signal Line</div>
-            <div style="color:${C.orange};font-size:14px;font-weight:800;">${parseFloat(s.signalLine).toFixed(3)}</div>
-          </div>
-        </div>
-        <div style="background:${bull?C.greenDim:C.redDim};border-radius:10px;padding:10px 12px;border:1px solid ${color}33;">
-          <span style="color:${C.textSub};font-size:12px;line-height:1.6;">${plain}</span>
-        </div>
-      </div>`;
-  })() : '';
+    momRows.push(row('📊','MACD', `Line is ${bull?'above':'below'} signal.`, bull?'Bullish':'Bearish', bull?C.green:C.red));
+  }
+  const momCard = momRows.length ? categoryCard('Momentum Check', 'Momentum tells you whether buyers or sellers currently have control — and whether that\'s changing.', momRows) : '';
 
-  const atrBlock = s.atr ? (() => {
+  // ── VOLUME ─────────────────────────────────────────────────────────────
+  const volRows = [];
+  if(volRatio!=null) volRows.push(row('📶','Today\'s Volume', `${fmtVol(s.vol)} vs ${fmtVol(s.avgvol)} avg (${volRatio.toFixed(1)}x)`, volRatio>1.2?'Above Avg':volRatio<0.8?'Below Avg':'Normal', volRatio>1.2?C.green:volRatio<0.8?C.red:C.yellow));
+  volRows.push(row('🔍','Volume On Up Days', upDayVol ? upDayVol.text : 'Needs at least 4 daily updates to compare up-day vs down-day volume.', upDayVol?upDayVol.label:'No Data', upDayVol?upDayVol.color:C.textMuted));
+  const volCard = volRows.length ? categoryCard('Volume Check', 'We want to see buyers stepping in with real volume, not just price drifting on quiet trading.', volRows) : '';
+
+  // ── RISK & VOLATILITY ──────────────────────────────────────────────────
+  const riskRows = [];
+  if(s.atr && s.price) {
     const pctMove = ((s.atr/s.price)*100).toFixed(1);
-    const color   = s.atr<5?C.green:s.atr<15?C.yellow:C.orange;
-    const label   = s.atr<5?`Low daily movement. Small drops are normal. Don't panic on small moves.`:s.atr<15?`A ${fmtP(s.atr)} swing in a single day is completely normal for this stock. Only worry if it moves more than double that.`:`This is a volatile stock. Moves of ${fmtP(s.atr)} or more per day happen regularly. Size your position carefully.`;
-    const smartStop = (s.atr*1.5).toFixed(2);
-
-    // Can you survive this trade? — compare the stop distance to your actual position size
+    riskRows.push(row('⚡','ATR (14)', `${fmtP(s.atr)} (${pctMove}% average daily move)`, s.atr/s.price<0.02?'Low':s.atr/s.price<0.04?'Normal':'High', s.atr/s.price<0.02?C.green:s.atr/s.price<0.04?C.yellow:C.orange));
     const budget = s.invested || 150;
     const approxShares = s.price ? budget/s.price : 0;
-    const dollarRisk = approxShares * (s.atr*1.5);
-    const riskPctOfPosition = budget>0 ? (dollarRisk/budget)*100 : null;
-    const survivable = riskPctOfPosition!=null ? riskPctOfPosition<15 : null;
-    const survivalBlock = riskPctOfPosition!=null ? `
-      <div style="background:${survivable?C.greenDim:C.redDim};border-radius:8px;padding:10px 12px;margin-top:8px;border:1px solid ${survivable?C.green:C.red}33;">
-        <div style="color:${survivable?C.green:C.red};font-size:12px;font-weight:700;margin-bottom:3px;">${survivable?'✓ Position size can absorb normal noise':'⚠ Stop is tight relative to your position'}</div>
-        <div style="color:${C.textSub};font-size:11px;line-height:1.6;">On a ${fmtP(budget)} position (${approxShares.toFixed(2)} shares), a normal stop at 1.5× ATR risks about ${fmtP(dollarRisk)} (${riskPctOfPosition.toFixed(0)}% of the position). ${survivable?'That\'s a reasonable amount to risk on one trade.':'That\'s a big bite out of a small position — normal daily noise could stop you out before the setup even plays out. Consider a smaller stop multiple or skipping this one.'}</div>
-      </div>` : '';
-
-    return `
-      <div style="margin-bottom:20px;">
-        <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
-          <span style="color:${C.textSub};font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;">ATR — Typical Daily Move</span>
-          <span style="color:${color};font-size:13px;font-weight:800;">${fmtP(s.atr)}</span>
-        </div>
-        <div style="background:${C.cardHigh};border-radius:10px;padding:12px 14px;">
-          <div style="color:${C.text};font-size:13px;font-weight:700;margin-bottom:6px;">This stock typically moves ${fmtP(s.atr)} per day (${pctMove}%)</div>
-          <div style="color:${C.textSub};font-size:12px;line-height:1.6;">${label}</div>
-          <div style="color:${C.textMuted};font-size:11px;margin-top:8px;padding-top:8px;border-top:1px solid ${C.border};">Smart stop zone: set it about $${smartStop} below your entry price (1.5× the daily move range)</div>
-          ${survivalBlock}
-        </div>
-      </div>`;
-  })() : '';
+    const dollarRisk = approxShares*(s.atr*1.5);
+    const riskPct = budget>0 ? (dollarRisk/budget)*100 : null;
+    if(riskPct!=null) riskRows.push(row('🎯','Position Size Fit', `${fmtP(budget)} position risks about ${fmtP(dollarRisk)} (${riskPct.toFixed(0)}%) on a 1.5× ATR stop.`, riskPct<15?'Good':'Tight', riskPct<15?C.green:C.yellow));
+  }
+  const riskCard = riskRows.length ? categoryCard('Risk & Volatility', s.atr ? `${s.ticker} moves about ${fmtP(s.atr)} a day on average. That's normal — just size your position right.` : 'Add an ATR reading to see risk sizing.', riskRows) : '';
 
   return `
     <div style="display:flex;flex-direction:column;gap:14px;">
       ${narrativeBlock}
-      ${signalBlock}
-      <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:20px;">
-        <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:20px;">Technical Picture</div>
-        ${renderSlider('52-Week Range',s.lo52,s.hi52,s.price,`Low ${fmtP(s.lo52)}`,`High ${fmtP(s.hi52)}`)}
-        ${s.ma50?renderSlider('vs 50-Day Avg',s.ma50*0.85,s.ma50*1.15,s.price,'15% below','15% above',s.price>s.ma50?C.green:C.red)+ma50note:''}
-        ${s.ma200?renderSlider('vs 200-Day Avg',s.ma200*0.85,s.ma200*1.15,s.price,'15% below','15% above',s.price>s.ma200?C.green:C.red)+ma200note:''}
-        ${rsiGauge}
-        ${macdBlock}
-        ${volBar}
-        ${atrBlock}
-      </div>
+      ${trajBox}
+      ${trendCard}
+      ${momCard}
+      ${volCard}
+      ${riskCard}
     </div>`;
 }
+
 
 // ─── NOTES TAB ────────────────────────────────────────────────────────────────
 function renderTabNotes(s) {
   const snaps = s.snapshots||[];
-  let traj = '';
-  if(snaps.length>=3) {
-    const f=snaps[0],l=snaps[snaps.length-1];
-    const rd=l.rsi<f.rsi?'dropped':'climbed';
-    const pd=l.price>f.price?'moved up':'moved down';
-    const days=snaps.length;
-    const weeks=Math.round(days/5);
-    const timeLabel=days>=20?`${weeks} weeks`:days>=5?`${Math.round(days/5)} week`:`${days} days`;
-
-    // RSI trend over last 10 days
-    const recent=snaps.slice(-10);
-    const rsiVals=recent.map(r=>r.rsi).filter(v=>v!=null);
-    const rsiTrend=rsiVals.length>=2?(rsiVals[rsiVals.length-1]-rsiVals[0]).toFixed(1):null;
-    const rsiTrendStr=rsiTrend?parseFloat(rsiTrend)>0?`RSI has been rising ${rsiTrend} points over the last 10 days — momentum building.`:`RSI has dropped ${Math.abs(rsiTrend)} points recently — sellers in control short term.`:'';
-
-    // Volume trend
-    const volVals=recent.map(r=>r.vol).filter(v=>v!=null);
-    const avgRecent=volVals.length?volVals.reduce((a,b)=>a+b,0)/volVals.length:null;
-    const allVols=snaps.map(r=>r.vol).filter(v=>v!=null);
-    const avgAll=allVols.length?allVols.reduce((a,b)=>a+b,0)/allVols.length:null;
-    const volTrendStr=avgRecent&&avgAll?(avgRecent>avgAll*1.2?'Volume has been above average recently — institutional interest is elevated.'
-      :avgRecent<avgAll*0.8?'Volume has been below average recently — quiet period with lower conviction.'
-      :'Volume is running near its historical average — normal trading conditions.'):'';
-
-    // Price vs MA trends
-    const maNote=l.ma200&&l.price?(l.price>l.ma200?'Price is holding above the long-term support line — the big picture trend is still healthy.':'Price has dropped below the long-term support line — worth being cautious.'):'';
-
-    traj=`Over the past ${timeLabel} (${days} trading days), ${s.ticker} has ${pd} from ${fmtP(f.price)} to ${fmtP(l.price)} and RSI has ${rd} from ${f.rsi?.toFixed(0)||'—'} to ${l.rsi?.toFixed(0)||'—'}. ${rsiTrendStr} ${volTrendStr} ${maNote}`.trim();
-  } else {
-    traj=`You have ${snaps.length} update${snaps.length===1?'':'s'} saved. Import a CSV from ThinkorSwim or keep entering daily data — after 3 updates the app will start showing you how this stock is trending.`;
-  }
 
   const snapRows = [...snaps].reverse().map((snap,i)=>`
     <div style="padding:12px 0;border-bottom:${i<snaps.length-1?`1px solid ${C.border}`:'none'};">
@@ -1215,10 +1432,6 @@ function renderTabNotes(s) {
       <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
         <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">My Notes</div>
         <textarea onchange="updateNotes('${s.id}',this.value)" style="width:100%;background:${C.cardHigh};border:1px solid ${C.borderLight};border-radius:10px;color:${C.text};font-size:14px;padding:14px;resize:none;outline:none;line-height:1.7;box-sizing:border-box;min-height:120px;" placeholder="Your thesis, reasons, gut feeling. This is just for you.">${s.notes||''}</textarea>
-      </div>
-      <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
-        <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">How It's Trending</div>
-        <p style="color:${C.text};font-size:13px;line-height:1.7;margin:0;">${traj}</p>
       </div>
       <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
         <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:14px;">Daily Update History</div>
