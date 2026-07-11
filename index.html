@@ -736,6 +736,21 @@ function showTab(tab, id) {
 
 // ─── GAME PLAN TAB ────────────────────────────────────────────────────────────
 function renderTabPlan(s) {
+  if(!s.tranche || s.tranche.length===0) {
+    return `
+      <div style="display:flex;flex-direction:column;gap:14px;">
+        <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
+          <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">What's happening</div>
+          <p style="color:${C.text};font-size:14px;line-height:1.7;margin:0;">${s.summary||'Analysis pending.'}</p>
+        </div>
+        <div style="background:${C.card};border-radius:16px;border:1px dashed ${C.borderLight};padding:28px 20px;text-align:center;">
+          <div style="font-size:32px;margin-bottom:10px;">📋</div>
+          <div style="color:${C.text};font-size:15px;font-weight:800;margin-bottom:6px;">No buy plan yet</div>
+          <div style="color:${C.textSub};font-size:13px;line-height:1.6;margin-bottom:18px;">This stock has no entry tranches set up, so there's nothing to show here. Build a plan to define how you'll scale in.</div>
+          <button onclick="showBuildPlanFlow('${s.id}')" style="width:100%;padding:14px;background:${C.text};color:${C.bg};border:none;border-radius:14px;font-size:14px;font-weight:800;cursor:pointer;">+ Build Buy Plan</button>
+        </div>
+      </div>`;
+  }
   const splits = splitBudget(s.invested||0, (s.tranche||[]).length);
 
   const tranches = (s.tranche||[]).map((t,i) => {
@@ -1165,6 +1180,57 @@ async function doDelete(id) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// BUILD BUY PLAN (creates tranches — previously nothing did this)
+// ═══════════════════════════════════════════════════════════════════════════════
+function showBuildPlanFlow(stockId) {
+  const s = stocks.find(x=>String(x.id)===String(stockId));
+  if(!s) return;
+  showSheet(`
+    <div style="width:36px;height:4px;border-radius:2px;background:${C.border};margin:0 auto 20px;"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+      <span style="color:${C.textMuted};font-size:11px;">${s.ticker} · Buy Plan</span>
+      <button onclick="closeAllOverlays()" style="background:none;border:none;color:${C.textMuted};font-size:22px;cursor:pointer;">✕</button>
+    </div>
+    <div style="color:${C.text};font-size:22px;font-weight:900;letter-spacing:-0.01em;margin-bottom:8px;">How many entries?</div>
+    <div style="color:${C.textMuted};font-size:12px;margin-bottom:20px;line-height:1.6;">Spreading your budget across 2-3 entries lets you buy more if it dips further, instead of going all-in at one price.</div>
+    <div style="display:flex;flex-direction:column;gap:10px;">
+      <button onclick="doBuildPlan('${stockId}',1)" style="padding:16px 18px;border-radius:14px;font-size:15px;font-weight:700;border:1px solid ${C.border};background:none;color:${C.text};cursor:pointer;text-align:left;">1 entry — go all in at once</button>
+      <button onclick="doBuildPlan('${stockId}',2)" style="padding:16px 18px;border-radius:14px;font-size:15px;font-weight:700;border:1px solid ${C.border};background:none;color:${C.text};cursor:pointer;text-align:left;">2 entries — split into a first buy and an add</button>
+      <button onclick="doBuildPlan('${stockId}',3)" style="padding:16px 18px;border-radius:14px;font-size:15px;font-weight:700;border:1px solid ${C.border};background:none;color:${C.text};cursor:pointer;text-align:left;">3 entries — scale in gradually</button>
+    </div>`);
+}
+
+async function doBuildPlan(stockId, count) {
+  const s = stocks.find(x=>String(x.id)===String(stockId));
+  if(!s) return;
+  const step = s.atr ? s.atr : s.price*0.03; // fall back to 3% spacing if no ATR yet
+  const labels = ['Tranche 1','Tranche 2','Tranche 3'];
+  const notes = [
+    'First entry — start the position here.',
+    'Add if it pulls back further. Confirms the dip is being bought, not just falling.',
+    'Final add — only if your thesis still holds and this level gets tested.'
+  ];
+  const tranche = Array.from({length:count}).map((_,i) => {
+    const zonePrice = s.price - (step*1.5*i); // each tranche a bit lower than the last
+    return {
+      label: labels[i],
+      zone: i===0 ? (s.buyZone && s.buyZone!=='Run full analysis' ? s.buyZone : `Around ${fmtP(zonePrice)}`) : `Around ${fmtP(zonePrice)}`,
+      note: notes[i],
+      status: i===0 ? 'ready' : 'waiting',
+    };
+  });
+  const updated = {...s, tranche};
+  stocks = stocks.map(x=>String(x.id)===String(stockId)?updated:x);
+  closeAllOverlays();
+  await fbSaveStock(updated);
+  showSaveStatus('saved');
+  setTimeout(()=>showSaveStatus('ready'),2000);
+  renderDetail(updated);
+  renderHome();
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // FILL / SELL MODALS
 // ═══════════════════════════════════════════════════════════════════════════════
 function showFillModal(stockId, trancheLabel) {
@@ -1261,6 +1327,7 @@ const UPDATE_STEPS = [
   {key:'price',     label:"Current price?",          hint:'e.g. 196.50',  prefix:'$', inputmode:'decimal'},
   {key:'rsi',       label:"RSI right now?",           hint:'e.g. 36',      inputmode:'decimal'},
   {key:'vol',       label:"Today's volume?",          hint:'e.g. 138M',    inputmode:'text', note:'Type 120M, 1.4B, or the full number'},
+  {key:'avgvol',    label:"20-day avg volume?",       hint:'e.g. 120M',    inputmode:'text', note:'Type 120M, 1.4B, or the full number'},
   {key:'ma20',      label:"20-day moving average?",   hint:'e.g. 197.20',  prefix:'$', inputmode:'decimal'},
   {key:'macdLine',  label:"MACD Line value?",         hint:'e.g. -1.234',  inputmode:'decimal', note:'From the MACD indicator in ThinkorSwim'},
   {key:'signalLine',label:"Signal Line value?",       hint:'e.g. -0.876',  inputmode:'decimal', note:'The dotted line on your MACD indicator'},
@@ -1328,6 +1395,7 @@ async function doSaveUpdate() {
     price: parseFloat(updateVals.price)||s.price,
     rsi:   parseFloat(updateVals.rsi)||null,
     vol:   parseVol(updateVals.vol),
+    avgvol:parseVol(updateVals.avgvol),
     ma20:  parseFloat(updateVals.ma20)||null,
     macdLine:   parseFloat(updateVals.macdLine)||null,
     signalLine: parseFloat(updateVals.signalLine)||null,
@@ -1338,6 +1406,7 @@ async function doSaveUpdate() {
     price:      snap.price,
     rsi:        snap.rsi,
     vol:        snap.vol,
+    avgvol:     snap.avgvol ?? s.avgvol,
     ma20:       snap.ma20,
     macdLine:   snap.macdLine,
     signalLine: snap.signalLine,
