@@ -1344,6 +1344,8 @@ async function copyAIPrompt(id) {
 
 function computeAtAGlance(s) {
   const setup = analyzeSetup(s);
+  const {rz, dz, volConfirmed, trendUp, trendBroken} = setup;
+  const narrative = brokerRead(s, setup, computeTrajectory(s));
 
   const trend = trendBroken ? {label:'Broken', color:C.red, sub:'Below long-term support'}
               : trendUp ? {label:'Long-term uptrend', color:C.green, sub:'Price above 50 & 200-day'}
