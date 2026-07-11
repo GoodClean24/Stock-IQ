@@ -222,30 +222,68 @@ function today() {
   return new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
 }
 
+// RSI classified by what it actually means for a trending stock, not just "overbought/oversold"
+function rsiZone(rsi) {
+  if(rsi==null) return null;
+  if(rsi<30)   return {zone:'panic',  label:'Panic / Oversold',   color:C.green, note:'Sellers look exhausted. This is reversal territory — where beaten-down stocks often turn.'};
+  if(rsi<40)   return {zone:'weak',   label:'Weak',               color:C.yellow,note:'Still soft, but drifting toward a bounce zone. Not there yet.'};
+  if(rsi<50)   return {zone:'caution',label:'Caution',            color:C.yellow,note:'Neither strong nor weak. No real edge here on its own.'};
+  if(rsi<65)   return {zone:'healthy',label:'Healthy Uptrend',    color:C.green, note:'This is where strong, well-behaved uptrends usually sit. Not a warning — a good sign.'};
+  if(rsi<75)   return {zone:'strong', label:'Strong Momentum',    color:C.teal,  note:'Real strength. Good stocks can stay here for weeks — this is not automatically "too late."'};
+  return           {zone:'hot',    label:'Watch Carefully',    color:C.red,   note:'Stretched further than most healthy trends go. Chasing here is risky — wait for it to cool off.'};
+}
+
+// Distance from the 50-day average, turned into a buy/wait zone
+function distanceZone(price, ma50) {
+  if(!price||!ma50) return null;
+  const d = ((price-ma50)/ma50)*100;
+  let zone,label,color,note;
+  if(d<-5){ zone='broken';  label='Below Support'; color=C.red;   note='Price has broken meaningfully below its 50-day average. The trend may be turning down — proceed with caution.'; }
+  else if(d<0){ zone='buy'; label='Buy Zone';       color=C.green;note='Price is testing its 50-day average from below and holding nearby. Classic dip-buy territory if the bigger trend is still up.'; }
+  else if(d<5){ zone='buy'; label='Buy Zone';       color=C.green;note='Price just pulled back to its 50-day average and is holding. This is where buyers have historically stepped back in.'; }
+  else if(d<10){ zone='healthy'; label='Healthy';   color=C.teal; note='A normal, comfortable distance above support. Not urgent, but nothing wrong here.'; }
+  else if(d<20){ zone='extended'; label='Extended'; color=C.yellow;note='Price has run up further than most pullback buyers would chase. Getting in now means paying a premium.'; }
+  else{ zone='wait'; label='Overextended — Wait'; color=C.orange; note='Price is stretched far above its average. Either it corrects soon, or you\'re late. Wait for it to come back down.'; }
+  return {dist:d, zone, label, color, note};
+}
+
 function oppScore(s) {
-  let score=0, reason='Monitoring';
-  if(s.verdict==='Buy Zone'){score+=40;reason='In buy zone now';}
-  else if(s.verdict==='Watch'){score+=20;reason='Setup building';}
-  else if(s.verdict==='Wait'){score+=5;reason='Not ready yet';}
-  else if(s.verdict==='Pass'){score-=10;reason='Pass for now';}
-  if(s.rsi!=null){
-    if(s.rsi<30){score+=25;reason='RSI near buy zone';}
-    else if(s.rsi<40){score+=15;reason='RSI getting close';}
-    else if(s.rsi>70){score-=10;reason='Overbought, wait';}
+  const rz = rsiZone(s.rsi);
+  const dz = distanceZone(s.price, s.ma50);
+  const volRatio = s.vol&&s.avgvol ? s.vol/s.avgvol : null;
+  const volConfirmed = volRatio!=null && volRatio>1.2;
+  const trendUp = s.ma50&&s.ma200&&s.price ? (s.price>s.ma50 && s.price>s.ma200) : false;
+  const trendBroken = s.ma200&&s.price ? s.price < s.ma200*0.97 : false;
+  const nearMA200 = s.ma200&&s.price ? Math.abs((s.price-s.ma200)/s.ma200)<0.05 : false;
+
+  let score=0, reason='Monitoring', signals=0;
+
+  if(s.verdict==='Buy Zone') score+=15;
+  else if(s.verdict==='Watch') score+=8;
+  else if(s.verdict==='Pass') score-=15;
+
+  // Setup A — Reversal: near long-term support, RSI panic/weak, volume confirms the bounce
+  const reversalAligned = nearMA200 && rz && (rz.zone==='panic'||rz.zone==='weak') && volConfirmed;
+  // Setup B — Pullback in an uptrend: trend intact, price back near the 50-day, RSI cooled off (not crashed), volume confirms
+  const pullbackAligned = trendUp && dz && (dz.zone==='buy'||dz.zone==='healthy') && rz && (rz.zone==='caution'||rz.zone==='healthy') && volConfirmed;
+
+  if(reversalAligned){ score+=50; signals=4; reason='Reversal setup — signals aligned'; }
+  else if(pullbackAligned){ score+=50; signals=4; reason='Pullback in uptrend — signals aligned'; }
+  else {
+    let partial=0;
+    if(trendUp){partial+=8;signals++;}
+    if(dz&&dz.zone==='buy'){partial+=8;signals++;}
+    if(rz&&(rz.zone==='healthy'||rz.zone==='panic')){partial+=6;signals++;}
+    if(volConfirmed){partial+=6;signals++;}
+    score+=partial;
+    reason = signals>=2 ? `${signals} of 4 signals lining up` : signals===1 ? 'Only one signal present' : 'Monitoring';
   }
-  if(s.vol&&s.avgvol){
-    const r=s.vol/s.avgvol;
-    if(r>1.5){score+=15;if(score>30)reason='Big volume today';}
-    else if(r>1.2)score+=8;
-    else if(r<0.8)score-=5;
-  }
-  if(s.ma200&&s.price){
-    const d=((s.price-s.ma200)/s.ma200)*100;
-    if(d>-3&&d<5){score+=20;if(score>35)reason='At key support';}
-  }
-  if(s.score>=80)score+=10;
-  else if(s.score>=70)score+=5;
-  return{oppScore:Math.max(0,score),reason};
+
+  if(trendBroken){ score-=20; reason='Below long-term support'; }
+  if(dz&&dz.zone==='wait') score-=10;
+  if(rz&&rz.zone==='hot') score-=8;
+
+  return {oppScore:Math.max(0,score), reason, signals};
 }
 
 function splitBudget(budget, count) {
@@ -843,9 +881,17 @@ function renderTabAnalysis(s) {
       </div>
     </div>` : '';
 
-  const ma50note = s.ma50 ? `
-    <div style="background:${C.cardHigh};border-radius:10px;padding:10px 14px;margin-top:-14px;margin-bottom:20px;">
-      <span style="color:${C.textSub};font-size:12px;">Price is <span style="color:${s.price>s.ma50?C.green:C.red};font-weight:700;">${Math.abs(((s.price-s.ma50)/s.ma50)*100).toFixed(1)}% ${s.price>s.ma50?'above':'below'}</span> the 50-day line. ${s.price>s.ma50?'Short-term momentum is positive.':'Short-term momentum is negative.'}</span>
+  const dz = distanceZone(s.price, s.ma50);
+  const ma50note = dz ? `
+    <div style="background:${C.cardHigh};border-radius:10px;padding:12px 14px;margin-top:-14px;margin-bottom:20px;border:1px solid ${dz.color}33;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+        <span style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.07em;">Distance from 50-Day</span>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="background:${dz.color}22;color:${dz.color};border:1px solid ${dz.color}44;border-radius:20px;padding:2px 9px;font-size:10px;font-weight:800;">${dz.label}</span>
+          <span style="color:${dz.color};font-size:13px;font-weight:800;">${dz.dist>=0?'+':''}${dz.dist.toFixed(1)}%</span>
+        </div>
+      </div>
+      <span style="color:${C.textSub};font-size:12px;line-height:1.6;">${dz.note}</span>
     </div>` : '';
 
   const ma200note = s.ma200 ? `
@@ -853,24 +899,27 @@ function renderTabAnalysis(s) {
       <span style="color:${C.textSub};font-size:12px;">Price is <span style="color:${s.price>s.ma200?C.green:C.red};font-weight:700;">${Math.abs(((s.price-s.ma200)/s.ma200)*100).toFixed(1)}% ${s.price>s.ma200?'above':'below'}</span> the long-term support line. ${s.price>s.ma200?'Long-term trend is healthy.':'Long-term trend is broken.'}</span>
     </div>` : '';
 
-  const rsiColor = (s.rsi||50)<30?C.green:(s.rsi||50)>70?C.red:C.yellow;
-  const rsiNote = (s.rsi||50)<30?'Oversold — sellers may be running out of steam.':(s.rsi||50)>70?'Overbought — not a great time to buy more.':'Neutral — not stretched in either direction.';
+  const rz = rsiZone(s.rsi);
+  const rsiColor = rz?rz.color:C.textMuted;
   const rsiPct = Math.max(0,Math.min(100,s.rsi||0));
   const rsiGauge = s.rsi!=null ? `
     <div style="margin-bottom:20px;">
       <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
         <span style="color:${C.textSub};font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;">RSI (14)</span>
-        <span style="color:${rsiColor};font-size:13px;font-weight:800;">${s.rsi}</span>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="background:${rsiColor}22;color:${rsiColor};border:1px solid ${rsiColor}44;border-radius:20px;padding:2px 9px;font-size:10px;font-weight:800;">${rz?rz.label:'—'}</span>
+          <span style="color:${rsiColor};font-size:13px;font-weight:800;">${s.rsi}</span>
+        </div>
       </div>
       <div style="position:relative;height:6px;border-radius:3px;overflow:hidden;margin-bottom:2px;">
-        <div style="position:absolute;inset:0;background:linear-gradient(90deg,${C.green} 0%,${C.green} 30%,${C.yellow} 30%,${C.yellow} 70%,${C.red} 70%,${C.red} 100%);opacity:0.25;"></div>
+        <div style="position:absolute;inset:0;background:linear-gradient(90deg,${C.green} 0%,${C.green} 30%,${C.yellow} 30%,${C.green} 50%,${C.green} 65%,${C.teal} 65%,${C.teal} 75%,${C.red} 75%,${C.red} 100%);opacity:0.25;"></div>
         <div style="position:absolute;top:50%;left:${rsiPct}%;transform:translate(-50%,-50%);width:16px;height:16px;border-radius:50%;background:${rsiColor};border:2.5px solid ${C.bg};box-shadow:0 0 10px ${rsiColor}99;"></div>
       </div>
       <div style="display:flex;justify-content:space-between;margin-top:6px;">
-        <span style="color:${C.textMuted};font-size:11px;">0 — Oversold</span>
+        <span style="color:${C.textMuted};font-size:11px;">0 — Panic</span>
         <span style="color:${C.textMuted};font-size:11px;">100 — Overbought</span>
       </div>
-      <div style="color:${rsiColor};font-size:12px;margin-top:8px;font-weight:600;line-height:1.5;">${rsiNote}</div>
+      <div style="color:${rsiColor};font-size:12px;margin-top:8px;font-weight:600;line-height:1.5;">${rz?rz.note:''}</div>
     </div>` : '';
 
   const volRatio = s.vol&&s.avgvol?s.vol/s.avgvol:null;
@@ -927,6 +976,19 @@ function renderTabAnalysis(s) {
     const color   = s.atr<5?C.green:s.atr<15?C.yellow:C.orange;
     const label   = s.atr<5?`Low daily movement. Small drops are normal. Don't panic on small moves.`:s.atr<15?`A ${fmtP(s.atr)} swing in a single day is completely normal for this stock. Only worry if it moves more than double that.`:`This is a volatile stock. Moves of ${fmtP(s.atr)} or more per day happen regularly. Size your position carefully.`;
     const smartStop = (s.atr*1.5).toFixed(2);
+
+    // Can you survive this trade? — compare the stop distance to your actual position size
+    const budget = s.invested || 150;
+    const approxShares = s.price ? budget/s.price : 0;
+    const dollarRisk = approxShares * (s.atr*1.5);
+    const riskPctOfPosition = budget>0 ? (dollarRisk/budget)*100 : null;
+    const survivable = riskPctOfPosition!=null ? riskPctOfPosition<15 : null;
+    const survivalBlock = riskPctOfPosition!=null ? `
+      <div style="background:${survivable?C.greenDim:C.redDim};border-radius:8px;padding:10px 12px;margin-top:8px;border:1px solid ${survivable?C.green:C.red}33;">
+        <div style="color:${survivable?C.green:C.red};font-size:12px;font-weight:700;margin-bottom:3px;">${survivable?'✓ Position size can absorb normal noise':'⚠ Stop is tight relative to your position'}</div>
+        <div style="color:${C.textSub};font-size:11px;line-height:1.6;">On a ${fmtP(budget)} position (${approxShares.toFixed(2)} shares), a normal stop at 1.5× ATR risks about ${fmtP(dollarRisk)} (${riskPctOfPosition.toFixed(0)}% of the position). ${survivable?'That\'s a reasonable amount to risk on one trade.':'That\'s a big bite out of a small position — normal daily noise could stop you out before the setup even plays out. Consider a smaller stop multiple or skipping this one.'}</div>
+      </div>` : '';
+
     return `
       <div style="margin-bottom:20px;">
         <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
@@ -937,6 +999,7 @@ function renderTabAnalysis(s) {
           <div style="color:${C.text};font-size:13px;font-weight:700;margin-bottom:6px;">This stock typically moves ${fmtP(s.atr)} per day (${pctMove}%)</div>
           <div style="color:${C.textSub};font-size:12px;line-height:1.6;">${label}</div>
           <div style="color:${C.textMuted};font-size:11px;margin-top:8px;padding-top:8px;border-top:1px solid ${C.border};">Smart stop zone: set it about $${smartStop} below your entry price (1.5× the daily move range)</div>
+          ${survivalBlock}
         </div>
       </div>`;
   })() : '';
