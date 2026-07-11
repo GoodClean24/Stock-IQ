@@ -1279,10 +1279,71 @@ function computeKeyLevels(s) {
 }
 
 // Six-cell summary grid — Trend, Momentum, Volume, Risk Level, Position Size, Overall.
+// Builds a copy-ready prompt with StockIQ's real live numbers, so an external
+// Claude/ChatGPT session analyzes actual data instead of guessing. Deliberately
+// tells the AI NOT to redo the technical math — that's StockIQ's job and it's
+// already computed here. The AI's job is the part StockIQ structurally can't
+// do: news, catalysts, analyst sentiment, fundamentals.
+function buildAIPrompt(s) {
+  const setup = analyzeSetup(s);
+  const traj = computeTrajectory(s);
+  const narrative = brokerRead(s, setup, traj);
+  const setupScore = computeSetupScore(s);
+  const levels = computeKeyLevels(s);
+  const gp = computeGamePlan(s);
+  const glance = computeAtAGlance(s);
+
+  const lines = [];
+  lines.push(`Analyze ${s.ticker} (${s.name}) using the data below from my stock tracking app, plus your own knowledge of recent news, earnings, and analyst sentiment.`);
+  lines.push('');
+  lines.push(`Please DON'T recompute the technical numbers — I already have those from real price data. Focus on what I can't get from a price chart: catalysts, competitive position, fundamentals, and risks.`);
+  lines.push('');
+  lines.push(`CURRENT DATA (from StockIQ):`);
+  lines.push(`- Price: ${fmtP(s.price)} (${(s.pct||0)>=0?'+':''}${(s.pct||0).toFixed(2)}% since last update)`);
+  lines.push(`- Setup Score: ${setupScore.score}/100 (${setupScore.label})`);
+  lines.push(`- Verdict: ${narrative.verdict} — ${narrative.verdictSub}`);
+  lines.push(`- Trend: ${glance.trend.label} (${glance.trend.sub})`);
+  lines.push(`- Momentum: ${glance.momentum.label} (${glance.momentum.sub})`);
+  lines.push(`- Volume: ${glance.volume.label} (${glance.volume.sub})`);
+  lines.push(`- Risk Level: ${glance.riskLevel.label} (${glance.riskLevel.sub})`);
+  if(levels.support) lines.push(`- Support: ${fmtP(levels.support.price)} (${levels.support.label})`);
+  if(levels.resistance) lines.push(`- Resistance: ${fmtP(levels.resistance.price)} (${levels.resistance.label})`);
+  lines.push(`- My Game Plan: Entry ${gp.buyZone}, Target ${gp.profit}, Stop ${gp.stopPrice!=null?fmtP(gp.stopPrice):'—'}`);
+  lines.push(`- Position type: ${s.type||'—'}, typical position size ~${fmtP(s.invested||150)}`);
+  lines.push('');
+  lines.push(`QUESTIONS TO ANSWER:`);
+  lines.push(`1. Any recent news, earnings, or catalysts that could affect this stock in the next 1-3 months?`);
+  lines.push(`2. What are analysts currently saying — recent upgrades/downgrades, price targets?`);
+  lines.push(`3. Does the underlying business/fundamentals support or contradict this technical setup?`);
+  lines.push(`4. What's the biggest risk here that a price chart wouldn't show me?`);
+  lines.push(`5. Bottom line — does this make you more or less confident in the trade, and why?`);
+  lines.push('');
+  lines.push(`Keep it concise and specific to ${s.ticker} — I'll paste your answer back into my app next to my own technical analysis.`);
+
+  return lines.join('\n');
+}
+
+async function copyAIPrompt(id) {
+  const s = stocks.find(x=>String(x.id)===String(id));
+  if(!s) return;
+  const text = buildAIPrompt(s);
+  try {
+    await navigator.clipboard.writeText(text);
+    const btn = document.getElementById('copy-prompt-btn');
+    if(btn) { const orig = btn.textContent; btn.textContent = '✓ Copied — paste into Claude'; setTimeout(()=>{ if(btn) btn.textContent = orig; }, 2500); }
+  } catch(e) {
+    showModal(`
+      <div style="background:${C.card};border-radius:20px;padding:22px;border:1px solid ${C.border};">
+        <div style="color:${C.text};font-size:15px;font-weight:800;margin-bottom:10px;">Couldn't copy automatically</div>
+        <div style="color:${C.textSub};font-size:12px;margin-bottom:12px;">Select and copy the text below manually:</div>
+        <textarea readonly style="width:100%;background:${C.cardHigh};border:1px solid ${C.borderLight};border-radius:10px;color:${C.text};font-size:12px;padding:12px;min-height:200px;box-sizing:border-box;">${text}</textarea>
+        <button onclick="closeAllOverlays()" style="width:100%;margin-top:12px;padding:12px;border-radius:12px;border:none;background:${C.text};color:${C.bg};font-size:14px;font-weight:800;cursor:pointer;">Close</button>
+      </div>`);
+  }
+}
+
 function computeAtAGlance(s) {
   const setup = analyzeSetup(s);
-  const {rz, dz, volConfirmed, trendUp, trendBroken} = setup;
-  const narrative = brokerRead(s, setup, computeTrajectory(s));
 
   const trend = trendBroken ? {label:'Broken', color:C.red, sub:'Below long-term support'}
               : trendUp ? {label:'Long-term uptrend', color:C.green, sub:'Price above 50 & 200-day'}
@@ -1504,12 +1565,22 @@ function renderTabOverview(s) {
       </div>` : `<div style="color:${C.textSub};font-size:12px;line-height:1.6;">No buy plan set up yet. <span onclick="showTab('plan','${s.id}')" style="color:${C.teal};cursor:pointer;font-weight:700;">Build one →</span></div>`}
     </div>`;
 
+  const aiPreview = `
+    <div style="background:${C.card};border-radius:16px;border:1px solid ${C.purple}33;padding:18px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <span style="color:${C.purple};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;">🔮 AI Research</span>
+        <button onclick="showTab('notes','${s.id}')" style="background:none;border:none;color:${C.purple};font-size:12px;font-weight:700;cursor:pointer;">${s.research?'View Full →':'Add Research →'}</button>
+      </div>
+      ${s.research ? `<p style="color:${C.textSub};font-size:12px;line-height:1.6;margin:0;">${s.research.length>220?s.research.slice(0,220)+'…':s.research}</p>` : `<div style="color:${C.textMuted};font-size:12px;line-height:1.6;">No qualitative research added yet. This stays separate from your score — it's here for context, not the math.</div>`}
+    </div>`;
+
   return `
     <div style="display:flex;flex-direction:column;gap:14px;">
       ${takeCard}
       ${glanceGrid}
       ${renderPriceChart(s)}
       ${keyLevelsCard}
+      ${aiPreview}
       ${gamePlanPreview}
     </div>`;
 }
@@ -1678,6 +1749,15 @@ function renderTabNotes(s) {
         <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">My Notes</div>
         <textarea onchange="updateNotes('${s.id}',this.value)" style="width:100%;background:${C.cardHigh};border:1px solid ${C.borderLight};border-radius:10px;color:${C.text};font-size:14px;padding:14px;resize:none;outline:none;line-height:1.7;box-sizing:border-box;min-height:120px;" placeholder="Your thesis, reasons, gut feeling. This is just for you.">${s.notes||''}</textarea>
       </div>
+      <div style="background:${C.card};border-radius:16px;border:1px solid ${C.purple}44;padding:18px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+          <span style="font-size:14px;">🔮</span>
+          <span style="color:${C.purple};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;">AI Research</span>
+        </div>
+        <div style="color:${C.textMuted};font-size:11px;line-height:1.6;margin-bottom:12px;">Step 1: copy a prompt pre-filled with this stock's real numbers. Step 2: paste it into Claude (or ChatGPT) and let it research news, earnings, and analyst sentiment. Step 3: paste the answer back below. StockIQ shows it alongside your score, but never factors it into the math — that stays pure and auditable.</div>
+        <button id="copy-prompt-btn" onclick="copyAIPrompt('${s.id}')" style="width:100%;padding:12px;background:${C.purple}22;color:${C.purple};border:1px solid ${C.purple}66;border-radius:10px;font-size:13px;font-weight:800;cursor:pointer;margin-bottom:12px;">📋 Copy Analysis Prompt (with live data)</button>
+        <textarea onchange="updateResearch('${s.id}',this.value)" style="width:100%;background:${C.cardHigh};border:1px solid ${C.purple}33;border-radius:10px;color:${C.text};font-size:13px;padding:14px;resize:none;outline:none;line-height:1.7;box-sizing:border-box;min-height:140px;" placeholder="Paste the AI's answer here...">${s.research||''}</textarea>
+      </div>
       <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
         <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:14px;">Daily Update History</div>
         ${snapRows||`<div style="color:${C.textMuted};font-size:13px;text-align:center;padding:20px 0;">Tap Update to log your first snapshot</div>`}
@@ -1720,6 +1800,14 @@ function updateNotes(id, val) {
   const s = stocks.find(x=>String(x.id)===String(id));
   if(!s) return;
   const updated = {...s, notes:val};
+  stocks = stocks.map(x=>String(x.id)===String(id)?updated:x);
+  scheduleSave(updated);
+}
+
+function updateResearch(id, val) {
+  const s = stocks.find(x=>String(x.id)===String(id));
+  if(!s) return;
+  const updated = {...s, research:val};
   stocks = stocks.map(x=>String(x.id)===String(id)?updated:x);
   scheduleSave(updated);
 }
@@ -2123,6 +2211,7 @@ async function doAddStock() {
     expiry:  '90 days from today',
     starred: false,
     notes:   addVals.why||'',
+    research: '',
     analyzed: todayStr,
     tranche: [],
     snapshots:[{
