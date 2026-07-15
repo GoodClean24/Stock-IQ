@@ -92,7 +92,7 @@ input[type=number]{-moz-appearance:textfield;}
   <!-- Stock list -->
   <div id="stock-list" style="padding:8px 16px 4px;display:flex;flex-direction:column;gap:14px;"></div>
   <!-- Quick action tiles -->
-  <div id="quick-actions" style="padding:16px 16px 120px;"></div>
+  <div id="quick-actions" style="padding:16px 16px 40px;"></div>
 </div>
 
 <!-- BOTTOM NAV -->
@@ -272,25 +272,43 @@ function computeGamePlan(s) {
   const atr = s.atr;
 
   let buyZone = 'Waiting on more data';
+  let entryRef = s.price;   // the price the target/stop must be anchored to
+  let entryPending = false; // true when the plan says "wait for a pullback", not "buy now"
+
   if(s.ma50 && s.price) {
     const lo = s.ma50*0.98, hi = s.ma50*1.03;
-    if(dz && (dz.zone==='buy'||dz.zone==='healthy')) buyZone = `${fmtP(lo)} - ${fmtP(hi)}`;
-    else if(dz && (dz.zone==='extended'||dz.zone==='wait')) buyZone = `Wait for pullback to ~${fmtP(s.ma50)}`;
-    else if(dz && dz.zone==='broken') buyZone = `Below support — wait for trend to repair`;
+    if(dz && (dz.zone==='buy'||dz.zone==='healthy')) {
+      buyZone = `${fmtP(lo)} - ${fmtP(hi)}`;
+      entryRef = s.price; // buying near today's price
+    } else if(dz && (dz.zone==='extended'||dz.zone==='wait')) {
+      buyZone = `Wait for pullback to ~${fmtP(s.ma50)}`;
+      entryRef = s.ma50;  // stop/target must anchor HERE, not today's extended price
+      entryPending = true;
+    } else if(dz && dz.zone==='broken') {
+      buyZone = `Below support — wait for trend to repair`;
+      entryRef = null;    // no valid entry yet — nothing to anchor a stop to
+      entryPending = true;
+    }
   }
 
   let profit = '—';
-  if(s.hi52 && s.price && s.price < s.hi52) profit = `${fmtP(s.hi52)} (52-week high)`;
-  else if(atr && s.price) profit = `${fmtP(s.price + atr*3)} (3× ATR extension)`;
+  if(entryRef!=null) {
+    if(s.hi52 && entryRef<s.hi52) profit = `${fmtP(s.hi52)} (52-week high)`;
+    else if(atr) profit = `${fmtP(entryRef + atr*3)} (3× ATR extension)`;
+  }
 
   let stopRule = 'Set once you have an ATR reading.';
   let stopPrice = null;
-  if(atr && s.price) {
-    stopPrice = s.price - atr*1.5;
-    stopRule = `Exit if price closes below ${fmtP(stopPrice)} (1.5× ATR below entry). Objective, no-emotion stop, not a gut call.`;
+  if(atr && entryRef!=null) {
+    stopPrice = entryRef - atr*1.5;
+    stopRule = entryPending
+      ? `If it pulls back to ${fmtP(entryRef)} and you buy there, exit if price then closes below ${fmtP(stopPrice)} (1.5× ATR below that entry — not below today's price).`
+      : `Exit if price closes below ${fmtP(stopPrice)} (1.5× ATR below entry). Objective, no-emotion stop, not a gut call.`;
+  } else if(entryPending) {
+    stopRule = 'No valid entry yet — the trend needs to repair before a stop makes sense.';
   }
 
-  return {buyZone, profit, stopRule, stopPrice};
+  return {buyZone, profit, stopRule, stopPrice, entryPending, entryRef};
 }
 
 
@@ -562,7 +580,8 @@ function renderHome() {
   renderListHeader();
   renderStockList();
   renderQuickActions();
-  renderBottomNav();
+  // renderBottomNav(); — hidden for now per Kim, not deleted. Nav bar and its
+  // "Coming Soon" wiring are still intact below; just re-add this call to bring it back.
 }
 
 function renderMarket() {
@@ -710,8 +729,8 @@ function renderStockList() {
   const filtered = ranked.filter(s => {
     if(activeTag==='All') return true;
     if(activeTag==='★ Favorites') return s.starred;
-    if(activeTag==='Swing') return s.type==='Swing';
-    if(activeTag==='Long Term') return s.type==='Long Term';
+    if(activeTag==='Swing') return s.type==='Swing'||s.type==='Both';
+    if(activeTag==='Long Term') return s.type==='Long Term'||s.type==='Both';
     return s.verdict===activeTag;
   });
 
@@ -791,7 +810,7 @@ function renderStockCard(s, rank) {
               <button onclick="event.stopPropagation();toggleStar('${s.id}')" style="background:none;border:none;cursor:pointer;font-size:14px;color:${s.starred?C.yellow:C.textMuted};padding:0;">${s.starred?'★':'☆'}</button>
             </div>
             <div style="color:${C.textMuted};font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px;">${s.name}</div>
-            <span style="display:inline-block;margin-top:3px;background:${s.type==='Swing'?C.blueDim:C.purpleDim};color:${s.type==='Swing'?C.blue:C.purple};font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;">${s.type||'—'}</span>
+            <span style="display:inline-block;margin-top:3px;background:${s.type==='Swing'?C.blueDim:s.type==='Both'?C.tealDim:C.purpleDim};color:${s.type==='Swing'?C.blue:s.type==='Both'?C.teal:C.purple};font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;">${s.type||'—'}</span>
           </div>
         </div>
         <button onclick="event.stopPropagation();showRowMenu('${s.id}')" style="background:none;border:none;color:${C.textMuted};cursor:pointer;padding:4px;flex-shrink:0;">
@@ -963,7 +982,7 @@ function renderDetail(s) {
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <div style="display:flex;gap:8px;">
           <span style="background:${cfg.dim};color:${cfg.color};border:1px solid ${cfg.color}44;border-radius:20px;padding:5px 14px;font-size:12px;font-weight:800;letter-spacing:0.05em;">${cfg.label}</span>
-          <span style="background:${s.type==='Swing'?C.blueDim:C.purpleDim};color:${s.type==='Swing'?C.blue:C.purple};border-radius:20px;padding:5px 14px;font-size:12px;font-weight:700;">${s.type||'—'}</span>
+          <span style="background:${s.type==='Swing'?C.blueDim:s.type==='Both'?C.tealDim:C.purpleDim};color:${s.type==='Swing'?C.blue:s.type==='Both'?C.teal:C.purple};border-radius:20px;padding:5px 14px;font-size:12px;font-weight:700;">${s.type||'—'}</span>
         </div>
         <div style="display:flex;gap:8px;">
           <button onclick="showImportFlow('${s.id}')" style="background:${C.cardHigh};color:${C.teal};border:1px solid ${C.teal}44;border-radius:20px;padding:7px 14px;font-size:12px;font-weight:800;cursor:pointer;">📂 Import</button>
@@ -996,13 +1015,107 @@ function showTab(tab, id) {
 }
 
 // ─── GAME PLAN TAB ────────────────────────────────────────────────────────────
+
+// Checks a filled position's stop against real confirmation (trend/volume),
+// not just "did price touch the number" — so a normal pullback within an
+// intact uptrend doesn't read the same as a real breakdown.
+function checkExitSignal(s) {
+  const filled = (s.tranche||[]).filter(t=>t.status==='filled');
+  if(!filled.length || !s.atr) return null;
+  // Anchor on the actual average entry price of shares you hold — NOT
+  // computeGamePlan's forward-looking new-entry stop, which goes blank when
+  // the trend is broken (exactly when a held position needs this most).
+  const totalShares = filled.reduce((a,t)=>a+(t.shares||0),0);
+  if(totalShares<=0) return null;
+  const avgEntry = filled.reduce((a,t)=>a+(t.entryPrice||0)*(t.shares||0),0)/totalShares;
+  const stopPrice = avgEntry - s.atr*1.5;
+  const belowStop = s.price <= stopPrice;
+  if(!belowStop) return {triggered:false, confirmed:false, color:C.green,
+    message:`Price (${fmtP(s.price)}) is still above your stop (${fmtP(stopPrice)}), based on your average entry of ${fmtP(avgEntry)}. No action needed.`};
+  const setup = analyzeSetup(s);
+  const confirmed = setup.trendBroken || setup.volConfirmed;
+  if(confirmed) return {triggered:true, confirmed:true, color:C.red,
+    message:`Price closed below your stop (${fmtP(stopPrice)}) AND ${setup.trendBroken?'the long-term trend has broken':'volume confirms real selling'} — this looks like a real breakdown, not noise. Worth exiting.`};
+  return {triggered:true, confirmed:false, color:C.yellow,
+    message:`Price dipped below your stop (${fmtP(stopPrice)}), but volume is quiet and the trend hasn't broken. This could be normal noise inside the uptrend rather than a real reversal — a confirmed breakdown usually shows heavier volume or a broken trend. Use judgment before exiting.`};
+}
+
+// Live version of the wizard's suggestHoldType — reads the stock's current
+// numbers instead of the one-time answers typed in at add-time, so it stays
+// accurate as price/ATR/trend actually change.
+function suggestHoldTypeLive(s) {
+  if(!s.price || !s.ma50 || !s.ma200 || !s.atr) return null;
+  const trendUp = s.price>s.ma50 && s.price>s.ma200;
+  const atrPct = (s.atr/s.price)*100;
+  const pctStr = atrPct.toFixed(1)+'%';
+  if(trendUp && atrPct<2.5) return {label:'Long Term', reason:`Steady uptrend, small daily moves (ATR ${pctStr}) — better suited to holding than day-to-day trading.`};
+  if(trendUp && atrPct>=2.5) return {label:'Both', reason:`Strong uptrend AND real daily movement (ATR ${pctStr}) — supports holding long-term while trading the pullbacks.`};
+  if(!trendUp && atrPct>=2.5) return {label:'Swing', reason:`No confirmed long-term uptrend, but real daily movement (ATR ${pctStr}) — better suited to tactical in-and-out trades.`};
+  return {label:'Both', reason:`No strong trend and modest daily movement — genuinely a toss-up from the numbers alone.`};
+}
+
+const PLAN_OF_ATTACK = {
+  'Long Term': 'Hold the core position. Add on real pullbacks to support. Ignore short-term noise — you\'re playing the multi-month trend, not the daily wiggle.',
+  'Swing':     'Enter near support/pullback zone, exit near resistance or your profit target. Once you\'re out, you\'re out — this isn\'t a buy-and-forget position.',
+  'Both':      'Treat this as two positions in one stock: keep a core tranche untouched for the long-term trend, and trade a second tranche around your entry/exit levels for the swings.',
+};
+
+// Real, live risk flags instead of a frozen placeholder — pulls from
+// whatever the current data actually shows could go wrong right now.
+function computeWatchOuts(s) {
+  const setup = analyzeSetup(s);
+  const dz = distanceZone(s.price, s.ma50);
+  const rz = rsiZone(s.rsi);
+  const out = [];
+  if(dz && (dz.zone==='extended'||dz.zone==='wait')) out.push('Price is extended above the 50-day — chasing here means paying a premium.');
+  if(rz && rz.zone==='hot') out.push('RSI is stretched — a pullback could come at any time.');
+  if(setup.volRatio!=null && !setup.volConfirmed) out.push('Volume is quiet right now — the current move doesn\'t have strong conviction behind it yet.');
+  if(setup.trendBroken) out.push('Price has broken below the 200-day — the long-term trend is no longer confirmed.');
+  if(s.atr && s.price) {
+    const budget = s.invested||150;
+    const riskPct = budget>0 ? ((budget/s.price)*(s.atr*1.5)/budget)*100 : null;
+    if(riskPct!=null && riskPct>=15) out.push('Your position size is tight relative to this stock\'s normal daily movement — a normal down day could stop you out early.');
+  }
+  const parsed = parseResearch(s.research);
+  if(parsed && parsed.risk) out.push(`From your research: ${parsed.risk}`);
+  return out;
+}
+
+// Unfilled tranche price zones are now computed live at render time instead
+// of frozen the moment "Build Buy Plan" was tapped — so they track price
+// instead of going stale after a week of updates.
+function computeTrancheZone(s, tranche, index) {
+  if(index===0) {
+    const gp = computeGamePlan(s);
+    return gp.buyZone;
+  }
+  const step = s.atr ? s.atr : s.price*0.03;
+  const zonePrice = s.price - (step*1.5*index);
+  return `Around ${fmtP(zonePrice)}`;
+}
+
+// Days remaining (or overdue) on a plan, computed from the stock's actual
+// creation timestamp instead of a frozen "90 days" string set once and
+// never touched again.
+function computePlanExpiry(s) {
+  const created = s.id; // id is Date.now() at creation
+  if(!created || typeof created !== 'number') return {text:'90 days', overdue:false};
+  const daysElapsed = Math.floor((Date.now()-created)/(1000*60*60*24));
+  const daysLeft = 90-daysElapsed;
+  if(daysLeft<0) return {text:`Overdue by ${Math.abs(daysLeft)} day${Math.abs(daysLeft)===1?'':'s'} — reassess this thesis`, overdue:true};
+  if(daysLeft===0) return {text:'Expires today — reassess this thesis', overdue:true};
+  return {text:`${daysLeft} day${daysLeft===1?'':'s'}`, overdue:false};
+}
+
 function renderTabPlan(s) {
   if(!s.tranche || s.tranche.length===0) {
+    const setup0 = analyzeSetup(s);
+    const narrative0 = brokerRead(s, setup0, computeTrajectory(s));
     return `
       <div style="display:flex;flex-direction:column;gap:14px;">
         <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
           <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">What's happening</div>
-          <p style="color:${C.text};font-size:14px;line-height:1.7;margin:0;">${s.summary||'Analysis pending.'}</p>
+          <p style="color:${C.text};font-size:14px;line-height:1.7;margin:0;">${narrative0.read}</p>
         </div>
         <div style="background:${C.card};border-radius:16px;border:1px dashed ${C.borderLight};padding:28px 20px;text-align:center;">
           <div style="font-size:32px;margin-bottom:10px;">📋</div>
@@ -1054,7 +1167,7 @@ function renderTabPlan(s) {
           </div>
           ${isFilled?`<span style="background:${C.greenDim};color:${C.green};font-size:11px;font-weight:800;padding:3px 10px;border-radius:20px;">✓ Filled</span>`:isReady?`<span style="background:${C.tealDim};color:${C.teal};border:1px solid ${C.teal}44;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;">● In Zone</span>`:`<span style="color:${C.textMuted};font-size:11px;background:${C.cardHigh};padding:3px 10px;border-radius:20px;">Waiting</span>`}
         </div>
-        <div style="color:${C.teal};font-size:13px;font-weight:700;margin-bottom:4px;margin-left:20px;">${t.zone}</div>
+        <div style="color:${C.teal};font-size:13px;font-weight:700;margin-bottom:4px;margin-left:20px;">${computeTrancheZone(s,t,i)}</div>
         <div style="color:${C.textSub};font-size:12px;line-height:1.5;margin-left:20px;margin-bottom:10px;">${t.note}</div>
         ${!hasSold?`<div style="margin-left:20px;display:flex;align-items:center;gap:8px;">
           <div style="position:relative;flex:1;">
@@ -1070,18 +1183,51 @@ function renderTabPlan(s) {
       </div>`;
   }).join('');
 
-  const watchOuts = (s.watchOuts||[]).map(w=>`
+  const watchOuts = computeWatchOuts(s).map(w=>`
     <div style="display:flex;gap:12px;align-items:flex-start;margin-bottom:12px;">
       <span style="color:${C.yellow};font-size:16px;flex-shrink:0;line-height:1.4;">⚠</span>
       <span style="color:${C.textSub};font-size:13px;line-height:1.6;">${w}</span>
     </div>`).join('');
 
+  const setup = analyzeSetup(s);
+  const narrative = brokerRead(s, setup, computeTrajectory(s));
+  const exitSignal = checkExitSignal(s);
+  const suggestion = suggestHoldTypeLive(s);
+  const expiry = computePlanExpiry(s);
+
+  const exitCheckCard = exitSignal ? `
+    <div style="background:${C.card};border-radius:16px;border:1px solid ${exitSignal.color}44;padding:18px;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+        <span style="font-size:16px;">${exitSignal.triggered?(exitSignal.confirmed?'🔴':'🟡'):'🟢'}</span>
+        <span style="color:${exitSignal.color};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;">Exit Check</span>
+      </div>
+      <p style="color:${C.textSub};font-size:13px;line-height:1.6;margin:0;">${exitSignal.message}</p>
+    </div>` : '';
+
+  const whyTypeCard = suggestion ? `
+    <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
+      <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">Why "${s.type}"?</div>
+      ${suggestion.label===s.type ? `
+        <p style="color:${C.textSub};font-size:12px;line-height:1.6;margin:0 0 12px;">Current data still backs this up: ${suggestion.reason}</p>
+      ` : `
+        <div style="background:${C.yellow}14;border:1px solid ${C.yellow}44;border-radius:10px;padding:10px 12px;margin-bottom:12px;">
+          <div style="color:${C.yellow};font-size:11px;font-weight:800;margin-bottom:3px;">⚠ Drifted since you classified this</div>
+          <p style="color:${C.textSub};font-size:12px;line-height:1.6;margin:0;">You picked ${s.type}, but current data now suggests <b>${suggestion.label}</b>: ${suggestion.reason} Worth reassessing.</p>
+        </div>
+      `}
+      <div style="background:${C.cardHigh};border-radius:10px;padding:12px 14px;">
+        <div style="color:${C.teal};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px;">Plan of Attack</div>
+        <p style="color:${C.text};font-size:12px;line-height:1.6;margin:0;">${PLAN_OF_ATTACK[s.type]||PLAN_OF_ATTACK['Both']}</p>
+      </div>
+    </div>` : '';
+
   return `
     <div style="display:flex;flex-direction:column;gap:14px;">
       <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
         <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">What's happening</div>
-        <p style="color:${C.text};font-size:14px;line-height:1.7;margin:0;">${s.summary||'Analysis pending.'}</p>
+        <p style="color:${C.text};font-size:14px;line-height:1.7;margin:0;">${narrative.read}</p>
       </div>
+      ${whyTypeCard}
       <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
           <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;">Buy Plan</div>
@@ -1095,6 +1241,7 @@ function renderTabPlan(s) {
         </div>
         ${tranches}
       </div>
+      ${exitCheckCard}
       ${gp.profit&&gp.profit!=='—'?`
       <div style="background:${C.greenDim};border-radius:16px;border:1px solid ${C.green}33;padding:16px;display:flex;align-items:center;gap:14px;">
         <span style="font-size:26px;">🎯</span>
@@ -1115,9 +1262,9 @@ function renderTabPlan(s) {
         <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">Keep an Eye On</div>
         ${watchOuts}
       </div>`:''}
-      <div style="background:${C.card};border-radius:12px;border:1px solid ${C.border};padding:12px 16px;display:flex;align-items:center;gap:10px;">
-        <span style="font-size:16px;">⏱</span>
-        <span style="color:${C.textSub};font-size:13px;">Plan expires <span style="color:${C.yellow};font-weight:700;">${s.expiry||'90 days'}</span> if nothing triggers.</span>
+      <div style="background:${C.card};border-radius:12px;border:1px solid ${expiry.overdue?C.red+'44':C.border};padding:12px 16px;display:flex;align-items:center;gap:10px;">
+        <span style="font-size:16px;">${expiry.overdue?'⏰':'⏱'}</span>
+        <span style="color:${C.textSub};font-size:13px;">${expiry.overdue?expiry.text:`Plan expires in <span style="color:${C.yellow};font-weight:700;">${expiry.text}</span> if nothing triggers.`}</span>
       </div>
     </div>`;
 }
@@ -1649,6 +1796,19 @@ function renderTabAnalysis(s) {
       <div style="color:${C.textSub};font-size:12px;line-height:1.5;">${text}</div>
     </div>` : '';
 
+  const howToReadCard = `
+    <details style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:16px 18px;">
+      <summary style="color:${C.teal};font-size:12px;font-weight:800;cursor:pointer;list-style:none;">📖 How to read this page</summary>
+      <div style="margin-top:12px;color:${C.textSub};font-size:12px;line-height:1.7;">
+        A real analyst looks at these in a specific order, and so does this page, top to bottom:<br><br>
+        <b style="color:${C.text};">1. Trend</b> — is this even in a healthy uptrend? The gatekeeper question. Nothing else matters if this is wrong.<br>
+        <b style="color:${C.text};">2. Momentum (RSI, then MACD)</b> — RSI tells you the current state (hot, cold, healthy). MACD confirms it — it doesn't lead. Buying because MACD crossed, with nothing else lining up, is backwards.<br>
+        <b style="color:${C.text};">3. Volume</b> — did real buyers show up, or is this move happening on thin, unconvincing trading? This tells you whether to trust the signal.<br>
+        <b style="color:${C.text};">4. Risk (ATR)</b> — never decides whether to buy. Only decides how much to risk once everything above already said yes.<br>
+        <b style="color:${C.text};">5. Bottom Line</b> — all of it combined into one call.
+      </div>
+    </details>`;
+
   const narrativeBlock = `
     <div style="background:${C.card};border-radius:16px;border:2px solid ${narrative.color}44;padding:18px;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
@@ -1759,6 +1919,7 @@ function renderTabAnalysis(s) {
 
   return `
     <div style="display:flex;flex-direction:column;gap:14px;">
+      ${howToReadCard}
       ${narrativeBlock}
       ${trajBox}
       ${trendCard}
@@ -2170,6 +2331,24 @@ async function doSaveUpdate() {
 // ═══════════════════════════════════════════════════════════════════════════════
 // ADD STOCK FLOW
 // ═══════════════════════════════════════════════════════════════════════════════
+// Suggests Swing / Long Term / Both from what's already been typed into the
+// wizard — trend (price vs 50/200-day) and volatility (ATR as % of price).
+// A steady uptrend with small daily moves favors holding; real daily
+// movement on top of a trend supports doing both; no trend plus real
+// movement favors tactical swing trades. This is a suggestion, not a
+// verdict — the choice buttons below still let you override it.
+function suggestHoldType(vals) {
+  const price = parseFloat(vals.price), ma50 = parseFloat(vals.ma50), ma200 = parseFloat(vals.ma200), atr = parseFloat(vals.atr);
+  if(!price || !ma50 || !ma200 || !atr) return null;
+  const trendUp = price>ma50 && price>ma200;
+  const atrPct = (atr/price)*100;
+  const pctStr = atrPct.toFixed(1)+'%';
+  if(trendUp && atrPct<2.5) return {label:'Long Term', reason:`Steady uptrend, small daily moves (ATR ${pctStr}) — better suited to holding than day-to-day trading.`};
+  if(trendUp && atrPct>=2.5) return {label:'Both', reason:`Strong uptrend AND real daily movement (ATR ${pctStr}) — this can support holding long-term while trading the pullbacks, like you described with NVDA.`};
+  if(!trendUp && atrPct>=2.5) return {label:'Swing', reason:`No confirmed long-term uptrend yet, but real daily movement (ATR ${pctStr}) — better suited to tactical in-and-out trades.`};
+  return {label:'Both', reason:`No strong trend and modest daily movement — genuinely a toss-up from the numbers alone. Your call.`};
+}
+
 const ADD_STEPS = [
   {key:'ticker',  label:'Ticker symbol',          hint:'e.g. NVDA',          inputmode:'text', upper:true},
   {key:'price',   label:'Current price',          hint:'e.g. 194.32',        inputmode:'decimal', prefix:'$'},
@@ -2182,7 +2361,7 @@ const ADD_STEPS = [
   {key:'atr',     label:'ATR — typical daily move?', hint:'e.g. 6.20',      inputmode:'decimal', prefix:'$', note:'Find ATR on ThinkorSwim. Shows how much it typically moves per day.'},
   {key:'hi52',    label:'52-week high',           hint:'e.g. 236.54',        inputmode:'decimal', prefix:'$'},
   {key:'lo52',    label:'52-week low',            hint:'e.g. 158.39',        inputmode:'decimal', prefix:'$'},
-  {key:'holdtype',label:'How long will you hold?',hint:'',                   type:'choice', choices:['Swing — days to weeks','Long Term — months to years']},
+  {key:'holdtype',label:'How long will you hold?',hint:'',                   type:'choice', choices:['Swing — days to weeks','Long Term — months to years','Both — hold long-term, trade the swings']},
 ];
 
 function showAddFlow() {
@@ -2197,6 +2376,7 @@ function renderAddStep() {
   const progress = ADD_STEPS.map((_,i)=>`<div style="flex:1;height:3px;border-radius:2px;background:${i<=addStep?C.text:C.border};transition:background 0.2s;"></div>`).join('');
 
   if(cur.type==='choice') {
+    const suggestion = cur.key==='holdtype' ? suggestHoldType(addVals) : null;
     showSheet(`
       <div style="width:36px;height:4px;border-radius:2px;background:${C.border};margin:0 auto 20px;"></div>
       <div style="display:flex;gap:3px;margin-bottom:24px;">${progress}</div>
@@ -2204,7 +2384,11 @@ function renderAddStep() {
         <span style="color:${C.textMuted};font-size:11px;">${addStep+1} of ${ADD_STEPS.length}</span>
         <button onclick="closeAllOverlays()" style="background:none;border:none;color:${C.textMuted};font-size:22px;cursor:pointer;">✕</button>
       </div>
-      <div style="color:${C.text};font-size:22px;font-weight:900;letter-spacing:-0.01em;margin-bottom:20px;">${cur.label}</div>
+      <div style="color:${C.text};font-size:22px;font-weight:900;letter-spacing:-0.01em;margin-bottom:${suggestion?'12px':'20px'};">${cur.label}</div>
+      ${suggestion?`<div style="background:${C.tealDim};border:1px solid ${C.teal}44;border-radius:10px;padding:12px 14px;margin-bottom:20px;">
+        <div style="color:${C.teal};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">📊 Based on your numbers: ${suggestion.label}</div>
+        <div style="color:${C.textSub};font-size:12px;line-height:1.5;">${suggestion.reason}</div>
+      </div>`:''}
       <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:28px;">
         ${cur.choices.map(ch=>`<button onclick="addChoiceSelect('${ch}')" style="padding:16px 18px;border-radius:14px;font-size:15px;font-weight:600;border:1px solid ${addVals[cur.key]===ch?C.text:C.border};background:${addVals[cur.key]===ch?C.cardHigh:'none'};color:${addVals[cur.key]===ch?C.text:C.textSub};cursor:pointer;text-align:left;">${ch}</button>`).join('')}
       </div>
@@ -2276,7 +2460,7 @@ async function doAddStock() {
     price:   parseFloat(addVals.price)||0,
     change:  0, pct: 0,
     verdict: 'Watch', score: 70,
-    type:    addVals.holdtype?.includes('Swing')?'Swing':'Long Term',
+    type:    addVals.holdtype?.includes('Both')?'Both':addVals.holdtype?.includes('Swing')?'Swing':'Long Term',
     buyZone: 'Run full analysis',
     invested: 0,
     hi52:    parseFloat(addVals.hi52)||null,
@@ -2345,7 +2529,7 @@ function showImportFlow(stockId) {
     </div>`);
 }
 
-function parseCSVDate(str) {
+function parseCSVDateRaw(str) {
   if(!str) return null;
   str = str.trim();
   // Handle M/D/YY and M/D/YYYY
@@ -2353,16 +2537,18 @@ function parseCSVDate(str) {
   if(parts.length === 3) {
     let [m, d, y] = parts;
     if(y.length === 2) y = '20' + y;
-    const date = new Date(parseInt(y), parseInt(m)-1, parseInt(d));
-    return date.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+    return new Date(parseInt(y), parseInt(m)-1, parseInt(d));
   }
   // Handle YYYY-MM-DD
   const iso = str.split('-');
   if(iso.length === 3) {
-    const date = new Date(parseInt(iso[0]), parseInt(iso[1])-1, parseInt(iso[2]));
-    return date.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+    return new Date(parseInt(iso[0]), parseInt(iso[1])-1, parseInt(iso[2]));
   }
-  return str;
+  return null;
+}
+function parseCSVDate(str) {
+  const date = parseCSVDateRaw(str);
+  return date ? date.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : str;
 }
 
 function parseCSV(text) {
@@ -2410,9 +2596,11 @@ function parseCSV(text) {
 
     const dateStr = idx.date !== undefined ? cols[idx.date]?.trim() : null;
     if(!dateStr) continue;
+    const rawDate = parseCSVDateRaw(dateStr);
 
     rows.push({
       date:       parseCSVDate(dateStr),
+      _ts:        rawDate ? rawDate.getTime() : 0,
       price:      pf('close'),
       open:       pf('open'),
       high:       pf('high'),
@@ -2428,8 +2616,13 @@ function parseCSV(text) {
     });
   }
 
-  // Sort oldest to newest
-  return rows.reverse();
+  // Sort oldest to newest using the actual parsed date — never assume the
+  // file's row order. A CSV that's already oldest-first would get silently
+  // flipped backwards by a blind reverse(), corrupting "most recent row"
+  // into "oldest row" everywhere downstream.
+  rows.sort((a,b) => a._ts - b._ts);
+  rows.forEach(r => delete r._ts);
+  return rows;
 }
 
 let pendingImportRows = null;
@@ -2534,6 +2727,15 @@ async function doImportCSV(stockId) {
     ma20:       r2(row.ma20),
   }));
 
+  // ThinkorSwim's export gives raw daily volume, not a pre-computed average —
+  // derive a trailing 20-day average from the volume history itself, so
+  // volume-confirmation checks (oppScore, Volume Check, At-a-Glance) actually
+  // have something to compare against instead of silently going blank.
+  for(let i=0;i<cleanRows.length;i++){
+    const windowVals = cleanRows.slice(Math.max(0,i-19), i+1).map(r=>r.vol).filter(v=>v!=null);
+    cleanRows[i].avgvol = windowVals.length ? Math.round(windowVals.reduce((a,b)=>a+b,0)/windowVals.length) : null;
+  }
+
   // Use the most recent row to update current stock values
   const latest = cleanRows[cleanRows.length - 1];
   const prevRow = cleanRows.length>1 ? cleanRows[cleanRows.length - 2] : null;
@@ -2546,6 +2748,7 @@ async function doImportCSV(stockId) {
     pct:        prevPrice ? ((latest.price - prevPrice)/prevPrice)*100 : s.pct,
     rsi:        latest.rsi        ?? s.rsi,
     vol:        latest.vol        ?? s.vol,
+    avgvol:     latest.avgvol     ?? s.avgvol,
     ma20:       latest.ma20       ?? s.ma20,
     ma50:       latest.ma50       ?? s.ma50,
     ma200:      latest.ma200      ?? s.ma200,
