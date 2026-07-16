@@ -810,18 +810,10 @@ function renderStockCard(s, rank) {
   const initials = (s.ticker||'??').slice(0,2);
   const avatarHue = Array.from(s.ticker||'XX').reduce((a,c)=>a+c.charCodeAt(0),0)%360;
 
-  const setupScore = computeSetupScore(s);
-  const scoreColor = setupScore.color;
+  const conviction = computeConviction(s);
   const tc = typeBadgeColors(s.type);
   const needsReclass = needsReclassify(s);
-  const r=19,circ=2*Math.PI*r,dash=(setupScore.score/100)*circ;
-  const scoreRing = `<div style="position:relative;width:46px;height:46px;flex-shrink:0;">
-    <svg width="46" height="46" style="transform:rotate(-90deg);">
-      <circle cx="23" cy="23" r="${r}" fill="none" stroke="${C.border}" stroke-width="5"/>
-      <circle cx="23" cy="23" r="${r}" fill="none" stroke="${scoreColor}" stroke-width="5" stroke-dasharray="${dash} ${circ}" stroke-linecap="round"/>
-    </svg>
-    <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;"><span style="color:${scoreColor};font-size:13px;font-weight:900;">${setupScore.score}</span></div>
-  </div>`;
+  const scoreRing = renderConvictionBadge(conviction.level, 'sm');
 
   return `
     <div class="fade-in" style="background:${C.card};border-radius:20px;border:1px solid ${C.border};padding:16px;cursor:pointer;position:relative;overflow:hidden;" onclick="openDetail('${s.id}')">
@@ -985,9 +977,7 @@ function renderDetail(s) {
   const totalInv = filled.reduce((a,t)=>a+(t.entryPrice||0)*(t.shares||0),0);
   const totalVal = filled.reduce((a,t)=>a+s.price*(t.shares||0),0);
   const gl = totalVal-totalInv;
-  const setupScore = computeSetupScore(s);
-  const scoreColor = setupScore.color;
-  const r=23,circ=2*Math.PI*r,dash=(setupScore.score/100)*circ;
+  const conviction = computeConviction(s);
 
   const typeSuggestion = suggestHoldTypeLive(s);
   const typeDrift = typeSuggestion && typeSuggestion.confident && typeSuggestion.label !== s.type;
@@ -1003,13 +993,7 @@ function renderDetail(s) {
           <div style="color:${C.text};font-size:26px;font-weight:900;letter-spacing:-0.02em;">${s.ticker}</div>
           <div style="color:${C.textSub};font-size:13px;">${s.name}</div>
         </div>
-        <div style="position:relative;width:52px;height:52px;flex-shrink:0;">
-          <svg width="52" height="52" style="transform:rotate(-90deg);">
-            <circle cx="26" cy="26" r="${r}" fill="none" stroke="${C.border}" stroke-width="5"/>
-            <circle cx="26" cy="26" r="${r}" fill="none" stroke="${scoreColor}" stroke-width="5" stroke-dasharray="${dash} ${circ}" stroke-linecap="round"/>
-          </svg>
-          <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;"><span style="color:${scoreColor};font-size:13px;font-weight:900;">${setupScore.score}</span></div>
-        </div>
+        ${renderConvictionBadge(conviction.level, 'md')}
       </div>
       <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:12px;">
         <span style="color:${C.text};font-size:34px;font-weight:900;letter-spacing:-0.03em;">${fmtP(s.price)}</span>
@@ -1567,7 +1551,7 @@ function buildAIPrompt(s) {
   const setup = analyzeSetup(s);
   const traj = computeTrajectory(s);
   const narrative = brokerRead(s, setup, traj);
-  const setupScore = computeSetupScore(s);
+  const conviction = computeConviction(s);
   const levels = computeKeyLevels(s);
   const gp = computeGamePlan(s);
   const glance = computeAtAGlance(s);
@@ -1579,7 +1563,7 @@ function buildAIPrompt(s) {
   lines.push('');
   lines.push(`CURRENT DATA (from StockIQ):`);
   lines.push(`- Price: ${fmtP(s.price)} (${(s.pct||0)>=0?'+':''}${(s.pct||0).toFixed(2)}% since last update)`);
-  lines.push(`- Setup Score: ${setupScore.score}/100 (${setupScore.label})`);
+  lines.push(`- Conviction: ${conviction.level} — ${conviction.reason}`);
   lines.push(`- Verdict: ${narrative.verdict} — ${narrative.verdictSub}`);
   lines.push(`- Trend: ${glance.trend.label} (${glance.trend.sub})`);
   lines.push(`- Momentum: ${glance.momentum.label} (${glance.momentum.sub})`);
@@ -2435,6 +2419,338 @@ function mentorBack() {
   if(mentorStep>0) { mentorStep--; renderMentorStep(); }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// SECTION 4 — THE ANALYSIS ENGINE
+// ═══════════════════════════════════════════════════════════════════════════════
+// Redesigns the Analysis tab to read like an analyst's reasoning, not a
+// dashboard: Executive Summary -> Build the Case -> Contradictory Evidence ->
+// Missing Evidence -> Invalidation -> Strategy-Specific Action -> Evidence
+// Table -> "60 Seconds" -> "Watching Next". Every category reuses the SAME
+// functions the rest of the app already trusts (computeMarketState,
+// analyzeSetup, computeVolumeOnUpDays, computeKeyLevels, computeWatchOuts) —
+// this tab is a narrative layer on top of existing math, not a second engine.
+//
+// The numeric 0-100 "Setup Score" is retired everywhere in the app (detail
+// header, watchlist cards, Overview, the AI research prompt) in favor of
+// Conviction: High / Moderate / Low / Insufficient Evidence, always paired
+// with a plain-English reason. computeSetupScore() itself is left in place,
+// unused, rather than deleted, since nothing else in the codebase depends on
+// deleting it and removing a function is a needless place to introduce risk.
+
+const CONVICTION_META = {
+  'High':                 {color:C.green,  bg:C.greenDim,  dots:'●●●'},
+  'Moderate':             {color:C.yellow, bg:C.yellowDim, dots:'●●○'},
+  'Low':                  {color:C.red,    bg:C.redDim,    dots:'●○○'},
+  'Insufficient Evidence':{color:C.textMuted, bg:C.card,   dots:'○○○'},
+};
+
+// Compact badge that replaces every numeric score ring in the app.
+// Deliberately NOT a partial-fill ring — a ring implies a spectrum/percentage,
+// which is exactly the fake precision Conviction is meant to remove.
+function renderConvictionBadge(level, size) {
+  const m = CONVICTION_META[level] || CONVICTION_META['Insufficient Evidence'];
+  const dims = size==='sm' ? {w:46,h:46,fs:8,fs2:9} : size==='md' ? {w:52,h:52,fs:8,fs2:9} : {w:66,h:66,fs:9,fs2:11};
+  const shortLabel = level==='Insufficient Evidence' ? 'N/A' : level.toUpperCase();
+  return `<div style="width:${dims.w}px;height:${dims.h}px;border-radius:14px;background:${m.bg};border:1.5px solid ${m.color}88;display:flex;flex-direction:column;align-items:center;justify-content:center;flex-shrink:0;">
+    <span style="color:${m.color};font-size:${dims.fs}px;letter-spacing:1px;margin-bottom:2px;">${m.dots}</span>
+    <span style="color:${m.color};font-size:${dims.fs2}px;font-weight:900;text-align:center;line-height:1.1;">${shortLabel}</span>
+  </div>`;
+}
+
+// ── EVIDENCE CATEGORIES ─────────────────────────────────────────────────────
+// Each returns {verdict, teach} — verdict is Strong/Moderate/Weak (or
+// Healthy/Elevated for Volatility, since ATR isn't a strength spectrum),
+// teach is interpretation-first prose with the indicator named once,
+// parenthetically, never leading with the acronym.
+
+function computeTrendEvidence(s) {
+  const slope = computeMASlope(s);
+  const above200 = s.ma200!=null && s.price>s.ma200;
+  const stackBullish = s.ma50!=null && s.ma200!=null && s.ma50>s.ma200;
+  const rising50 = slope ? slope.rising50 : null;
+  let verdict = 'Weak';
+  if(above200 && stackBullish && rising50!==false) verdict = 'Strong';
+  else if(above200 || stackBullish) verdict = 'Moderate';
+  let teach;
+  if(above200) {
+    teach = `Price remains above its 200-day average${stackBullish?', while the 50-day continues to act as intermediate support':''}. `;
+    teach += rising50===true ? 'Long-term buyers remain in control.' : rising50===false ? 'That said, the 50-day has started to flatten or roll over — the trend is holding, but losing some of its push.' : 'Not enough saved history yet to confirm whether the 50-day is still rising.';
+  } else {
+    teach = 'Price has slipped below its 200-day moving average — the long-term trend is no longer confirmed, and this should be treated as a trend under repair, not a discount.';
+  }
+  return {verdict, teach};
+}
+
+function computeMomentumEvidence(s) {
+  const rz = rsiZone(s.rsi);
+  if(!rz) return {verdict:'Weak', teach:'RSI hasn\'t been logged yet, so momentum can\'t be read.'};
+  const macdKnown = s.macdLine!=null && s.signalLine!=null;
+  const macdBull = macdKnown && s.macdLine>s.signalLine;
+  let verdict = (rz.zone==='healthy') ? 'Strong' : (rz.zone==='hot') ? 'Weak' : 'Moderate';
+  let teach = rz.zone==='hot' ? `Momentum is stretched further than most healthy trends go (RSI ${s.rsi}) — chasing here is risky.` :
+    rz.zone==='panic' ? `Momentum has been beaten down into oversold territory (RSI ${s.rsi}), which is often where reversals begin.` :
+    rz.zone==='healthy' ? `Momentum sits in a healthy, sustainable range (RSI ${s.rsi}) — not stretched, not broken down.` :
+    `Momentum is neither strong nor weak right now (RSI ${s.rsi}) — no real edge here on its own.`;
+  if(macdKnown) teach += macdBull ? ' Momentum confirmation agrees, with a bullish MACD reading.' : ' MACD hasn\'t confirmed with a bullish crossover yet.';
+  return {verdict, teach};
+}
+
+function computeVolumeEvidence(s) {
+  const setup = analyzeSetup(s);
+  const upDayVol = computeVolumeOnUpDays(s);
+  let verdict, teach;
+  if(upDayVol) {
+    verdict = upDayVol.ratio>1.15 ? 'Strong' : upDayVol.ratio<0.85 ? 'Weak' : 'Moderate';
+    teach = upDayVol.text;
+  } else {
+    verdict = setup.volConfirmed ? 'Moderate' : 'Moderate';
+    teach = setup.volConfirmed ? 'Volume is running above average today, which adds some real conviction to the move (not yet enough saved history to compare up-day vs. down-day volume).' : 'Volume is unremarkable right now — no strong conviction behind the current move either way.';
+  }
+  return {verdict, teach};
+}
+
+function computeVolatilityEvidence(s) {
+  if(!s.atr || !s.price) return {verdict:'Unknown', teach:'ATR hasn\'t been logged yet, so typical daily movement isn\'t known.'};
+  const atrPct = (s.atr/s.price)*100;
+  const verdict = atrPct>6 ? 'Elevated' : 'Healthy';
+  const teach = verdict==='Healthy'
+    ? `Today's movement is within normal daily volatility (about ${atrPct.toFixed(1)}% of price per day, or ATR) and doesn't indicate unusual market behavior.`
+    : `This stock is moving more than usual right now (about ${atrPct.toFixed(1)}% of price per day, or ATR) — size any position accordingly.`;
+  return {verdict, teach};
+}
+
+function mapStateToStrength(state) {
+  if(state==='Healthy Uptrend') return 'Strong';
+  if(['Normal Pullback','Consolidation','Recovery Attempt'].includes(state)) return 'Moderate';
+  if(['Trend Weakening','Confirmed Breakdown'].includes(state)) return 'Weak';
+  return 'Unknown';
+}
+
+// ── CONVICTION ──────────────────────────────────────────────────────────────
+// Explicit ordered gates, not a blend — same discipline as Evidence Strength
+// in Section 2. Insufficient Evidence and outright contradiction both
+// override an otherwise-decent-looking picture.
+function computeConviction(s) {
+  const tier = computeMentorHistoryTier(s);
+  const ms = computeMarketState(s);
+  if(ms.state==='Insufficient Data' || tier==='limited') {
+    return {level:'Insufficient Evidence', reason:'StockIQ doesn\'t have enough fresh history on this stock yet to responsibly back a conclusion — current-condition data only.', ms};
+  }
+  const trendEv = computeTrendEvidence(s);
+  const momentumEv = computeMomentumEvidence(s);
+  const volumeEv = computeVolumeEvidence(s);
+  const structureStrength = mapStateToStrength(ms.state);
+
+  const culprits = [];
+  if(trendEv.verdict==='Weak') culprits.push('the long-term trend');
+  if(structureStrength==='Weak') culprits.push('current structure');
+  if(volumeEv.verdict==='Weak') culprits.push('volume behavior');
+  if(culprits.length) {
+    return {level:'Low', reason:`${culprits.join(' and ')} materially contradict${culprits.length===1?'s':''} the bullish case right now.`, ms, trendEv, momentumEv, volumeEv, structureStrength};
+  }
+
+  const strongCore = trendEv.verdict==='Strong' && structureStrength==='Strong';
+  const broadSupport = momentumEv.verdict!=='Weak' && volumeEv.verdict!=='Weak';
+  if(strongCore && broadSupport) {
+    return {level:'High', reason:'Trend and structure are both healthy, and momentum and volume aren\'t working against the case.', ms, trendEv, momentumEv, volumeEv, structureStrength};
+  }
+  return {level:'Moderate', reason:'The trend is intact, but the current setup is incomplete or mixed — not a clean case yet, not a broken one either.', ms, trendEv, momentumEv, volumeEv, structureStrength};
+}
+
+// ── CONTRADICTORY & MISSING EVIDENCE ────────────────────────────────────────
+// Contradictory Evidence = computeWatchOuts(), reused directly — it already
+// does exactly this job, no reason to build a second version.
+// Missing Evidence turns the market state engine's unmet/non-evaluable
+// conditions into forward-looking "I want to see X" statements.
+const MISSING_EVIDENCE_PHRASING = {
+  ma50Slope: 'I want to see the 50-day average clearly turn up before trusting this as a real trend, not just a bounce.',
+  ma200Slope: 'I want to see the 200-day average confirm direction before calling the long-term trend fully healthy.',
+  accumDistribution: 'I want to see buyers return with stronger-than-average volume before treating this as real accumulation.',
+  structureProxy: 'I want to see the next pullback hold above the prior low before trusting the structure here.',
+  atrTrend: 'I want to see volatility settle down before treating this as a calm, tradeable range.',
+  reclaim20ema: 'I want to see price reclaim the 20-day average before this looks like real strength again.',
+  defendSupport: 'I want to see buyers actually defend the 50-day average, not just approach it.',
+  generic: 'I want more saved history here before drawing a firm conclusion.',
+};
+function missingEvidenceFor(label) {
+  const l = label.toLowerCase();
+  if(l.includes('50 sma') && l.includes('within')) return MISSING_EVIDENCE_PHRASING.defendSupport;
+  if(l.includes('50 sma') && (l.includes('rising')||l.includes('declining')||l.includes('flat'))) return MISSING_EVIDENCE_PHRASING.ma50Slope;
+  if(l.includes('200 sma') && (l.includes('rising')||l.includes('flat'))) return MISSING_EVIDENCE_PHRASING.ma200Slope;
+  if(l.includes('volume') && (l.includes('down-day')||l.includes('up day')||l.includes('up-day'))) return MISSING_EVIDENCE_PHRASING.accumDistribution;
+  if(l.includes('structure proxy')||l.includes('lower-low')||l.includes('higher-low')) return MISSING_EVIDENCE_PHRASING.structureProxy;
+  if(l.includes('atr')) return MISSING_EVIDENCE_PHRASING.atrTrend;
+  if(l.includes('20 ema')) return MISSING_EVIDENCE_PHRASING.reclaim20ema;
+  return MISSING_EVIDENCE_PHRASING.generic;
+}
+function computeMissingEvidence(ms) {
+  const unmet = ms.conditions.filter(c=>c.evaluable && !c.met);
+  const needsHistory = ms.conditions.filter(c=>!c.evaluable);
+  const items = [];
+  unmet.forEach(c=>items.push(missingEvidenceFor(c.label)));
+  needsHistory.forEach(c=>items.push(missingEvidenceFor(c.label)));
+  const deduped = [...new Set(items)];
+  return deduped.length ? deduped.slice(0,4) : ['Nothing glaring is missing right now — the existing evidence is reasonably complete.'];
+}
+
+// ── INVALIDATION ─────────────────────────────────────────────────────────────
+// Varies by strategy on purpose: Swing/Position get a real technical trigger.
+// Long-Term Hold gets a thesis-review trigger, never an automatic-sale line —
+// technical deterioration alone isn't a reason to sell a long-term thesis,
+// per the same caution suggestHoldTypeLive already applies elsewhere.
+function computeInvalidation(s, type) {
+  const levels = computeKeyLevels(s);
+  const supportPrice = levels.support ? levels.support.price : (s.ma50||null);
+  if(!supportPrice) return {isThesisReview:false, text:'Not enough data yet to define an invalidation level.', price:null};
+  if(type==='Long-Term Hold') {
+    return {isThesisReview:true, price:supportPrice,
+      text:`A close below ${fmtP(supportPrice)} on above-average volume wouldn't automatically mean sell. For a long-term hold, it means it's time to review whether the original thesis for owning this stock still holds — not to react to the price alone.`};
+  }
+  return {isThesisReview:false, price:supportPrice,
+    text:`This analysis becomes incorrect if price closes below ${fmtP(supportPrice)} on above-average volume (1.2× the 20-day average or higher).`};
+}
+
+// ── BUY READINESS GATE ───────────────────────────────────────────────────────
+// "BUY NOW" is never shown unless every one of these is true. Otherwise the
+// action reads "Ready for Entry Review" — close, not confirmed. Two honest
+// gaps, called out rather than faked:
+//  - Position sizing uses the same rough ATR-vs-budget heuristic
+//    computeWatchOuts already uses, not the real risk-first sizing engine
+//    (still on the backlog — Section 2 future scope, item 3).
+//  - Earnings risk has no data field anywhere in this app yet. Until
+//    s.earningsDate exists on a stock, this check fails safe — it never
+//    silently assumes "clear". That means BUY NOW won't fire for ANY stock
+//    today, which is the correct, honest consequence of requiring an
+//    earnings check the app can't yet perform, not a bug.
+function isEarningsSoon(dateStr) {
+  const d = new Date(dateStr);
+  if(isNaN(d)) return null;
+  const diffDays = Math.round((d - new Date())/(1000*60*60*24));
+  return diffDays>=-1 && diffDays<=10;
+}
+function computeBuyReadiness(s, type) {
+  const gp = computeGamePlan(s);
+  const checks = [];
+
+  const hasEntryZone = !gp.entryPending && gp.buyZone && gp.buyZone!=='Waiting on more data';
+  checks.push({label:'Entry zone defined', pass:!!hasEntryZone});
+
+  const inval = computeInvalidation(s, type);
+  checks.push({label:'Invalidation level defined', pass: !inval.isThesisReview && inval.price!=null});
+
+  let rewardRiskOk = false;
+  if(gp.stopPrice!=null && gp.entryRef!=null) {
+    const riskDist = gp.entryRef - gp.stopPrice;
+    let targetPrice = null;
+    if(s.hi52 && gp.entryRef<s.hi52) targetPrice = s.hi52;
+    else if(s.atr) targetPrice = gp.entryRef + s.atr*3;
+    if(targetPrice!=null && riskDist>0) rewardRiskOk = ((targetPrice-gp.entryRef)/riskDist) >= 1.5;
+  }
+  checks.push({label:'Reward outweighs risk (1.5:1 or better)', pass:rewardRiskOk});
+
+  let sizingPass = false, sizingUnknown = true;
+  if(s.atr && s.price) {
+    const budget = s.invested||150;
+    const riskPct = budget>0 ? ((budget/s.price)*(s.atr*1.5)/budget)*100 : null;
+    if(riskPct!=null) { sizingUnknown=false; sizingPass = riskPct<15; }
+  }
+  checks.push({label:'Position sizing reasonable for normal daily movement', pass:sizingPass, unknown:sizingUnknown});
+
+  const earningsKnown = s.earningsDate!=null && String(s.earningsDate).trim()!=='';
+  checks.push({label:'No earnings event imminent', pass: earningsKnown ? !isEarningsSoon(s.earningsDate) : false, unknown:!earningsKnown});
+
+  const ms = computeMarketState(s);
+  let strategyOk = false;
+  if(type==='Swing Trade') strategyOk = ['Healthy Uptrend','Normal Pullback'].includes(ms.state) && ms.evidence!=='Weak';
+  else if(type==='Position Trade') strategyOk = ['Healthy Uptrend','Normal Pullback'].includes(ms.state);
+  else if(type==='Long-Term Hold') strategyOk = !['Confirmed Breakdown','Trend Weakening'].includes(ms.state);
+  checks.push({label:'Strategy-specific structure check', pass:strategyOk});
+
+  return {ready: checks.every(c=>c.pass), checks};
+}
+
+// ── STRATEGY-SPECIFIC ACTION ────────────────────────────────────────────────
+// Never auto-BUYs on Healthy Uptrend — always routes through the readiness
+// gate above. Same stock, same state, three different actions depending on
+// Position Type, per the strategy rules established in Section 1.
+function computeAction(s) {
+  const type = s.type;
+  const ms = computeMarketState(s);
+  const holding = (s.tranche||[]).some(t=>t.status==='filled');
+  const readiness = computeBuyReadiness(s, type);
+  const exitSignal = holding ? checkExitSignal(s) : null;
+  const entryLabel = () => readiness.ready ? 'Ready for Entry Review' : 'WAIT';
+
+  const TABLE = {
+    'Swing Trade': {
+      'Healthy Uptrend': holding?'HOLD':entryLabel(), 'Normal Pullback': holding?'HOLD':'WAIT',
+      'Consolidation': holding?'HOLD':'WAIT',
+      'Trend Weakening': holding?((exitSignal&&exitSignal.confirmed)?'EXIT':'REDUCE RISK'):'AVOID',
+      'Confirmed Breakdown': holding?'EXIT':'AVOID', 'Recovery Attempt': holding?'HOLD':'WAIT',
+      'Insufficient Data': 'INSUFFICIENT DATA',
+    },
+    'Position Trade': {
+      'Healthy Uptrend': holding?'HOLD':entryLabel(), 'Normal Pullback': 'HOLD',
+      'Consolidation': holding?'HOLD':'WAIT',
+      'Trend Weakening': holding?'REDUCE RISK — DON\'T ADD':'AVOID',
+      'Confirmed Breakdown': holding?'EXIT OR REDUCE':'AVOID', 'Recovery Attempt': 'WAIT',
+      'Insufficient Data': 'INSUFFICIENT DATA',
+    },
+    'Long-Term Hold': {
+      'Healthy Uptrend': 'CONTINUE HOLDING', 'Normal Pullback': 'CONTINUE HOLDING',
+      'Consolidation': 'CONTINUE HOLDING', 'Trend Weakening': 'REVIEW THESIS',
+      'Confirmed Breakdown': 'REVIEW THESIS', 'Recovery Attempt': 'CONTINUE HOLDING',
+      'Insufficient Data': 'INSUFFICIENT DATA',
+    },
+  };
+  const action = (TABLE[type]||TABLE['Swing Trade'])[ms.state] || 'INSUFFICIENT DATA';
+  return {action, readiness, holding, ms};
+}
+
+// ── EXECUTIVE SUMMARY, 60 SECONDS, WATCHING NEXT ────────────────────────────
+function computeExecutiveSummary(s, conviction) {
+  const stateText = {
+    'Healthy Uptrend': `${s.ticker} remains in a healthy long-term uptrend`,
+    'Normal Pullback': `${s.ticker} remains in a healthy long-term uptrend but is currently experiencing a normal pullback toward intermediate support`,
+    'Consolidation': `${s.ticker} is consolidating, with neither buyers nor sellers currently in clear control`,
+    'Trend Weakening': `${s.ticker}'s trend is showing real signs of weakening`,
+    'Confirmed Breakdown': `${s.ticker}'s long-term trend has broken down`,
+    'Recovery Attempt': `${s.ticker} is attempting to recover from a recent breakdown, though that recovery isn't confirmed yet`,
+    'Insufficient Data': `StockIQ doesn't have enough data on ${s.ticker} yet to characterize its trend`,
+  }[conviction.ms.state] || `${s.ticker}'s current condition is unclear from the data available`;
+
+  let volLine = '';
+  if(conviction.volumeEv) {
+    volLine = conviction.volumeEv.verdict==='Weak' ? ' Selling volume is outpacing buying volume, which is worth taking seriously.'
+      : conviction.volumeEv.verdict==='Strong' ? ' Institutions do not appear to be distributing shares aggressively, suggesting patience rather than panic.' : '';
+  }
+  return `${stateText}.${volLine} Overall conviction here is ${conviction.level.toLowerCase()}: ${conviction.reason}`;
+}
+
+function compute60Second(conviction) {
+  if(!conviction.trendEv) return 'Ignore everything else — StockIQ doesn\'t have enough history yet to point you at one thing with confidence. Focus on logging more daily updates.';
+  const strengthRank = v => v==='Weak'?0:v==='Moderate'?1:2;
+  const ranked = [
+    {name:'the 200-day trend line', rank: strengthRank(conviction.trendEv.verdict)},
+    {name:'the current market state on your Setup and Structure chart', rank: strengthRank(conviction.structureStrength)},
+    {name:'volume behavior', rank: strengthRank(conviction.volumeEv.verdict)},
+    {name:'momentum (RSI and MACD)', rank: strengthRank(conviction.momentumEv.verdict)},
+  ].sort((a,b)=>a.rank-b.rank);
+  return `Ignore the rest for now. Watch ${ranked[0].name} — that's the single most important thing driving this stock's read right now.`;
+}
+
+// ── EVIDENCE TABLE ROW RENDERER ──────────────────────────────────────────────
+const EVIDENCE_VERDICT_COLOR = {Strong:C.green, Healthy:C.green, Moderate:C.yellow, Elevated:C.orange, Weak:C.red, Unknown:C.textMuted};
+function renderEvidenceTableRow(category, verdict, why) {
+  const color = EVIDENCE_VERDICT_COLOR[verdict] || C.textMuted;
+  return `
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;padding:11px 0;border-bottom:1px solid ${C.border};gap:10px;">
+      <div style="min-width:70px;"><span style="color:${C.text};font-size:12.5px;font-weight:700;">${category}</span></div>
+      <div style="min-width:64px;"><span style="color:${color};font-size:11.5px;font-weight:800;">${verdict}</span></div>
+      <div style="flex:1;"><span style="color:${C.textSub};font-size:11.5px;line-height:1.5;">${why}</span></div>
+    </div>`;
+}
+
 // Price line chart from your snapshot history, with 50/200-day SMA overlays
 // when that data is present. Plain SVG — no chart library, matches app style.
 function renderPriceChart(s) {
@@ -2550,30 +2866,22 @@ function renderTabOverview(s) {
   const setup = analyzeSetup(s);
   const traj = computeTrajectory(s);
   const narrative = brokerRead(s, setup, traj);
-  const setupScore = computeSetupScore(s);
+  const conviction = computeConviction(s);
   const glance = computeAtAGlance(s);
   const levels = computeKeyLevels(s);
   const gp = computeGamePlan(s);
-  const r=27,circ=2*Math.PI*r,dash=(setupScore.score/100)*circ;
 
   const takeCard = `
     <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
       <div style="display:flex;gap:16px;align-items:center;">
-        <div style="position:relative;width:66px;height:66px;flex-shrink:0;">
-          <svg width="66" height="66" style="transform:rotate(-90deg);">
-            <circle cx="33" cy="33" r="${r}" fill="none" stroke="${C.border}" stroke-width="6"/>
-            <circle cx="33" cy="33" r="${r}" fill="none" stroke="${setupScore.color}" stroke-width="6" stroke-dasharray="${dash} ${circ}" stroke-linecap="round"/>
-          </svg>
-          <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;">
-            <span style="color:${setupScore.color};font-size:17px;font-weight:900;">${setupScore.score}</span>
-          </div>
-        </div>
+        ${renderConvictionBadge(conviction.level, 'lg')}
         <div style="flex:1;">
           <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:3px;">Today's Take</div>
           <div style="color:${narrative.color};font-size:17px;font-weight:900;margin-bottom:3px;">${narrative.verdict}</div>
-          <div style="color:${C.textSub};font-size:12px;">${setupScore.label} · ${narrative.verdictSub}</div>
+          <div style="color:${C.textSub};font-size:12px;">${conviction.level} Conviction · ${narrative.verdictSub}</div>
         </div>
       </div>
+      <div style="color:${C.textMuted};font-size:11px;line-height:1.5;margin-top:10px;padding-top:10px;border-top:1px solid ${C.border};">${conviction.reason}</div>
     </div>`;
 
   const glanceCell = (label, cell) => `
@@ -2669,120 +2977,117 @@ function renderTabOverview(s) {
 }
 
 function renderTabAnalysis(s) {
-  const setup = analyzeSetup(s);
-  const traj = computeTrajectory(s);
-  const narrative = brokerRead(s, setup, traj);
-  const dz = distanceZone(s.price, s.ma50);
-  const rz = rsiZone(s.rsi);
-  const volRatio = s.vol&&s.avgvol ? s.vol/s.avgvol : null;
-  const slope = computeMASlope(s);
-  const upDayVol = computeVolumeOnUpDays(s);
+  const type = s.type;
+  const conviction = computeConviction(s);
+  const ms = conviction.ms;
   const parsedResearch = parseResearch(s.research);
 
-  const howToReadCard = `
-    <details style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:16px 18px;">
-      <summary style="color:${C.teal};font-size:12px;font-weight:800;cursor:pointer;list-style:none;">📖 How to read this page</summary>
-      <div style="margin-top:12px;color:${C.textSub};font-size:12px;line-height:1.7;">
-        A real analyst looks at these in a specific order, and so does this page, top to bottom:<br><br>
-        <b style="color:${C.text};">1. Trend</b> — is this even in a healthy uptrend? The gatekeeper question. Nothing else matters if this is wrong.<br>
-        <b style="color:${C.text};">2. Momentum (RSI, then MACD)</b> — RSI tells you the current state (hot, cold, healthy). MACD confirms it — it doesn't lead. Buying because MACD crossed, with nothing else lining up, is backwards.<br>
-        <b style="color:${C.text};">3. Volume</b> — did real buyers show up, or is this move happening on thin, unconvincing trading? This tells you whether to trust the signal.<br>
-        <b style="color:${C.text};">4. Risk (ATR)</b> — never decides whether to buy. Only decides how much to risk once everything above already said yes.<br>
-        <b style="color:${C.text};">5. Bottom Line</b> — all of it combined into one call.
-      </div>
-    </details>`;
+  const convictionColor = (CONVICTION_META[conviction.level]||CONVICTION_META['Insufficient Evidence']).color;
 
-  const narrativeBlock = `
-    <div style="background:${C.card};border-radius:16px;border:2px solid ${narrative.color}44;padding:18px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
-        <span style="background:${narrative.color}22;color:${narrative.color};border:1.5px solid ${narrative.color};border-radius:10px;padding:8px 16px;font-size:16px;font-weight:900;letter-spacing:0.04em;">${narrative.verdict}</span>
-        <span style="color:${C.textMuted};font-size:11px;font-weight:600;text-align:right;">${narrative.verdictSub}</span>
+  if(ms.state==='Insufficient Data' || conviction.level==='Insufficient Evidence') {
+    return `
+    <div style="display:flex;flex-direction:column;gap:14px;">
+      <div style="background:${C.card};border-radius:16px;border:2px solid ${C.textMuted}44;padding:18px;">
+        <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">Executive Summary</div>
+        <p style="color:${C.text};font-size:13.5px;line-height:1.7;margin:0 0 14px;">${computeExecutiveSummary(s, conviction)}</p>
+        <div style="color:${C.textSub};font-size:12px;line-height:1.6;">${(ms.missing||[]).length ? `Still missing: ${ms.missing.join(', ')}.` : ''} Keep logging daily updates, or import a CSV, to unlock the full Analysis Engine.</div>
       </div>
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
-        <span style="font-size:22px;">${narrative.icon}</span>
-        <span style="color:${narrative.color};font-size:15px;font-weight:800;">${narrative.headline}</span>
+    </div>`;
+  }
+
+  const trendEv = conviction.trendEv, momentumEv = conviction.momentumEv, volumeEv = conviction.volumeEv, volatilityEv = computeVolatilityEvidence(s);
+  const action = computeAction(s);
+  const invalidation = computeInvalidation(s, type);
+  const contradictory = computeWatchOuts(s);
+  const missing = computeMissingEvidence(ms);
+
+  const execSummaryCard = `
+    <div style="background:${C.card};border-radius:16px;border:2px solid ${convictionColor}44;padding:18px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <span style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;">Executive Summary</span>
+        <span style="background:${convictionColor}22;color:${convictionColor};border-radius:20px;padding:4px 12px;font-size:10px;font-weight:800;">${conviction.level.toUpperCase()} CONVICTION</span>
       </div>
-      <div style="color:${C.text};font-size:13px;line-height:1.7;margin-bottom:${narrative.waitingOn.length?'14px':'0'};">${narrative.read}</div>
-      ${narrative.waitingOn.length?`
-      <div style="background:${C.cardHigh};border-radius:10px;padding:12px 14px;margin-bottom:14px;">
-        <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:8px;">What This Stock Is Waiting For</div>
-        ${narrative.waitingOn.map(w=>`<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:6px;"><span style="color:${C.textMuted};font-size:12px;">○</span><span style="color:${C.textSub};font-size:12px;line-height:1.5;">${w}</span></div>`).join('')}
+      <p style="color:${C.text};font-size:13.5px;line-height:1.75;margin:0;">${computeExecutiveSummary(s, conviction)}</p>
+    </div>`;
+
+  const evidenceRow = (label, ev) => `
+    <div style="border-bottom:1px solid ${C.border};padding:12px 0;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">
+        <span style="color:${C.text};font-size:13px;font-weight:800;">${label}</span>
+        <span style="color:${EVIDENCE_VERDICT_COLOR[ev.verdict]||C.textMuted};font-size:11.5px;font-weight:800;">${ev.verdict}</span>
+      </div>
+      <div style="color:${C.textSub};font-size:12.5px;line-height:1.65;">${ev.teach}</div>
+    </div>`;
+
+  const buildCaseCard = `
+    <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
+      <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:4px;">Build the Case</div>
+      <div style="color:${C.textMuted};font-size:11px;line-height:1.5;margin-bottom:10px;">Why the evidence points where it does — not just what the numbers say.</div>
+      ${evidenceRow('Trend', trendEv)}
+      ${evidenceRow('Momentum', momentumEv)}
+      ${evidenceRow('Volume', volumeEv)}
+      ${evidenceRow('Volatility', volatilityEv)}
+    </div>`;
+
+  const contradictoryCard = `
+    <div style="background:${C.card};border-radius:16px;border:1px solid ${C.orange}44;padding:18px;">
+      <div style="color:${C.orange};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">⚖️ What Concerns Me</div>
+      ${contradictory.length ? contradictory.map(w=>`<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:8px;"><span style="color:${C.orange};font-size:12px;">•</span><span style="color:${C.textSub};font-size:12.5px;line-height:1.6;">${w}</span></div>`).join('') : `<div style="color:${C.textSub};font-size:12.5px;line-height:1.6;">Nothing significant is working against this case right now — that itself is worth noting, not just assuming.</div>`}
+    </div>`;
+
+  const missingCard = `
+    <div style="background:${C.card};border-radius:16px;border:1px solid ${C.blue}44;padding:18px;">
+      <div style="color:${C.blue};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">🔎 Missing Evidence</div>
+      ${missing.map(m=>`<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:8px;"><span style="color:${C.blue};font-size:12px;">•</span><span style="color:${C.textSub};font-size:12.5px;line-height:1.6;">${m}</span></div>`).join('')}
+    </div>`;
+
+  const invalidationCard = `
+    <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
+      <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">🛑 ${invalidation.isThesisReview?'Thesis Review Trigger':'Invalidation'}</div>
+      <div style="color:${C.text};font-size:12.5px;line-height:1.7;">${invalidation.text}</div>
+      <div style="color:${C.textMuted};font-size:10.5px;line-height:1.5;margin-top:8px;">${invalidation.isThesisReview?'This tells you when to reassess, not when to sell — a long-term thesis doesn\'t break on price alone.':'This tells you what would prove this analysis wrong, not just where a stop order sits.'}</div>
+    </div>`;
+
+  const readinessRows = action.readiness.checks.map(c=>`
+    <div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:6px;"><span style="color:${c.pass?C.green:C.textMuted};font-size:12px;">${c.pass?'✓':c.unknown?'○':'✗'}</span><span style="color:${C.textSub};font-size:11.5px;line-height:1.5;">${c.label}${c.unknown?' (not tracked yet)':''}</span></div>`).join('');
+
+  const actionColor = action.action==='Ready for Entry Review'?C.green : /HOLD|CONTINUE/.test(action.action)?C.teal : /WAIT/.test(action.action)?C.yellow : /EXIT|AVOID/.test(action.action)?C.red : /REDUCE|REVIEW/.test(action.action)?C.orange : C.textMuted;
+  const actionCard = `
+    <div style="background:${C.card};border-radius:16px;border:2px solid ${actionColor}44;padding:18px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <span style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;">Action — ${type||'—'}</span>
+      </div>
+      <div style="color:${actionColor};font-size:19px;font-weight:900;letter-spacing:0.02em;margin-bottom:12px;">${action.action}</div>
+      ${action.action==='WAIT'||action.action==='Ready for Entry Review'?`
+      <div style="border-top:1px solid ${C.border};padding-top:10px;">
+        <div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;">Entry Readiness Checklist</div>
+        ${readinessRows}
       </div>`:''}
-      <button onclick="showTab('plan','${s.id}')" style="width:100%;padding:14px;background:${C.green};color:#000;border:none;border-radius:14px;font-size:14px;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">See My Game Plan <span>→</span></button>
+      <button onclick="showTab('plan','${s.id}')" style="width:100%;margin-top:14px;padding:14px;background:${C.cardHigh};color:${C.text};border:1px solid ${C.border};border-radius:14px;font-size:13px;font-weight:800;cursor:pointer;">See My Game Plan →</button>
     </div>`;
 
-  const trajBox = `
+  const evidenceTableCard = `
     <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
-      <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">History & Trend</div>
-      <p style="color:${C.text};font-size:13px;line-height:1.7;margin:0;">${traj.text}</p>
+      <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">Evidence Table</div>
+      ${renderEvidenceTableRow('Trend', trendEv.verdict, trendEv.teach.split('.')[0]+'.')}
+      ${renderEvidenceTableRow('Momentum', momentumEv.verdict, momentumEv.teach.split('.')[0]+'.')}
+      ${renderEvidenceTableRow('Volume', volumeEv.verdict, volumeEv.teach.split('.')[0]+'.')}
+      ${renderEvidenceTableRow('Volatility', volatilityEv.verdict, volatilityEv.teach.split('.')[0]+'.')}
+      ${renderEvidenceTableRow('Structure', mapStateToStrength(ms.state), ms.state)}
     </div>`;
 
-  // Shared row renderer for the grouped category cards below
-  const row = (icon, label, detail, statusLabel, statusColor) => `
-    <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 0;border-bottom:1px solid ${C.border};gap:10px;">
-      <div style="display:flex;align-items:flex-start;gap:12px;flex:1;min-width:0;">
-        <span style="font-size:17px;flex-shrink:0;margin-top:1px;">${icon}</span>
-        <div style="min-width:0;">
-          <div style="color:${C.text};font-size:13.5px;font-weight:700;margin-bottom:5px;">${label}</div>
-          <div style="color:${C.textSub};font-size:12.5px;line-height:1.5;">${detail}</div>
-        </div>
-      </div>
-      <span style="color:${statusColor};font-size:11px;font-weight:800;flex-shrink:0;white-space:nowrap;">${statusLabel}</span>
+  const sixtySecondCard = `
+    <div style="background:${C.purpleDim};border:1px solid ${C.purple}44;border-radius:16px;padding:18px;">
+      <div style="color:${C.purple};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">⏱️ If I Had Only 60 Seconds...</div>
+      <div style="color:${C.text};font-size:13px;line-height:1.7;">${compute60Second(conviction)}</div>
     </div>`;
 
-  const categoryCard = (title, summary, rows) => `
+  const watchingNextCard = `
     <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
-      <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;">${title}</div>
-      <div style="color:${C.textSub};font-size:12px;line-height:1.6;margin-bottom:6px;">${summary}</div>
-      <div>${rows.join('')}</div>
+      <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">👀 What I'm Watching Next</div>
+      <div style="color:${C.text};font-size:12.5px;line-height:1.7;">${missing[0]}</div>
     </div>`;
 
-  // ── TREND ──────────────────────────────────────────────────────────────
-  const trendRows = [];
-  if(s.ma50&&s.ma200&&s.price) {
-    const above50 = s.price>s.ma50, above200 = s.price>s.ma200;
-    trendRows.push(row('📈','Price vs. Moving Averages', `Price is ${above50?'above':'below'} the 50-day and ${above200?'above':'below'} the 200-day.`,
-      (above50&&above200)?'Bullish':(!above50&&!above200)?'Bearish':'Neutral', (above50&&above200)?C.green:(!above50&&!above200)?C.red:C.yellow));
-    trendRows.push(row('📊','Trend Strength (50 vs 200)', `50-day is ${s.ma50>s.ma200?'above':'below'} 200-day.`, s.ma50>s.ma200?'Bullish':'Bearish', s.ma50>s.ma200?C.green:C.red));
-  }
-  if(s.ma20&&s.price) {
-    trendRows.push(row('📉','20-Day Avg vs Price', `Price is ${s.price>s.ma20?'above':'below'} the 20-day average.`, s.price>s.ma20?'Bullish':'Neutral', s.price>s.ma20?C.green:C.yellow));
-  }
-  trendRows.push(row('📐','Slope of 50 & 200 MA', slope ? `50-day is ${slope.rising50?'rising':'falling'}.${slope.rising200!=null?` 200-day is ${slope.rising200?'rising':'falling'}.`:''}` : 'Needs more CSV-imported history to compute.',
-    slope ? (slope.rising50?'Bullish':'Bearish') : 'No Data', slope ? (slope.rising50?C.green:C.red) : C.textMuted));
-  const trendCard = trendRows.length ? categoryCard('Trend', traj.enough ? `${s.ticker} ${setup.trendUp?'is in a confirmed uptrend':setup.trendBroken?'has broken its long-term trend':'has a mixed trend picture'}. We prefer entries on pullbacks, not chases.` : 'Add price and moving average data to see the trend picture.', trendRows) : '';
-
-  // ── MOMENTUM ───────────────────────────────────────────────────────────
-  const momRows = [];
-  if(s.rsi!=null && rz) momRows.push(row('🌀','RSI (14)', `${s.rsi} — ${rz.label}.`, rz.zone==='healthy'||rz.zone==='panic'?'Healthy':rz.zone==='strong'?'Strong':rz.zone==='hot'?'Overbought':'Neutral', rz.color));
-  if(s.macdLine!=null&&s.signalLine!=null) {
-    const bull = s.macdLine>s.signalLine;
-    momRows.push(row('📊','MACD', `Line is ${bull?'above':'below'} signal.`, bull?'Bullish':'Bearish', bull?C.green:C.red));
-  }
-  const momCard = momRows.length ? categoryCard('Momentum Check', 'Momentum tells you whether buyers or sellers currently have control — and whether that\'s changing.', momRows) : '';
-
-  // ── VOLUME ─────────────────────────────────────────────────────────────
-  const volRows = [];
-  if(volRatio!=null) volRows.push(row('📶','Today\'s Volume', `${fmtVol(s.vol)} vs ${fmtVol(s.avgvol)} avg (${volRatio.toFixed(1)}x)`, volRatio>1.2?'Above Avg':volRatio<0.8?'Below Avg':'Normal', volRatio>1.2?C.green:volRatio<0.8?C.red:C.yellow));
-  volRows.push(row('🔍','Volume On Up Days', upDayVol ? upDayVol.text : 'Needs at least 4 daily updates to compare up-day vs down-day volume.', upDayVol?upDayVol.label:'No Data', upDayVol?upDayVol.color:C.textMuted));
-  const volCard = volRows.length ? categoryCard('Volume Check', 'We want to see buyers stepping in with real volume, not just price drifting on quiet trading.', volRows) : '';
-
-  // ── RISK & VOLATILITY ──────────────────────────────────────────────────
-  const riskRows = [];
-  if(s.atr && s.price) {
-    const pctMove = ((s.atr/s.price)*100).toFixed(1);
-    riskRows.push(row('⚡','ATR (14)', `${fmtP(s.atr)} (${pctMove}% average daily move)`, s.atr/s.price<0.02?'Low':s.atr/s.price<0.04?'Normal':'High', s.atr/s.price<0.02?C.green:s.atr/s.price<0.04?C.yellow:C.orange));
-    const budget = s.invested || 150;
-    const approxShares = s.price ? budget/s.price : 0;
-    const dollarRisk = approxShares*(s.atr*1.5);
-    const riskPct = budget>0 ? (dollarRisk/budget)*100 : null;
-    if(riskPct!=null) riskRows.push(row('🎯','Position Size Fit', `${fmtP(budget)} position risks about ${fmtP(dollarRisk)} (${riskPct.toFixed(0)}%) on a 1.5× ATR stop.`, riskPct<15?'Good':'Tight', riskPct<15?C.green:C.yellow));
-  }
-  const riskCard = riskRows.length ? categoryCard('Risk & Volatility', s.atr ? `${s.ticker} moves about ${fmtP(s.atr)} a day on average. That's normal — just size your position right.` : 'Add an ATR reading to see risk sizing.', riskRows) : '';
-
-  // One consolidated research card instead of scattering the same pasted
-  // content across three separate cards — fixes the "everything repeats
-  // itself" complaint. Catalysts stay Overview-only; this covers the rest.
   const researchCard = parsedResearch ? `
     <div style="background:${C.card};border-radius:16px;border:1px solid ${C.purple}33;padding:18px;">
       <div style="color:${C.purple};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">🔮 From Your Research</div>
@@ -2794,13 +3099,15 @@ function renderTabAnalysis(s) {
 
   return `
     <div style="display:flex;flex-direction:column;gap:14px;">
-      ${howToReadCard}
-      ${narrativeBlock}
-      ${trajBox}
-      ${trendCard}
-      ${momCard}
-      ${volCard}
-      ${riskCard}
+      ${execSummaryCard}
+      ${buildCaseCard}
+      ${contradictoryCard}
+      ${missingCard}
+      ${invalidationCard}
+      ${actionCard}
+      ${evidenceTableCard}
+      ${sixtySecondCard}
+      ${watchingNextCard}
       ${researchCard}
     </div>`;
 }
