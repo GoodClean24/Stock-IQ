@@ -214,9 +214,33 @@ let addVals  = {};
 let updateStep = 0;
 let updateVals = {};
 let updateStockId = null;
+let mentorMode = null;      // 'setup' | 'analysis'
+let mentorStockId = null;
+let mentorStep = 0;
+let mentorTabOrder = [];    // computed per-stock plan for 'analysis' mode
+let mentorHistoryTier = 'full';   // 'full' | 'limited' — how much saved history the stock has
+let mentorShowLimitedIntro = false; // whether step 0 is the Limited History intro screen
 let searchQuery = '';
 let sortMode = 'score'; // 'score' | 'price' | 'pct' | 'name'
 let portfolioHidden = false;
+let reclassifyDismissed = new Set(); // session-only — "Review Later" on the Both-strategy banner
+
+// Old type values migrate automatically; 'Both' is deliberately left alone —
+// it's not converted, it's flagged for the user to actually choose.
+function migrateStockType(s) {
+  if(s.type==='Swing') return 'Swing Trade';
+  if(s.type==='Long Term') return 'Long-Term Hold';
+  return s.type;
+}
+function needsReclassify(s) { return s.type==='Both'; }
+
+function typeBadgeColors(type) {
+  if(type==='Swing Trade') return {bg:C.blueDim, fg:C.blue};
+  if(type==='Position Trade') return {bg:C.tealDim, fg:C.teal};
+  if(type==='Long-Term Hold') return {bg:C.purpleDim, fg:C.purple};
+  if(type==='Both') return {bg:C.orangeDim, fg:C.orange};
+  return {bg:C.card, fg:C.textMuted};
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // HELPERS
@@ -492,7 +516,7 @@ auth.onAuthStateChanged(user => {
     if(unsubStocks) unsubStocks();
     unsubStocks = stocksRef(user.uid).onSnapshot(snap => {
       stocks = [];
-      snap.forEach(doc => stocks.push(doc.data()));
+      snap.forEach(doc => { const d = doc.data(); d.type = migrateStockType(d); stocks.push(d); });
       showSaveStatus('ready');
       renderHome();
     }, err => {
@@ -545,7 +569,7 @@ function closeAllOverlays() {
 // ═══════════════════════════════════════════════════════════════════════════════
 // HOME RENDER
 // ═══════════════════════════════════════════════════════════════════════════════
-const TAGS = ['All','★ Favorites','Buy Zone','Watch','Wait','Pass','Swing','Long Term'];
+const TAGS = ['All','★ Favorites','Buy Zone','Watch','Wait','Pass','Swing Trade','Position Trade','Long-Term Hold'];
 const TAG_COLORS = {'Buy Zone':C.green,'Watch':C.yellow,'Wait':C.orange,'Pass':C.red};
 
 // Generic "not built yet" notice — used for nav items / tiles that are visual
@@ -729,8 +753,9 @@ function renderStockList() {
   const filtered = ranked.filter(s => {
     if(activeTag==='All') return true;
     if(activeTag==='★ Favorites') return s.starred;
-    if(activeTag==='Swing') return s.type==='Swing'||s.type==='Both';
-    if(activeTag==='Long Term') return s.type==='Long Term'||s.type==='Both';
+    if(activeTag==='Swing Trade') return s.type==='Swing Trade';
+    if(activeTag==='Position Trade') return s.type==='Position Trade';
+    if(activeTag==='Long-Term Hold') return s.type==='Long-Term Hold';
     return s.verdict===activeTag;
   });
 
@@ -787,6 +812,8 @@ function renderStockCard(s, rank) {
 
   const setupScore = computeSetupScore(s);
   const scoreColor = setupScore.color;
+  const tc = typeBadgeColors(s.type);
+  const needsReclass = needsReclassify(s);
   const r=19,circ=2*Math.PI*r,dash=(setupScore.score/100)*circ;
   const scoreRing = `<div style="position:relative;width:46px;height:46px;flex-shrink:0;">
     <svg width="46" height="46" style="transform:rotate(-90deg);">
@@ -810,13 +837,18 @@ function renderStockCard(s, rank) {
               <button onclick="event.stopPropagation();toggleStar('${s.id}')" style="background:none;border:none;cursor:pointer;font-size:14px;color:${s.starred?C.yellow:C.textMuted};padding:0;">${s.starred?'★':'☆'}</button>
             </div>
             <div style="color:${C.textMuted};font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px;">${s.name}</div>
-            <span style="display:inline-block;margin-top:3px;background:${s.type==='Swing'?C.blueDim:s.type==='Both'?C.tealDim:C.purpleDim};color:${s.type==='Swing'?C.blue:s.type==='Both'?C.teal:C.purple};font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;">${s.type||'—'}</span>
+            <span style="display:inline-block;margin-top:3px;background:${tc.bg};color:${tc.fg};font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;">${needsReclass?'Needs Strategy':s.type||'—'}</span>
           </div>
         </div>
         <button onclick="event.stopPropagation();showRowMenu('${s.id}')" style="background:none;border:none;color:${C.textMuted};cursor:pointer;padding:4px;flex-shrink:0;">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
         </button>
       </div>
+      ${needsReclass?`
+      <div onclick="event.stopPropagation();showReclassifyFlow('${s.id}')" style="background:${C.orangeDim};border:1px solid ${C.orange}44;border-radius:10px;padding:8px 12px;margin-bottom:14px;display:flex;align-items:center;gap:8px;cursor:pointer;">
+        <span style="font-size:13px;">⚠️</span>
+        <span style="color:${C.orange};font-size:11px;font-weight:700;">Strategy needs updating — tap to choose</span>
+      </div>`:''}
 
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
         <div style="flex:1;min-width:0;">
@@ -957,6 +989,11 @@ function renderDetail(s) {
   const scoreColor = setupScore.color;
   const r=23,circ=2*Math.PI*r,dash=(setupScore.score/100)*circ;
 
+  const typeSuggestion = suggestHoldTypeLive(s);
+  const typeDrift = typeSuggestion && typeSuggestion.confident && typeSuggestion.label !== s.type;
+  const tc = typeBadgeColors(s.type);
+  const needsReclass = needsReclassify(s);
+
   document.getElementById('detail-content').innerHTML = `
     <!-- Header -->
     <div style="background:${C.card};border-bottom:1px solid ${C.border};padding:16px 20px;position:sticky;top:0;z-index:10;">
@@ -979,17 +1016,33 @@ function renderDetail(s) {
         <span style="color:${(s.pct||0)>=0?C.green:C.red};font-size:14px;font-weight:700;">${(s.pct||0)>=0?'▲':'▼'} ${Math.abs(s.pct||0).toFixed(2)}%</span>
         ${totalInv>0?`<span style="margin-left:auto;color:${gl>=0?C.green:C.red};font-size:14px;font-weight:800;">${gl>=0?'+':''}${gl.toFixed(2)} P&L</span>`:''}
       </div>
-      <div style="display:flex;justify-content:space-between;align-items:center;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:${typeDrift?'6px':'0'};">
         <div style="display:flex;gap:8px;">
           <span style="background:${cfg.dim};color:${cfg.color};border:1px solid ${cfg.color}44;border-radius:20px;padding:5px 14px;font-size:12px;font-weight:800;letter-spacing:0.05em;">${cfg.label}</span>
-          <span style="background:${s.type==='Swing'?C.blueDim:s.type==='Both'?C.tealDim:C.purpleDim};color:${s.type==='Swing'?C.blue:s.type==='Both'?C.teal:C.purple};border-radius:20px;padding:5px 14px;font-size:12px;font-weight:700;">${s.type||'—'}</span>
+          <span style="background:${tc.bg};color:${tc.fg};border-radius:20px;padding:5px 14px;font-size:12px;font-weight:700;">${needsReclass?'Needs Strategy':s.type||'—'}</span>
         </div>
         <div style="display:flex;gap:8px;">
+          <button onclick="openMentor('${s.id}')" style="background:${C.cardHigh};color:${C.purple};border:1px solid ${C.purple}44;border-radius:20px;padding:7px 14px;font-size:12px;font-weight:800;cursor:pointer;">🎓 Mentor</button>
           <button onclick="showImportFlow('${s.id}')" style="background:${C.cardHigh};color:${C.teal};border:1px solid ${C.teal}44;border-radius:20px;padding:7px 14px;font-size:12px;font-weight:800;cursor:pointer;">📂 Import</button>
           <button onclick="showDailyUpdate('${s.id}')" style="background:${C.teal};color:#000;border:none;border-radius:20px;padding:7px 16px;font-size:12px;font-weight:800;cursor:pointer;">↻ Update</button>
         </div>
       </div>
+      ${typeDrift ? `<div style="margin-top:6px;color:${C.yellow};font-size:11px;">📊 Data currently suggests <b>${typeSuggestion.label}</b> — see Game Plan for why.</div>` : ''}
     </div>
+    ${needsReclass && !reclassifyDismissed.has(String(s.id)) ? `
+    <div style="background:${C.orangeDim};border-bottom:1px solid ${C.orange}44;padding:14px 20px;">
+      <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:12px;">
+        <span style="font-size:18px;flex-shrink:0;">⚠️</span>
+        <div>
+          <div style="color:${C.orange};font-size:13px;font-weight:800;margin-bottom:4px;">Strategy needs updating</div>
+          <div style="color:${C.textSub};font-size:12px;line-height:1.6;">This stock was previously labeled "Both." Choose Swing Trade, Position Trade, or Long-Term Hold so StockIQ can apply the correct entry, risk, and exit rules.</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button onclick="showReclassifyFlow('${s.id}')" style="flex:1;padding:10px;border-radius:10px;border:none;background:${C.orange};color:#000;font-size:12px;font-weight:800;cursor:pointer;">Choose Strategy</button>
+        <button onclick="dismissReclassifyBanner('${s.id}')" style="flex:1;padding:10px;border-radius:10px;border:1px solid ${C.border};background:none;color:${C.textSub};font-size:12px;font-weight:700;cursor:pointer;">Review Later</button>
+      </div>
+    </div>` : ''}
     <!-- Tabs -->
     <div style="display:flex;background:${C.card};border-bottom:1px solid ${C.border};overflow-x:auto;">
       <button id="tab-btn-overview" onclick="showTab('overview','${s.id}')" style="flex:1;padding:14px 0;background:none;border:none;cursor:pointer;font-size:13px;font-weight:700;color:${C.text};border-bottom:2px solid ${C.text};white-space:nowrap;">Overview</button>
@@ -1041,24 +1094,78 @@ function checkExitSignal(s) {
 }
 
 // Live version of the wizard's suggestHoldType — reads the stock's current
-// numbers instead of the one-time answers typed in at add-time, so it stays
-// accurate as price/ATR/trend actually change.
+// numbers instead of the one-time answers typed in at add-time. Deliberately
+// cautious: never confidently suggests Long-Term Hold from technicals alone
+// (that needs business/valuation research this app can't do), and requires
+// a real defined setup — not just "ATR is big" — before suggesting Swing.
 function suggestHoldTypeLive(s) {
   if(!s.price || !s.ma50 || !s.ma200 || !s.atr) return null;
-  const trendUp = s.price>s.ma50 && s.price>s.ma200;
+  const setup = analyzeSetup(s);
+  const { trendUp, dz, trendBroken } = setup;
   const atrPct = (s.atr/s.price)*100;
-  const pctStr = atrPct.toFixed(1)+'%';
-  if(trendUp && atrPct<2.5) return {label:'Long Term', reason:`Steady uptrend, small daily moves (ATR ${pctStr}) — better suited to holding than day-to-day trading.`};
-  if(trendUp && atrPct>=2.5) return {label:'Both', reason:`Strong uptrend AND real daily movement (ATR ${pctStr}) — supports holding long-term while trading the pullbacks.`};
-  if(!trendUp && atrPct>=2.5) return {label:'Swing', reason:`No confirmed long-term uptrend, but real daily movement (ATR ${pctStr}) — better suited to tactical in-and-out trades.`};
-  return {label:'Both', reason:`No strong trend and modest daily movement — genuinely a toss-up from the numbers alone.`};
+  const slope = computeMASlope(s);
+  const ma50Rising = slope ? slope.rising50 : null;
+  const gp = computeGamePlan(s);
+  const hasDefinedSetup = gp.stopPrice!=null && gp.profit && gp.profit!=='—';
+  const notSeverelyExtended = dz && dz.zone!=='wait' && dz.zone!=='broken';
+  const liquidityOk = !s.avgvol || s.avgvol>=300000;
+
+  const positionCandidate = trendUp && notSeverelyExtended && ma50Rising!==false;
+  const swingCandidate = hasDefinedSetup && atrPct>=2 && !trendBroken && liquidityOk;
+  const looksLongTermTechnically = trendUp && atrPct<2 && notSeverelyExtended;
+
+  if(looksLongTermTechnically) {
+    return {label:null, confident:false, longTermCandidate:true,
+      reason:`Technicals support a long-term uptrend, but business quality and valuation research are still required before classifying this as a Long-Term Hold.`};
+  }
+  if(positionCandidate) {
+    return {label:'Position Trade', confident:true,
+      reason:`Price is above its 200-day average${ma50Rising?' and the 50-day is rising':''}, and the intermediate trend looks healthy without being severely extended.`};
+  }
+  if(swingCandidate) {
+    return {label:'Swing Trade', confident:true,
+      reason:`There's a defined technical setup here — a real stop and target — with enough daily movement (ATR ${atrPct.toFixed(1)}%) for a shorter-term trade.`};
+  }
+  return {label:null, confident:false,
+    reason:`Nothing here clearly supports one strategy over another right now — no defined setup, and the trend isn't confirmed either way.`};
 }
 
 const PLAN_OF_ATTACK = {
-  'Long Term': 'Hold the core position. Add on real pullbacks to support. Ignore short-term noise — you\'re playing the multi-month trend, not the daily wiggle.',
-  'Swing':     'Enter near support/pullback zone, exit near resistance or your profit target. Once you\'re out, you\'re out — this isn\'t a buy-and-forget position.',
-  'Both':      'Treat this as two positions in one stock: keep a core tranche untouched for the long-term trend, and trade a second tranche around your entry/exit levels for the swings.',
+  'Swing Trade':    'Days to several weeks. Enter near support after confirmation, exit near resistance or your profit target. Use a tight ATR-based stop — exit if the setup is invalidated, even if the 200-day is still fine. This is not a buy-and-hold position.',
+  'Position Trade': 'Several weeks to months. Ride the intermediate trend using the 50-day for context. Routine pullbacks are normal — don\'t exit just because price briefly loses the 20-day. Reduce or exit if the intermediate trend structure actually breaks.',
+  'Long-Term Hold': 'Years, based on the business, not the chart. Don\'t sell because of an RSI or MACD signal, and don\'t use a daily ATR trailing stop here. A sustained 200-day breakdown means "review the thesis," not "sell automatically" — a real sale needs fundamental deterioration or a major structural breakdown.',
 };
+
+// Rule config per strategy — data foundation only for now. Not yet wired into
+// scoring, market-state classification, or stop calculations (that's a later
+// phase); this just establishes what each strategy is supposed to mean.
+const STRATEGY_RULES = {
+  'Swing Trade': {
+    holdingPeriod: 'Days to several weeks',
+    useATRStop: true,
+    use20EMA: true,
+    use50SMA: true,
+    use200SMAAsExit: false,
+    allowTechnicalAutoExit: true,
+  },
+  'Position Trade': {
+    holdingPeriod: 'Several weeks to several months',
+    useATRStop: false,
+    use20EMA: 'warning',
+    use50SMA: 'primary trend support',
+    use200SMAAsExit: 'major warning',
+    allowTechnicalAutoExit: true,
+  },
+  'Long-Term Hold': {
+    holdingPeriod: 'Years',
+    useATRStop: false,
+    use20EMA: false,
+    use50SMA: 'entry and add context',
+    use200SMAAsExit: 'thesis review only',
+    allowTechnicalAutoExit: false,
+  },
+};
+
 
 // Real, live risk flags instead of a frozen placeholder — pulls from
 // whatever the current data actually shows could go wrong right now.
@@ -1111,6 +1218,21 @@ function renderTabPlan(s) {
   if(!s.tranche || s.tranche.length===0) {
     const setup0 = analyzeSetup(s);
     const narrative0 = brokerRead(s, setup0, computeTrajectory(s));
+    if(needsReclassify(s)) {
+      return `
+        <div style="display:flex;flex-direction:column;gap:14px;">
+          <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
+            <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">What's happening</div>
+            <p style="color:${C.text};font-size:14px;line-height:1.7;margin:0;">${narrative0.read}</p>
+          </div>
+          <div style="background:${C.orangeDim};border-radius:16px;border:1px solid ${C.orange}44;padding:28px 20px;text-align:center;">
+            <div style="font-size:32px;margin-bottom:10px;">⚠️</div>
+            <div style="color:${C.orange};font-size:15px;font-weight:800;margin-bottom:6px;">Strategy needs updating</div>
+            <div style="color:${C.textSub};font-size:13px;line-height:1.6;margin-bottom:18px;">This stock was previously labeled "Both." Choose Swing Trade, Position Trade, or Long-Term Hold so StockIQ can build the right game plan.</div>
+            <button onclick="showReclassifyFlow('${s.id}')" style="width:100%;padding:14px;background:${C.orange};color:#000;border:none;border-radius:14px;font-size:14px;font-weight:800;cursor:pointer;">Choose Strategy</button>
+          </div>
+        </div>`;
+    }
     return `
       <div style="display:flex;flex-direction:column;gap:14px;">
         <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
@@ -1121,7 +1243,7 @@ function renderTabPlan(s) {
           <div style="font-size:32px;margin-bottom:10px;">📋</div>
           <div style="color:${C.text};font-size:15px;font-weight:800;margin-bottom:6px;">No buy plan yet</div>
           <div style="color:${C.textSub};font-size:13px;line-height:1.6;margin-bottom:18px;">This stock has no entry tranches set up, so there's nothing to show here. Build a plan to define how you'll scale in.</div>
-          <button onclick="showBuildPlanFlow('${s.id}')" style="width:100%;padding:14px;background:${C.text};color:${C.bg};border:none;border-radius:14px;font-size:14px;font-weight:800;cursor:pointer;">+ Build Buy Plan</button>
+          <button onclick="doBuildPlan('${s.id}',2)" style="width:100%;padding:14px;background:${C.text};color:${C.bg};border:none;border-radius:14px;font-size:14px;font-weight:800;cursor:pointer;">+ Build Buy Plan</button>
         </div>
       </div>`;
   }
@@ -1204,22 +1326,24 @@ function renderTabPlan(s) {
       <p style="color:${C.textSub};font-size:13px;line-height:1.6;margin:0;">${exitSignal.message}</p>
     </div>` : '';
 
-  const whyTypeCard = suggestion ? `
+  const whyTypeCard = needsReclassify(s) ? '' : (suggestion ? `
     <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
       <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">Why "${s.type}"?</div>
-      ${suggestion.label===s.type ? `
+      ${suggestion.confident && suggestion.label===s.type ? `
         <p style="color:${C.textSub};font-size:12px;line-height:1.6;margin:0 0 12px;">Current data still backs this up: ${suggestion.reason}</p>
-      ` : `
+      ` : suggestion.confident && suggestion.label!==s.type ? `
         <div style="background:${C.yellow}14;border:1px solid ${C.yellow}44;border-radius:10px;padding:10px 12px;margin-bottom:12px;">
           <div style="color:${C.yellow};font-size:11px;font-weight:800;margin-bottom:3px;">⚠ Drifted since you classified this</div>
           <p style="color:${C.textSub};font-size:12px;line-height:1.6;margin:0;">You picked ${s.type}, but current data now suggests <b>${suggestion.label}</b>: ${suggestion.reason} Worth reassessing.</p>
         </div>
+      ` : `
+        <p style="color:${C.textSub};font-size:12px;line-height:1.6;margin:0 0 12px;">${suggestion.reason}</p>
       `}
       <div style="background:${C.cardHigh};border-radius:10px;padding:12px 14px;">
         <div style="color:${C.teal};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px;">Plan of Attack</div>
-        <p style="color:${C.text};font-size:12px;line-height:1.6;margin:0;">${PLAN_OF_ATTACK[s.type]||PLAN_OF_ATTACK['Both']}</p>
+        <p style="color:${C.text};font-size:12px;line-height:1.6;margin:0;">${PLAN_OF_ATTACK[s.type]||'Choose a strategy to see your plan of attack.'}</p>
       </div>
-    </div>` : '';
+    </div>` : '');
 
   return `
     <div style="display:flex;flex-direction:column;gap:14px;">
@@ -1230,7 +1354,7 @@ function renderTabPlan(s) {
       ${whyTypeCard}
       <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-          <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;">Buy Plan</div>
+          <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;">Buy Plan · ${s.tranche.length} ${s.tranche.length===1?'entry':'entries'} ${!s.tranche.some(t=>t.status==='filled')?`<button onclick="showBuildPlanFlow('${s.id}')" style="background:none;border:none;color:${C.teal};font-size:10px;font-weight:700;cursor:pointer;padding:0;text-transform:none;letter-spacing:normal;">(change)</button>`:''}</div>
           <div style="display:flex;align-items:center;gap:8px;">
             <span style="color:${C.textMuted};font-size:11px;">Budget:</span>
             <div style="position:relative;">
@@ -1326,14 +1450,22 @@ function brokerRead(s, setup, traj) {
 
   const pullbackMissing = [];
   if(!trendUp) pullbackMissing.push('Price needs to trade above both the 50-day and 200-day averages to confirm the uptrend.');
-  if(!(dz&&(dz.zone==='buy'||dz.zone==='healthy'))) pullbackMissing.push(`Price needs to pull back closer to the 50-day average — right now it's ${dz?dz.label.toLowerCase():'unclear'}.`);
-  if(!(rz&&(rz.zone==='caution'||rz.zone==='healthy'))) pullbackMissing.push(`RSI needs to settle into the 40-65 range — right now it's ${rz?rz.label.toLowerCase():'unknown'}.`);
-  if(!volConfirmed) pullbackMissing.push('Volume needs to rise above 1.2x average to confirm buyers are actually stepping in.');
+  if(!s.ma50) {
+    pullbackMissing.push(`No 50-day average yet — this stock doesn't have 50 days of trading history. Pullback entries aren't checkable until it does.`);
+  } else if(!(dz&&(dz.zone==='buy'||dz.zone==='healthy'))) {
+    pullbackMissing.push(`Price needs to pull back to within 5% of the 50-day average (under ~${fmtP(s.ma50*1.05)}) — it's currently ${dz.dist.toFixed(1)}% above it.`);
+  }
+  if(!(rz&&(rz.zone==='caution'||rz.zone==='healthy'))) {
+    if(rz && rz.zone==='hot') pullbackMissing.push(`RSI needs to drop under 65 — it's currently ${s.rsi}.`);
+    else pullbackMissing.push(`RSI needs to be in the 40-65 range — it's currently ${s.rsi??'unknown'}.`);
+  }
+  if(!volConfirmed) pullbackMissing.push(`Volume needs to rise above 1.2× the 20-day average — it's currently running at ${setup.volRatio!=null?setup.volRatio.toFixed(1)+'×':'an unknown level'}.`);
+  if(!macdBull) pullbackMissing.push(`MACD hasn't crossed bullish yet (line below signal) — not required, but adds confirmation if it does.`);
 
   const reversalMissing = [];
-  if(!nearMA200) reversalMissing.push('Price needs to be within about 5% of the 200-day average.');
-  if(!(rz&&(rz.zone==='panic'||rz.zone==='weak'))) reversalMissing.push('RSI needs to drop under 40 to show real selling exhaustion.');
-  if(!volConfirmed) reversalMissing.push('Volume needs to rise above 1.2x average to confirm the bounce has support.');
+  if(!nearMA200) reversalMissing.push(s.ma200 ? `Price needs to be within 5% of the 200-day average (${fmtP(s.ma200)}) — it's currently further away.` : `No 200-day average yet — this stock doesn't have 200 days of trading history. Reversal-off-support isn't checkable until it does.`);
+  if(!(rz&&(rz.zone==='panic'||rz.zone==='weak'))) reversalMissing.push(`RSI needs to drop under 40 to show real selling exhaustion — it's currently ${s.rsi??'unknown'}.`);
+  if(!volConfirmed) reversalMissing.push(`Volume needs to rise above 1.2× the 20-day average to confirm the bounce has support — it's currently running at ${setup.volRatio!=null?setup.volRatio.toFixed(1)+'×':'an unknown level'}.`);
 
   const useReversal = reversalMissing.length < pullbackMissing.length;
   const missing = useReversal ? reversalMissing : pullbackMissing;
@@ -1603,6 +1735,706 @@ function computeMASlope(s) {
   return {rising50, rising200};
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// SECTION 2 — MARKET STATE ENGINE
+// ═══════════════════════════════════════════════════════════════════════════════
+// Six states, evaluated as a fixed-order decision tree so a stock always
+// lands in exactly one: data sufficiency -> confirmed breakdown -> recovery
+// attempt -> long-term trend intact -> advancing/pullback/sideways/weakening.
+// "Evidence Strength" (Strong/Moderate/Weak/Insufficient Data) is an
+// auditable ratio of conditions met vs. conditions we could actually check —
+// deliberately not a statistical "Confidence %".
+//
+// Data reality this respects: ma50/ma200 SLOPE needs snapshot history with
+// ma50/ma200 populated day over day. That only existed from the one-time Add
+// Stock wizard or a CSV import until ma50/ma200 were added to the daily
+// update wizard alongside this engine. Until that history builds up (roughly
+// 5+ daily updates for a usable slope), the "50/200 SMA rising/flat" checks
+// are SKIPPED — not assumed true or false — so the engine never invents a
+// trend direction it can't actually see.
+
+// Trading-day distance between two today()-format date strings
+// (e.g. "Jul 15, 2026"). Weekends only — does not account for market
+// holidays, an accepted approximation for a staleness flag, not a P&L calc.
+function tradingDaysBetween(dateStrEarlier, dateStrLater) {
+  const a = new Date(dateStrEarlier), b = new Date(dateStrLater);
+  if(isNaN(a)||isNaN(b)) return null;
+  let count = 0;
+  const cur = new Date(a); cur.setHours(0,0,0,0);
+  const end = new Date(b); end.setHours(0,0,0,0);
+  while(cur < end) {
+    cur.setDate(cur.getDate()+1);
+    const day = cur.getDay();
+    if(day!==0 && day!==6) count++;
+  }
+  return count;
+}
+
+// How stale is the ma50/ma200 data actually behind this stock's current
+// numbers? Finds the most recent snapshot carrying BOTH, measures trading
+// days back to the latest snapshot on file.
+function getIndicatorFreshness(s) {
+  const snaps = (s.snapshots||[]).filter(sn=>sn.date);
+  if(!snaps.length) return {staleDays:null, isStale:false, hasData:false};
+  const sorted = [...snaps].sort((x,y)=>new Date(x.date)-new Date(y.date));
+  const latest = sorted[sorted.length-1];
+  const withTrend = sorted.filter(sn=>sn.ma50!=null && sn.ma200!=null);
+  if(!withTrend.length) return {staleDays:null, isStale:false, hasData:false};
+  const lastTrendSnap = withTrend[withTrend.length-1];
+  const staleDays = tradingDaysBetween(lastTrendSnap.date, latest.date);
+  return {staleDays, isStale: staleDays!=null && staleDays>=3, hasData:true};
+}
+
+// Is a given moving-average field (e.g. 'ma20') flat over its last ~10
+// readings? Threshold is a hard number, not a vibe: first-vs-last reading
+// within the given % counts as flat.
+function computeMAFlatness(s, field, thresholdPct) {
+  const snaps = (s.snapshots||[]).filter(sn=>sn[field]!=null).sort((a,b)=>new Date(a.date)-new Date(b.date));
+  const recent = snaps.slice(-10);
+  if(recent.length<5) return null;
+  const first = recent[0][field], last = recent[recent.length-1][field];
+  if(!first) return null;
+  return Math.abs((last-first)/first) <= thresholdPct;
+}
+
+// Has ATR meaningfully cooled off vs. its own 20-day average? Needs real
+// ATR history from snapshots, not just today's single reading.
+function computeATRDecline(s) {
+  const snaps = (s.snapshots||[]).filter(sn=>sn.atr!=null).sort((a,b)=>new Date(a.date)-new Date(b.date));
+  if(snaps.length<10) return null;
+  const last20 = snaps.slice(-20);
+  const avg = last20.reduce((a,sn)=>a+sn.atr,0)/last20.length;
+  const current = s.atr!=null ? s.atr : last20[last20.length-1].atr;
+  if(!avg) return null;
+  return current <= avg*0.9;
+}
+
+// "Structure proxy" — explicitly NOT true swing-point (higher-high/
+// higher-low) detection, which stays deferred until a real pivot algorithm
+// exists. This is a cheap 10-session stand-in: today's close vs. the prior
+// 10 sessions' range for lower-low/higher-high, and a 5-day recent window
+// vs. the 10 sessions before it for higher-low/lower-high. Returns nulls
+// when there isn't enough history — never guesses.
+function computeStructureProxy(s) {
+  const snaps = (s.snapshots||[]).filter(sn=>sn.price!=null).sort((a,b)=>new Date(a.date)-new Date(b.date));
+  if(snaps.length<11) return {lowerLow:null, higherHigh:null, higherLow:null, lowerHigh:null, sample:snaps.length};
+  const closes = snaps.map(sn=>sn.price);
+  const current = closes[closes.length-1];
+  const prior10 = closes.slice(-11,-1);
+  const lowerLow = current < Math.min(...prior10);
+  const higherHigh = current > Math.max(...prior10);
+
+  let higherLow = null, lowerHigh = null;
+  if(closes.length>=16) {
+    const recent5 = closes.slice(-5);
+    const before10 = closes.slice(-16,-6);
+    higherLow = Math.min(...recent5) > Math.min(...before10);
+    lowerHigh = Math.max(...recent5) < Math.max(...before10);
+  }
+  return {lowerLow, higherHigh, higherLow, lowerHigh, sample:snaps.length};
+}
+
+// Shared Consolidation checklist — reachable from either the "trend intact"
+// or "trend not intact" branch of the tree, since balance between buyers
+// and sellers doesn't care which side of the 200 SMA price sits on.
+function computeConsolidationConditions(s) {
+  const snaps = (s.snapshots||[]).filter(sn=>sn.price!=null).sort((a,b)=>new Date(a.date)-new Date(b.date));
+  const last10 = snaps.slice(-10);
+  const rangeTight = last10.length>=10 ? (()=>{ const p=last10.map(sn=>sn.price); return ((Math.max(...p)-Math.min(...p))/Math.min(...p))<=0.06; })() : null;
+  const ma20Flat = computeMAFlatness(s,'ma20',0.02);
+  const ma50Flat = computeMAFlatness(s,'ma50',0.02);
+  const atrDeclined = computeATRDecline(s);
+  const volRatio = s.vol&&s.avgvol ? s.vol/s.avgvol : null;
+  return [
+    {label:'Price within a 6% range over the last 10 sessions', met: rangeTight===true, evaluable: rangeTight!=null},
+    {label:'20 EMA is flat', met: ma20Flat===true, evaluable: ma20Flat!=null},
+    {label:'50 SMA is flat', met: ma50Flat===true, evaluable: ma50Flat!=null},
+    {label:'ATR down at least 10% vs. its 20-day average', met: atrDeclined===true, evaluable: atrDeclined!=null},
+    {label:'Volume below average', met: volRatio!=null ? volRatio<1 : null, evaluable: volRatio!=null},
+  ];
+}
+
+// Wraps a winning state's condition list into the auditable Evidence
+// Strength result. Never a probability — "X of Y available conditions".
+// Staleness (see getIndicatorFreshness) knocks Evidence Strength down one
+// level, visibly, instead of silently trusting old trend data.
+function finalizeState(name, conditions, freshness) {
+  const evaluable = conditions.filter(c=>c.evaluable);
+  const metCount = evaluable.filter(c=>c.met).length;
+  const total = evaluable.length;
+  let evidence;
+  if(total<2) evidence='Insufficient Data';
+  else {
+    const ratio = metCount/total;
+    evidence = ratio>=0.85 ? 'Strong' : ratio>=0.6 ? 'Moderate' : 'Weak';
+  }
+  let staleNote = null;
+  if(freshness && freshness.isStale) {
+    staleNote = `Trend data is ${freshness.staleDays} trading days old. Evidence strength has been reduced.`;
+    if(evidence==='Strong') evidence='Moderate';
+    else if(evidence==='Moderate') evidence='Weak';
+  }
+  return {state:name, evidence, evidenceCount:`${metCount} of ${total} available conditions`, conditions, staleNote, closestMatch:false};
+}
+
+// Gate 5 helper — checks candidate states in priority order, requires ALL
+// evaluable conditions true (strict AND, no partial credit) and at least 2
+// evaluable conditions before calling it a match. If nothing in the branch
+// cleanly qualifies, falls back to the closest match by conditions-met
+// ratio — clearly flagged, never silently assumed.
+function classifyWithinBranch(candidates, freshness) {
+  for(const c of candidates) {
+    const evaluable = c.conditions.filter(x=>x.evaluable);
+    if(evaluable.length>=2 && evaluable.every(x=>x.met)) {
+      return finalizeState(c.name, c.conditions, freshness);
+    }
+  }
+  let best=null, bestRatio=-1;
+  for(const c of candidates) {
+    const evaluable = c.conditions.filter(x=>x.evaluable);
+    const metCount = evaluable.filter(x=>x.met).length;
+    const ratio = evaluable.length ? metCount/evaluable.length : 0;
+    if(ratio>bestRatio) { bestRatio=ratio; best=c; }
+  }
+  const result = finalizeState(best.name, best.conditions, freshness);
+  result.closestMatch = true;
+  result.evidence = 'Weak';
+  return result;
+}
+
+// The classifier itself. Gate order is fixed and matches the spec exactly:
+// data sufficiency -> confirmed breakdown -> recovery attempt -> long-term
+// trend intact -> advancing/pullback/sideways/weakening.
+function computeMarketState(s) {
+  // Gate 1 — enough core data to say anything at all?
+  const core = {price:s.price, '20 EMA':s.ma20, '50 SMA':s.ma50, '200 SMA':s.ma200, RSI:s.rsi, volume:s.vol, '20-day avg volume':s.avgvol};
+  const missing = Object.keys(core).filter(k=>core[k]==null);
+  if(missing.length) {
+    return {state:'Insufficient Data', evidence:'Insufficient Data', evidenceCount:'0 of 0 available conditions', missing, conditions:[], staleNote:null, closestMatch:false};
+  }
+
+  const volRatio = s.vol/s.avgvol;
+  const slope = computeMASlope(s); // {rising50, rising200} or null — needs real snapshot history
+  const proxy = computeStructureProxy(s);
+  const freshness = getIndicatorFreshness(s);
+
+  // ── Gate 2: Confirmed Breakdown candidate ──
+  const priceBelow200By3 = s.price < s.ma200*0.97;
+  const ma50Declining = slope ? slope.rising50===false : null;
+  const breakdownTriggers = [
+    {label:'Volume 1.3× average or higher', met: volRatio>=1.3, evaluable:true},
+    {label:'50 SMA declining', met: ma50Declining===true, evaluable: slope!=null},
+    {label:'Closed below the 10-session low (structure proxy)', met: proxy.lowerLow===true, evaluable: proxy.lowerLow!=null},
+  ];
+  const breakdownCandidate = priceBelow200By3 && breakdownTriggers.some(t=>t.evaluable && t.met);
+
+  // ── Gate 3: Recovery Attempt — only worth asking if the stock is below
+  // its key long-term level (200 SMA) or just tripped the breakdown gate.
+  const belowKeyLevel = s.price < s.ma200;
+  const macdImproving = (s.macdLine!=null && s.signalLine!=null) ? (s.macdLine > s.signalLine) : null;
+  const longTermRestored = s.price>s.ma200 && s.ma50>s.ma200;
+  const recoveryConditions = [
+    {label:'Price closed above the 20 EMA', met: s.price > s.ma20, evaluable:true},
+    {label:'RSI above 40', met: s.rsi > 40, evaluable:true},
+    {label:'MACD improving or bullish', met: macdImproving===true, evaluable: macdImproving!=null},
+    {label:'Volume 1.0× average or higher', met: volRatio>=1.0, evaluable:true},
+    {label:'Still below 50 SMA, or long-term structure not yet restored', met: (s.price < s.ma50) || !longTermRestored, evaluable:true},
+  ];
+  const recoveryEligible = belowKeyLevel || breakdownCandidate;
+  const recoveryEvaluable = recoveryConditions.filter(c=>c.evaluable);
+  const recoveryAttempt = recoveryEligible && recoveryEvaluable.length>=4 && recoveryEvaluable.every(c=>c.met);
+
+  if(recoveryAttempt) return finalizeState('Recovery Attempt', recoveryConditions, freshness);
+
+  if(breakdownCandidate) {
+    const conds = [{label:'Price more than 3% below the 200 SMA', met:true, evaluable:true}, ...breakdownTriggers];
+    return finalizeState('Confirmed Breakdown', conds, freshness);
+  }
+
+  // ── Gate 4: is the long-term trend intact? ──
+  // "200 SMA flat or rising" only checked when slope data actually exists.
+  const trendIntact = (s.price>s.ma200) && (s.ma50>s.ma200) && (slope && slope.rising200!=null ? slope.rising200!==false : true);
+
+  // ── Gate 5: within-branch classification ──
+  const consolidationConditions = computeConsolidationConditions(s);
+  if(trendIntact) {
+    const healthy = [
+      {label:'Price above 20 EMA', met: s.price>s.ma20, evaluable:true},
+      {label:'Price above 50 SMA', met: s.price>s.ma50, evaluable:true},
+      {label:'50 SMA rising', met: slope? slope.rising50===true : null, evaluable: slope!=null},
+      {label:'RSI between 50 and 70', met: s.rsi>=50 && s.rsi<=70, evaluable:true},
+    ];
+    const pullback = [
+      {label:'Price below 20 EMA', met: s.price<s.ma20, evaluable:true},
+      {label:'Price within 3% of the 50 SMA', met: Math.abs((s.price-s.ma50)/s.ma50)<=0.03, evaluable:true},
+      {label:'Price still above the 200 SMA', met: s.price>s.ma200, evaluable:true},
+      {label:'50 SMA still rising', met: slope? slope.rising50===true : null, evaluable: slope!=null},
+      {label:'RSI between 40 and 55', met: s.rsi>=40 && s.rsi<=55, evaluable:true},
+      {label:'Volume 1.1× average or less', met: volRatio<=1.1, evaluable:true},
+    ];
+    return classifyWithinBranch([
+      {name:'Healthy Uptrend', conditions:healthy},
+      {name:'Normal Pullback', conditions:pullback},
+      {name:'Consolidation', conditions:consolidationConditions},
+    ], freshness);
+  } else {
+    const upDayVol = computeVolumeOnUpDays(s);
+    const weakening = [
+      {label:'Price below the 50 SMA', met: s.price<s.ma50, evaluable:true},
+      {label:'RSI below 45', met: s.rsi<45, evaluable:true},
+      {label:'50 SMA flat or declining', met: slope? slope.rising50===false : null, evaluable: slope!=null},
+      {label:'Down-day volume stronger than up-day volume', met: upDayVol? upDayVol.ratio<1 : null, evaluable: upDayVol!=null},
+      {label:'Failed rebound or lower-low structure proxy', met: (proxy.lowerHigh===true || proxy.lowerLow===true), evaluable: (proxy.lowerHigh!=null || proxy.lowerLow!=null)},
+    ];
+    return classifyWithinBranch([
+      {name:'Trend Weakening', conditions:weakening},
+      {name:'Consolidation', conditions:consolidationConditions},
+    ], freshness);
+  }
+}
+
+// Retroactively recomputes market state across the stock's own snapshot
+// history — rather than persisting a "previousState" field that can drift
+// from the real math. Same "pure computed, nothing frozen" rule the rest of
+// the app already follows for score/verdict. Each day only sees data
+// available up to and including that day — no lookahead.
+function computeMarketStateHistory(s) {
+  const snaps = (s.snapshots||[]).filter(sn=>sn.date).sort((a,b)=>new Date(a.date)-new Date(b.date));
+  if(!snaps.length) return {timeline:[], currentStreakDays:0, changedOn:null};
+  const timeline = snaps.map((sn,i)=>{
+    const asOf = {...s, price:sn.price, rsi:sn.rsi, vol:sn.vol, avgvol:sn.avgvol, ma20:sn.ma20, ma50:sn.ma50, ma200:sn.ma200, macdLine:sn.macdLine, signalLine:sn.signalLine, atr:sn.atr, snapshots:snaps.slice(0,i+1)};
+    return {date:sn.date, state:computeMarketState(asOf).state};
+  });
+  const currentState = timeline[timeline.length-1].state;
+  let streak=0, changedOn=null;
+  for(let i=timeline.length-1;i>=0;i--) {
+    if(timeline[i].state===currentState) { streak++; }
+    else { changedOn = timeline[i+1] ? timeline[i+1].date : null; break; }
+  }
+  if(changedOn===null && streak===timeline.length) changedOn = timeline[0].date;
+  return {timeline, currentStreakDays:streak, changedOn};
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SECTION 3 — THE MENTOR
+// ═══════════════════════════════════════════════════════════════════════════════
+// "A coach tells you what to do. A mentor teaches you how to think." Two modes:
+//   Mode 1 (One-Time Setup)   — teaches how to build the 4 saved ThinkorSwim
+//                                chart views, generic, not tied to any stock.
+//   Mode 2 (Guided Analysis)  — per-stock, assumes the 4 views already exist,
+//                                walks through them using data StockIQ already
+//                                has. NEVER re-asks for a number the app knows.
+// Tab 2 (Setup and Structure) is deliberately just a teaching wrapper around
+// computeMarketState() — one source of truth, not a second opinion.
+// Tab 4 (Entry Timing) is honest about a real gap: this app has never stored
+// hourly data, so Mode 2 can't pull real numbers there — it teaches the
+// pattern to look for and says plainly why it can't show you the number.
+
+const MENTOR_TABS = {
+  bigPicture: {
+    id:'bigPicture', number:1, name:'Big Picture', color:C.blue,
+    question:'Is this even worth more of my attention?',
+    timeframe:'1 Year', aggregation:'Daily',
+    studies:['20 EMA','50 SMA','200 SMA','Volume'],
+    excludeNote:'No RSI, no MACD on this chart. Momentum comes later — right now you\'re only asking one question: is the long-term trend healthy?',
+    setupSteps:[
+      'Open a new chart tab. Set the time period to 1 Year and the aggregation to Daily.',
+      'Add a Moving Average study for the 20-period EMA (exponential).',
+      'Add a Moving Average study for the 50-period SMA (simple).',
+      'Add a Moving Average study for the 200-period SMA (simple).',
+      'Make sure Volume is showing in the panel below price.',
+      'Save this layout and name the tab "Big Picture."'
+    ],
+    whyItMatters:'This is the gatekeeper chart. If the long-term trend is broken, nothing on the other three charts matters yet — a great-looking entry inside a broken long-term trend is still a bad trade.'
+  },
+  setup: {
+    id:'setup', number:2, name:'Setup and Structure', color:C.yellow,
+    question:'What is this stock doing right now — advancing, pulling back, consolidating, weakening, or recovering?',
+    timeframe:'6 Months', aggregation:'Daily',
+    studies:['20 EMA','50 SMA','200 SMA','Volume'],
+    excludeNote:'This is the same chart as Big Picture, just zoomed in. It answers a different question, not a new one.',
+    setupSteps:[
+      'Duplicate the Big Picture layout, or add a new tab with the same studies: 20 EMA, 50 SMA, 200 SMA, Volume.',
+      'Set the time period to 6 Months, aggregation Daily.',
+      'Save this layout and name the tab "Setup and Structure."'
+    ],
+    whyItMatters:'This is your market-state chart — the same six-state read StockIQ already computes from your numbers (Healthy Uptrend, Normal Pullback, Consolidation, Trend Weakening, Confirmed Breakdown, or Recovery Attempt). Learning to see it on the chart yourself, not just read it off the app, is the actual skill.'
+  },
+  entryQuality: {
+    id:'entryQuality', number:3, name:'Entry Quality', color:C.teal,
+    question:'Is this stock near a sensible entry, and can the trade be sized safely?',
+    timeframe:'3 Months', aggregation:'Daily',
+    studies:['20 EMA','50 SMA','200 SMA','Volume','RSI 14','ATR 14'],
+    excludeNote:'No MACD here — it would just duplicate what the Entry Timing chart already shows you, on a shorter, noisier timeframe.',
+    setupSteps:[
+      'Add a new tab with 20 EMA, 50 SMA, 200 SMA, and Volume, same as before.',
+      'Add an RSI study, length 14.',
+      'Add an ATR study, length 14.',
+      'Set the time period to 3 Months, aggregation Daily.',
+      'Save this layout and name the tab "Entry Quality."'
+    ],
+    whyItMatters:'This is where you decide if today is actually a good day to act, and how big a position makes sense given how much this stock normally moves.'
+  },
+  entryTiming: {
+    id:'entryTiming', number:4, name:'Entry Timing', color:C.purple,
+    question:'Is short-term momentum starting to turn in the direction of the larger setup?',
+    timeframe:'30 Days', aggregation:'1 Hour',
+    studies:['20 EMA','50 SMA','Volume','MACD (12, 26, 9)'],
+    excludeNote:'No 200 SMA and no RSI on this one — this chart has one job: timing, not trend-reading.',
+    setupSteps:[
+      'Add a new tab with the 20 EMA, 50 SMA, Volume, and a MACD study set to 12, 26, 9.',
+      'Set the time period to 30 Days, aggregation 1 Hour.',
+      'Save this layout and name the tab "Entry Timing."'
+    ],
+    whyItMatters:'This chart never earns you a trade by itself — it only helps you avoid a sloppy entry into a setup the other three charts already approved. A bullish hourly MACD inside a confirmed daily breakdown is a bounce, not a buy signal.'
+  },
+};
+const MENTOR_TAB_CANON_ORDER = ['bigPicture','setup','entryQuality','entryTiming'];
+
+// How much saved history does this stock actually have, for Mentor teaching
+// purposes? 5+ snapshots covers a CSV import (which drops in dozens of rows
+// at once, so slope/structure/volume-pattern checks unlock immediately) and
+// 5+ days of daily updates equally — same threshold, same code path, no
+// separate "was this imported" flag needed.
+function computeMentorHistoryTier(s) {
+  const n = (s.snapshots||[]).filter(sn=>sn.date).length;
+  return n>=5 ? 'full' : 'limited';
+}
+
+// Specific, actionable "go check this yourself" instructions for every
+// history-dependent metric the app can't yet confirm from saved data. Keyed
+// so both the bigPicture/entryQuality point-builders and the Tab 2 market
+// state render can reuse the same text.
+const MENTOR_MANUAL_CHECKS = {
+  ma50Slope: 'Open your Big Picture chart (1 Year, Daily) and look at the 50-day line over the last few weeks — is it visibly angled up, flat, or down?',
+  ma200Slope: 'Open your Big Picture chart and check the 200-day line the same way — rising, flat, or falling?',
+  accumDistribution: 'Open your Setup and Structure chart (6 Months) and compare the size of volume bars on up days vs. down days over the last two weeks.',
+  structureProxy: 'Open your Setup and Structure chart and look at the most recent pullback — did its low hold above the prior pullback low, or break under it?',
+  atrTrend: 'Open your Setup and Structure chart and eyeball whether the last couple weeks of candles are compressing into a tighter range than the month before.',
+  generic: 'StockIQ can\'t verify this from saved history yet — check it directly on your Setup and Structure chart.',
+};
+
+// Maps a computed condition's label text to the right manual-check
+// instruction, for conditions coming out of computeMarketState (Tab 2)
+// that weren't evaluable due to missing history.
+function mentorManualCheckFor(label) {
+  const l = label.toLowerCase();
+  if(l.includes('50 sma') && (l.includes('rising')||l.includes('declining')||l.includes('flat'))) return MENTOR_MANUAL_CHECKS.ma50Slope;
+  if(l.includes('200 sma') && (l.includes('rising')||l.includes('flat'))) return MENTOR_MANUAL_CHECKS.ma200Slope;
+  if(l.includes('volume') && (l.includes('down-day')||l.includes('up day')||l.includes('up-day'))) return MENTOR_MANUAL_CHECKS.accumDistribution;
+  if(l.includes('structure proxy')||l.includes('lower-low')||l.includes('higher-low')) return MENTOR_MANUAL_CHECKS.structureProxy;
+  if(l.includes('atr')) return MENTOR_MANUAL_CHECKS.atrTrend;
+  return MENTOR_MANUAL_CHECKS.generic;
+}
+
+// Builds a teaching point that gracefully degrades: if the underlying data
+// exists, show the real read. If it doesn't, don't just say "not enough
+// history" and stop — hand back the exact manual-check instruction so the
+// walkthrough keeps moving.
+function mentorPoint(label, value, good, dataAvailable, manualKey, teachIfAvailable) {
+  if(dataAvailable) return {label, value, good, teach: teachIfAvailable};
+  return {label, value:'Check chart', good:null, teach: MENTOR_MANUAL_CHECKS[manualKey] || MENTOR_MANUAL_CHECKS.generic, manual:true};
+}
+
+// Which views matter most, and in what order, per Position Type — same
+// emphasis-not-workspace idea Section 1 already established with
+// STRATEGY_RULES. Kept as its own map rather than folded into
+// STRATEGY_RULES, which stays untouched and already-tested.
+const MENTOR_TAB_PLAN = {
+  'Swing Trade':     {order:['setup','entryQuality','entryTiming','bigPicture'], optionalIds:[], skippedIds:[]},
+  'Position Trade':  {order:['bigPicture','setup','entryQuality','entryTiming'], optionalIds:['entryTiming'], skippedIds:[]},
+  'Long-Term Hold':  {order:['bigPicture','setup','entryQuality'], optionalIds:[], skippedIds:['entryTiming'],
+                       longTermAside:'Long-term holders can also temporarily switch this Big Picture tab to 3 Years / Weekly for extra context. That weekly view is for context only — StockIQ\'s daily moving-average data doesn\'t directly describe it, so don\'t expect the numbers below to match a weekly chart exactly.'},
+};
+
+function openMentor(stockId) {
+  const s = stockId ? stocks.find(x=>String(x.id)===String(stockId)) : null;
+  showSheet(`
+    <div style="width:36px;height:4px;border-radius:2px;background:${C.border};margin:0 auto 18px;"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+      <span style="color:${C.purple};font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;">🎓 StockIQ Mentor</span>
+      <button onclick="closeAllOverlays()" style="background:none;border:none;color:${C.textMuted};font-size:20px;cursor:pointer;">✕</button>
+    </div>
+    <div style="color:${C.text};font-size:20px;font-weight:900;letter-spacing:-0.01em;margin-bottom:6px;">A coach tells you what to do.<br>A mentor teaches you how to think.</div>
+    <div style="color:${C.textSub};font-size:13px;line-height:1.6;margin-bottom:22px;">Pick a mode.</div>
+    <div onclick="startMentorSetup()" style="background:${C.cardHigh};border-radius:14px;padding:16px;margin-bottom:12px;cursor:pointer;border:1px solid ${C.border};">
+      <div style="color:${C.blue};font-size:13px;font-weight:800;margin-bottom:4px;">One-Time Setup</div>
+      <div style="color:${C.textSub};font-size:12px;line-height:1.5;">Build your 4 saved ThinkorSwim chart views, step by step, and understand why each one exists. Do this once.</div>
+    </div>
+    ${s ? `
+    <div onclick="startMentorAnalysis('${s.id}')" style="background:${C.cardHigh};border-radius:14px;padding:16px;border:1px solid ${C.border};cursor:pointer;">
+      <div style="color:${C.teal};font-size:13px;font-weight:800;margin-bottom:4px;">Guided Analysis — ${s.ticker}</div>
+      <div style="color:${C.textSub};font-size:12px;line-height:1.5;">Assumes your 4 views are already built. Walks through them using what StockIQ already knows, and teaches you how to read the rest on the chart.</div>
+    </div>` : `
+    <div style="background:${C.card};border:1px dashed ${C.border};border-radius:14px;padding:16px;">
+      <div style="color:${C.textMuted};font-size:12px;line-height:1.6;">Open a specific stock to run Guided Analysis on it.</div>
+    </div>`}
+  `);
+}
+
+function mentorProgressBar(total, current) {
+  return `<div style="display:flex;gap:3px;margin-bottom:20px;">${Array.from({length:total}).map((_,i)=>`<div style="flex:1;height:3px;border-radius:2px;background:${i<=current?C.purple:C.border};transition:background 0.2s;"></div>`).join('')}</div>`;
+}
+
+function mentorStudyPills(studies) {
+  return `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px;">${studies.map(st=>`<span style="background:${C.cardHigh};color:${C.textSub};border-radius:20px;padding:5px 10px;font-size:11px;font-weight:700;">${st}</span>`).join('')}</div>`;
+}
+
+// ── MODE 1: ONE-TIME SETUP ──────────────────────────────────────────────────
+function startMentorSetup() {
+  mentorMode = 'setup';
+  mentorStep = 0;
+  renderMentorStep();
+}
+function renderMentorSetupStep() {
+  const tabId = MENTOR_TAB_CANON_ORDER[mentorStep];
+  const tab = MENTOR_TABS[tabId];
+  const isLast = mentorStep === MENTOR_TAB_CANON_ORDER.length-1;
+  showSheet(`
+    <div style="width:36px;height:4px;border-radius:2px;background:${C.border};margin:0 auto 18px;"></div>
+    ${mentorProgressBar(MENTOR_TAB_CANON_ORDER.length, mentorStep)}
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+      <span style="color:${C.purple};font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;">One-Time Setup · Chart ${tab.number}/4</span>
+      <button onclick="closeAllOverlays()" style="background:none;border:none;color:${C.textMuted};font-size:20px;cursor:pointer;">✕</button>
+    </div>
+    <div style="color:${tab.color};font-size:22px;font-weight:900;letter-spacing:-0.01em;margin-bottom:4px;">${tab.name}</div>
+    <div style="color:${C.textSub};font-size:13px;line-height:1.6;margin-bottom:14px;">"${tab.question}"</div>
+    <div style="background:${C.cardHigh};border-radius:10px;padding:10px 12px;margin-bottom:14px;color:${C.textSub};font-size:12px;"><b style="color:${C.text};">${tab.timeframe} · ${tab.aggregation}</b></div>
+    ${mentorStudyPills(tab.studies)}
+    <div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;">How to build it</div>
+    <div style="margin-bottom:14px;">
+      ${tab.setupSteps.map((step,i)=>`<div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:8px;"><span style="color:${tab.color};font-size:12px;font-weight:800;flex-shrink:0;">${i+1}.</span><span style="color:${C.textSub};font-size:12.5px;line-height:1.5;">${step}</span></div>`).join('')}
+    </div>
+    <div style="background:${C.card};border:1px solid ${C.border};border-radius:10px;padding:12px 14px;margin-bottom:10px;">
+      <div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px;">Why this chart exists</div>
+      <div style="color:${C.text};font-size:12.5px;line-height:1.6;">${tab.whyItMatters}</div>
+    </div>
+    <div style="color:${C.textMuted};font-size:11px;line-height:1.5;margin-bottom:24px;">${tab.excludeNote}</div>
+    <div style="display:flex;gap:10px;">
+      ${mentorStep>0?`<button onclick="mentorBack()" style="flex:1;padding:15px;border-radius:14px;border:1px solid ${C.border};background:none;color:${C.textSub};font-size:14px;font-weight:700;cursor:pointer;">Back</button>`:''}
+      <button onclick="mentorNext()" style="flex:2;padding:15px;border-radius:14px;border:none;background:${C.purple};color:#000;font-size:15px;font-weight:800;cursor:pointer;">${isLast?'Done ✓':'Next Chart →'}</button>
+    </div>`);
+}
+
+// ── MODE 2: GUIDED STOCK ANALYSIS ───────────────────────────────────────────
+function startMentorAnalysis(stockId) {
+  const s = stocks.find(x=>String(x.id)===String(stockId));
+  if(!s) return;
+  if(needsReclassify(s)) {
+    closeAllOverlays();
+    showReclassifyFlow(s.id);
+    return;
+  }
+  const plan = MENTOR_TAB_PLAN[s.type] || MENTOR_TAB_PLAN['Swing Trade'];
+  mentorMode = 'analysis';
+  mentorStockId = stockId;
+  mentorTabOrder = plan.order.slice();
+  mentorHistoryTier = computeMentorHistoryTier(s);
+  mentorShowLimitedIntro = mentorHistoryTier==='limited';
+  mentorStep = 0;
+  renderMentorStep();
+}
+
+// Pulls together what StockIQ already computed, per tab, using the SAME
+// functions the rest of the app trusts (analyzeSetup, computeMASlope,
+// distanceZone, rsiZone, computeGamePlan, computeMarketState,
+// computeVolumeOnUpDays) — never a second opinion, never re-asking for a
+// number the app already has.
+function mentorAnalysisContent(tabId, s) {
+  const setup = analyzeSetup(s);
+  if(tabId==='bigPicture') {
+    const slope = computeMASlope(s);
+    const dz = distanceZone(s.price, s.ma50);
+    return [
+      {label:'Price vs. 200 SMA', value: s.price>s.ma200?'Above':'Below', good: s.price>s.ma200,
+        teach:'Price above the 200-day average is the single most basic sign a long-term uptrend is still alive. Below it, treat this as a trend under repair, not a trend to build a new position around.'},
+      {label:'50 SMA vs. 200 SMA', value: s.ma50>s.ma200?'50 above 200':'50 below 200', good: s.ma50>s.ma200,
+        teach:'When the 50-day sits above the 200-day, medium-term buyers have been in control for a while — that\'s a healthy stack. When it flips below, it\'s often an early warning the trend is turning before price itself makes it obvious.'},
+      mentorPoint('50 SMA direction', slope?(slope.rising50?'Rising':'Not rising'):null, slope?slope.rising50:null, slope!=null, 'ma50Slope',
+        'A rising 50-day means the medium-term trend is actively being pushed higher, not just coasting. Look at the slope on your chart, not just where the line sits.'),
+      mentorPoint('200 SMA direction', (slope&&slope.rising200!=null)?(slope.rising200?'Rising':'Not rising'):null, (slope&&slope.rising200!=null)?slope.rising200:null, (slope&&slope.rising200!=null), 'ma200Slope',
+        'The 200-day is slow by design. A flat or falling 200-day, even with price above it, means the long-term trend hasn\'t fully confirmed yet.'),
+      {label:'Distance from 50 SMA', value: dz?dz.label:'—', good: dz? (dz.zone==='buy'||dz.zone==='healthy') : null,
+        teach: dz?dz.note:'Not enough data yet.'},
+    ];
+  }
+  if(tabId==='setup') {
+    const ms = computeMarketState(s);
+    const meta = MARKET_STATE_META[ms.state] || MARKET_STATE_META['Insufficient Data'];
+    return {isMarketState:true, ms, meta};
+  }
+  if(tabId==='entryQuality') {
+    const rz = rsiZone(s.rsi);
+    const dz20 = (s.price&&s.ma20) ? ((s.price-s.ma20)/s.ma20)*100 : null;
+    const dz50 = distanceZone(s.price, s.ma50);
+    const upDayVol = computeVolumeOnUpDays(s);
+    const gp = computeGamePlan(s);
+    return [
+      {label:'RSI condition', value: rz?rz.label:'—', good: rz? (rz.zone==='healthy'||rz.zone==='panic') : null,
+        teach: rz?rz.note:'Not enough data yet.'},
+      {label:'Distance from 20 EMA', value: dz20!=null?`${dz20>=0?'+':''}${dz20.toFixed(1)}%`:'—', good:null,
+        teach:'The 20 EMA is your short-term pulse. Price hugging or just above it, with the bigger trend intact, is often the tightest, lowest-risk entry you\'ll get.'},
+      {label:'Distance from 50 SMA', value: dz50?dz50.label:'—', good: dz50?(dz50.zone==='buy'||dz50.zone==='healthy'):null,
+        teach: dz50?dz50.note:'Not enough data yet.'},
+      mentorPoint('Volume near support (accumulation vs. distribution)', upDayVol?upDayVol.label:null, upDayVol?upDayVol.ratio>1.15:null, upDayVol!=null, 'accumDistribution',
+        upDayVol?upDayVol.text:''),
+      {label:'ATR (typical daily move)', value: s.atr?`${fmtP(s.atr)}/day`:'—', good:null,
+        teach:'ATR never tells you which way the stock is headed — only how far it normally moves in a day. Use it to size your position and set a stop that\'s wider than normal noise, not to time an entry.'},
+      {label:'Plan if you entered near here', value: gp.stopPrice!=null?`Stop ${fmtP(gp.stopPrice)} · Target ${gp.profit}`:'Set once ATR is known', good:null,
+        teach:'Reward should meaningfully outweigh risk before you act. If the distance to your stop is bigger than the distance to your target, the trade isn\'t asking to be taken yet.'},
+    ];
+  }
+  if(tabId==='entryTiming') {
+    const ms = computeMarketState(s);
+    const dailyDamaged = ms.state==='Confirmed Breakdown' || ms.state==='Trend Weakening';
+    return {isHourlyGap:true, dailyDamaged, dailyState: ms.state};
+  }
+  return [];
+}
+
+function renderMentorTeachRow(pt) {
+  const color = pt.good===true?C.green:pt.good===false?C.red:pt.manual?C.blue:C.textSub;
+  return `
+    <div style="border-bottom:1px solid ${C.border};padding:12px 0;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">
+        <span style="color:${C.text};font-size:13px;font-weight:700;">${pt.label}</span>
+        <span style="color:${color};font-size:12.5px;font-weight:800;">${pt.manual?'🔍 ':''}${pt.value}</span>
+      </div>
+      <div style="color:${pt.manual?C.blue:C.textSub};font-size:12px;line-height:1.6;">${pt.teach}</div>
+    </div>`;
+}
+
+function renderMentorAnalysisStep() {
+  const s = stocks.find(x=>String(x.id)===String(mentorStockId));
+  if(!s) { closeAllOverlays(); return; }
+  const introOffset = mentorShowLimitedIntro ? 1 : 0;
+  const tabIndex = mentorStep - introOffset;
+  const tabId = mentorTabOrder[tabIndex];
+  const tab = MENTOR_TABS[tabId];
+  const plan = MENTOR_TAB_PLAN[s.type] || MENTOR_TAB_PLAN['Swing Trade'];
+  const isOptional = (plan.optionalIds||[]).includes(tabId);
+  const totalSteps = mentorTabOrder.length + introOffset;
+  const isLast = mentorStep === totalSteps-1;
+  const content = mentorAnalysisContent(tabId, s);
+
+  let body = '';
+  if(content && content.isMarketState) {
+    const {ms, meta} = content;
+    const met = ms.conditions.filter(c=>c.evaluable&&c.met);
+    const unmet = ms.conditions.filter(c=>c.evaluable&&!c.met);
+    const needsHistory = ms.conditions.filter(c=>!c.evaluable);
+    body = `
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+        <span style="font-size:20px;">${meta.icon}</span>
+        <span style="color:${meta.color};font-size:17px;font-weight:900;">${ms.state}</span>
+      </div>
+      <div style="color:${C.textSub};font-size:12.5px;margin-bottom:12px;">${meta.tagline}</div>
+      <div style="color:${C.textMuted};font-size:10px;margin-bottom:8px;">${ms.evidenceCount} support this reading — this is your Setup and Structure chart, translated into words.</div>
+      ${met.map(c=>`<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:6px;"><span style="color:${C.green};font-size:12px;">✓</span><span style="color:${C.textSub};font-size:12px;line-height:1.5;">${c.label}</span></div>`).join('')}
+      ${unmet.map(c=>`<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:6px;"><span style="color:${C.textMuted};font-size:12px;">✗</span><span style="color:${C.textSub};font-size:12px;line-height:1.5;">${c.label}</span></div>`).join('')}
+      ${needsHistory.length?`
+      <div style="border-top:1px solid ${C.border};margin-top:8px;padding-top:10px;">
+        <div style="color:${C.blue};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;">🔍 Needs more history — check these on your chart</div>
+        ${needsHistory.map(c=>`<div style="margin-bottom:8px;"><div style="color:${C.text};font-size:12px;font-weight:700;margin-bottom:3px;">${c.label}</div><div style="color:${C.blue};font-size:11.5px;line-height:1.6;">${mentorManualCheckFor(c.label)}</div></div>`).join('')}
+      </div>`:''}
+      <div style="color:${C.text};font-size:12.5px;line-height:1.6;margin-top:10px;padding-top:10px;border-top:1px solid ${C.border};">Now look at your actual 6-month chart. Can you see this yourself — where price is relative to the 20 EMA and 50 SMA, whether pullbacks come on lighter volume, whether rebounds come on stronger volume? That's the pattern-recognition skill this chart is training.</div>`;
+  } else if(content && content.isHourlyGap) {
+    body = `
+      <div style="background:${C.cardHigh};border-radius:10px;padding:12px 14px;margin-bottom:14px;color:${C.textSub};font-size:12px;line-height:1.6;">StockIQ has never stored hourly data, so this is the one chart where there's no number to hand you. This step teaches you what to look for — you have to read it live on your own chart.</div>
+      ${content.dailyDamaged ? `
+      <div style="background:${C.redDim};border:1px solid ${C.red}55;border-radius:12px;padding:14px;margin-bottom:14px;">
+        <div style="color:${C.red};font-size:12.5px;font-weight:800;margin-bottom:6px;">⚠️ Your daily chart currently reads ${content.dailyState}</div>
+        <div style="color:${C.text};font-size:12.5px;line-height:1.6;">Any bullish MACD cross or bounce you see on this hourly chart right now is just a bounce, not a buy signal. The Entry Timing chart never overrides a damaged daily chart — it can only help you time an entry into a setup the other charts have already approved.</div>
+      </div>` : `
+      <div style="background:${C.card};border:1px solid ${C.border};border-radius:12px;padding:14px;margin-bottom:14px;color:${C.textSub};font-size:12.5px;line-height:1.6;">Your daily chart is not currently damaged, so this step is worth using for real: it can help you time a cleaner entry into the setup the other three charts already approved.</div>`}
+      <div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;">What to look for</div>
+      <div style="margin-bottom:6px;">${['Price reclaiming the hourly 20 EMA','Short-term higher lows forming','MACD improving or crossing bullish','Volume increasing as buyers return','Failed rebounds and rejection at resistance — a warning, not a green light'].map(t=>`<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:6px;"><span style="color:${C.textMuted};font-size:12px;">○</span><span style="color:${C.textSub};font-size:12px;line-height:1.5;">${t}</span></div>`).join('')}</div>`;
+  } else {
+    body = (content||[]).map(renderMentorTeachRow).join('');
+  }
+
+  const asideNote = (tabId==='bigPicture' && plan.longTermAside) ? `<div style="background:${C.blueDim};border-radius:10px;padding:10px 12px;margin-top:12px;color:${C.blue};font-size:11px;line-height:1.6;">💡 ${plan.longTermAside}</div>` : '';
+
+  showSheet(`
+    <div style="width:36px;height:4px;border-radius:2px;background:${C.border};margin:0 auto 18px;"></div>
+    ${mentorProgressBar(totalSteps, mentorStep)}
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+      <span style="color:${C.purple};font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;">Guided Analysis · ${s.ticker} · ${mentorStep+1}/${totalSteps}</span>
+      <button onclick="closeAllOverlays()" style="background:none;border:none;color:${C.textMuted};font-size:20px;cursor:pointer;">✕</button>
+    </div>
+    <div style="color:${tab.color};font-size:20px;font-weight:900;letter-spacing:-0.01em;margin-bottom:2px;">${tab.name}${isOptional?` <span style="color:${C.textMuted};font-size:11px;font-weight:700;">(optional for ${s.type})</span>`:''}</div>
+    <div style="color:${C.textSub};font-size:12.5px;line-height:1.6;margin-bottom:10px;">"${tab.question}"</div>
+    <div style="color:${C.textMuted};font-size:10.5px;margin-bottom:14px;">Pull up your <b style="color:${C.textSub};">${tab.name}</b> tab: ${tab.timeframe} · ${tab.aggregation}</div>
+    ${body}
+    ${asideNote}
+    <div style="display:flex;gap:10px;margin-top:20px;">
+      ${mentorStep>0?`<button onclick="mentorBack()" style="flex:1;padding:15px;border-radius:14px;border:1px solid ${C.border};background:none;color:${C.textSub};font-size:14px;font-weight:700;cursor:pointer;">Back</button>`:''}
+      <button onclick="mentorNext()" style="flex:2;padding:15px;border-radius:14px;border:none;background:${C.purple};color:#000;font-size:15px;font-weight:800;cursor:pointer;">${isLast?'Done ✓':'Next Chart →'}</button>
+    </div>`);
+}
+
+const MENTOR_CAN_ASSESS_NOW = [
+  'Price relative to the current 20 EMA, 50 SMA and 200 SMA',
+  'Current RSI',
+  'Current MACD relationship',
+  'Today\'s volume vs. the 20-day average',
+  'ATR and current volatility',
+  'Distance from support',
+];
+const MENTOR_NEEDS_HISTORY = [
+  'Whether moving averages are rising or falling',
+  'Accumulation vs. distribution across multiple sessions',
+  'Higher-high / lower-low structure proxies',
+  'Trend deterioration or improvement over time',
+  'Whether today\'s condition is persistent or just one noisy session',
+];
+
+function renderMentorLimitedIntroStep() {
+  const s = stocks.find(x=>String(x.id)===String(mentorStockId));
+  if(!s) { closeAllOverlays(); return; }
+  const total = mentorTabOrder.length + 1;
+  showSheet(`
+    <div style="width:36px;height:4px;border-radius:2px;background:${C.border};margin:0 auto 18px;"></div>
+    ${mentorProgressBar(total, 0)}
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+      <span style="color:${C.purple};font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;">Guided Analysis · ${s.ticker}</span>
+      <button onclick="closeAllOverlays()" style="background:none;border:none;color:${C.textMuted};font-size:20px;cursor:pointer;">✕</button>
+    </div>
+    <div style="color:${C.orange};font-size:20px;font-weight:900;letter-spacing:-0.01em;margin-bottom:10px;">⚠️ Limited History Available</div>
+    <div style="color:${C.text};font-size:13px;line-height:1.7;margin-bottom:18px;">StockIQ can explain today's setup, but it can't yet confirm trend slope, accumulation vs. distribution, or price structure from one or a few snapshots. Import historical CSV data or keep logging daily updates to unlock the full analysis.</div>
+    <div style="background:${C.card};border:1px solid ${C.border};border-radius:12px;padding:14px;margin-bottom:12px;">
+      <div style="color:${C.green};font-size:10px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;">✓ What StockIQ can assess now</div>
+      ${MENTOR_CAN_ASSESS_NOW.map(t=>`<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:6px;"><span style="color:${C.green};font-size:12px;">•</span><span style="color:${C.textSub};font-size:12px;line-height:1.5;">${t}</span></div>`).join('')}
+    </div>
+    <div style="background:${C.card};border:1px solid ${C.border};border-radius:12px;padding:14px;margin-bottom:20px;">
+      <div style="color:${C.blue};font-size:10px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;">🔍 What still needs history</div>
+      ${MENTOR_NEEDS_HISTORY.map(t=>`<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:6px;"><span style="color:${C.blue};font-size:12px;">•</span><span style="color:${C.textSub};font-size:12px;line-height:1.5;">${t}</span></div>`).join('')}
+    </div>
+    <div style="color:${C.textMuted};font-size:11px;line-height:1.6;margin-bottom:20px;">The walkthrough still continues below — anywhere StockIQ can't confirm something from saved data, it'll show you exactly what to check yourself on the chart.</div>
+    <button onclick="mentorNext()" style="width:100%;padding:15px;border-radius:14px;border:none;background:${C.purple};color:#000;font-size:15px;font-weight:800;cursor:pointer;">Continue →</button>`);
+}
+
+function renderMentorStep() {
+  if(mentorMode==='setup') renderMentorSetupStep();
+  else if(mentorMode==='analysis') {
+    if(mentorShowLimitedIntro && mentorStep===0) renderMentorLimitedIntroStep();
+    else renderMentorAnalysisStep();
+  }
+}
+function mentorNext() {
+  if(mentorMode==='setup') {
+    if(mentorStep >= MENTOR_TAB_CANON_ORDER.length-1) { closeAllOverlays(); return; }
+    mentorStep++; renderMentorStep(); return;
+  }
+  const total = mentorTabOrder.length + (mentorShowLimitedIntro?1:0);
+  if(mentorStep >= total-1) { closeAllOverlays(); return; }
+  mentorStep++;
+  renderMentorStep();
+}
+function mentorBack() {
+  if(mentorStep>0) { mentorStep--; renderMentorStep(); }
+}
+
 // Price line chart from your snapshot history, with 50/200-day SMA overlays
 // when that data is present. Plain SVG — no chart library, matches app style.
 function renderPriceChart(s) {
@@ -1655,6 +2487,62 @@ function renderPriceChart(s) {
       <span style="color:${C.textMuted};font-size:10px;">${last.date}</span>
     </div>
     ${(!has50||!has200)?`<div style="color:${C.textMuted};font-size:10px;margin-top:8px;line-height:1.5;">${!has50&&!has200?'50 & 200-day lines need a CSV import — the daily update wizard doesn\'t collect those.':!has50?'50-day line needs a CSV import to appear.':'200-day line needs a CSV import to appear.'}</div>`:''}
+  </div>`;
+}
+
+const MARKET_STATE_META = {
+  'Healthy Uptrend':    {icon:'🟢', color:C.green,  tagline:'Buyers remain in control.'},
+  'Normal Pullback':    {icon:'🟡', color:C.yellow, tagline:'Healthy pause. Be patient.'},
+  'Consolidation':      {icon:'🟠', color:C.orange, tagline:'Market is undecided.'},
+  'Trend Weakening':    {icon:'🟠', color:C.orange, tagline:'Risk increasing.'},
+  'Confirmed Breakdown':{icon:'🔴', color:C.red,    tagline:'Capital preservation first.'},
+  'Recovery Attempt':   {icon:'🔵', color:C.blue,   tagline:'Hope is not confirmation.'},
+  'Insufficient Data':  {icon:'⚪', color:C.textMuted, tagline:'Not enough data yet to classify this stock.'},
+};
+const EVIDENCE_COLOR = {Strong:C.green, Moderate:C.yellow, Weak:C.orange, 'Insufficient Data':C.textMuted};
+
+function renderMarketStateCard(s) {
+  const ms = computeMarketState(s);
+  const meta = MARKET_STATE_META[ms.state] || MARKET_STATE_META['Insufficient Data'];
+
+  if(ms.state==='Insufficient Data') {
+    return `
+    <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
+      <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">Market State</div>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+        <span style="font-size:20px;">${meta.icon}</span>
+        <span style="color:${meta.color};font-size:16px;font-weight:900;">Insufficient Data</span>
+      </div>
+      <div style="color:${C.textSub};font-size:12px;line-height:1.6;">Still missing: ${(ms.missing||[]).join(', ')}. Add these on your next daily update to unlock market-state classification.</div>
+    </div>`;
+  }
+
+  const metConditions = ms.conditions.filter(c=>c.evaluable && c.met);
+  const unmetConditions = ms.conditions.filter(c=>c.evaluable && !c.met);
+  const evidColor = EVIDENCE_COLOR[ms.evidence] || C.textMuted;
+
+  return `
+  <div style="background:${C.card};border-radius:16px;border:2px solid ${meta.color}44;padding:18px;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">
+      <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;">Market State</div>
+      <span style="background:${evidColor}22;color:${evidColor};border-radius:20px;padding:4px 10px;font-size:10px;font-weight:800;white-space:nowrap;">${ms.evidence.toUpperCase()}</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;">
+      <span style="font-size:22px;">${meta.icon}</span>
+      <span style="color:${meta.color};font-size:18px;font-weight:900;">${ms.state}</span>
+    </div>
+    <div style="color:${C.textSub};font-size:12.5px;margin-bottom:12px;">${meta.tagline}${ms.closestMatch?' (closest match — no state fully qualified)':''}</div>
+    <div style="color:${C.textMuted};font-size:10px;margin-bottom:8px;">${ms.evidenceCount} support this state</div>
+    ${metConditions.length?`
+    <div style="margin-bottom:${unmetConditions.length?'10px':'0'};">
+      ${metConditions.map(c=>`<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:5px;"><span style="color:${C.green};font-size:12px;">✓</span><span style="color:${C.textSub};font-size:12px;line-height:1.5;">${c.label}</span></div>`).join('')}
+    </div>`:''}
+    ${unmetConditions.length?`
+    <div style="border-top:1px solid ${C.border};padding-top:10px;">
+      <div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px;">Not Yet</div>
+      ${unmetConditions.map(c=>`<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:5px;"><span style="color:${C.textMuted};font-size:12px;">✗</span><span style="color:${C.textSub};font-size:12px;line-height:1.5;">${c.label}</span></div>`).join('')}
+    </div>`:''}
+    ${ms.staleNote?`<div style="background:${C.orangeDim};border-radius:8px;padding:8px 10px;margin-top:10px;color:${C.orange};font-size:11px;">⚠️ ${ms.staleNote}</div>`:''}
   </div>`;
 }
 
@@ -1764,13 +2652,13 @@ function renderTabOverview(s) {
       </div>
       ${!s.research ? `<div style="color:${C.textMuted};font-size:12px;line-height:1.6;">No qualitative research added yet. This stays separate from your score — it's here for context, not the math.</div>` :
         parsedResearch ? `
-        ${parsedResearch.catalysts?`<div style="margin-bottom:10px;"><div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:3px;">Catalysts to Watch</div><p style="color:${C.textSub};font-size:12px;line-height:1.6;margin:0;">${parsedResearch.catalysts}</p></div>`:''}
-        ${parsedResearch.bottomLine?`<div><div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:3px;">What The Research Says</div><p style="color:${C.textSub};font-size:12px;line-height:1.6;margin:0;">${parsedResearch.bottomLine}</p></div>`:''}
+        ${parsedResearch.catalysts?`<p style="color:${C.textSub};font-size:12px;line-height:1.6;margin:0;">${parsedResearch.catalysts}</p>`:`<p style="color:${C.textMuted};font-size:12px;line-height:1.6;margin:0;">See the full breakdown in Analysis or Notes.</p>`}
         ` : `<p style="color:${C.textSub};font-size:12px;line-height:1.6;margin:0;">${s.research.length>220?s.research.slice(0,220)+'…':s.research}</p>`}
     </div>`;
 
   return `
     <div style="display:flex;flex-direction:column;gap:14px;">
+      ${renderMarketStateCard(s)}
       ${takeCard}
       ${glanceGrid}
       ${renderPriceChart(s)}
@@ -1790,11 +2678,6 @@ function renderTabAnalysis(s) {
   const slope = computeMASlope(s);
   const upDayVol = computeVolumeOnUpDays(s);
   const parsedResearch = parseResearch(s.research);
-  const researchCallout = (label, text) => text ? `
-    <div style="background:${C.purple}14;border:1px solid ${C.purple}33;border-radius:10px;padding:10px 12px;margin-top:10px;">
-      <div style="color:${C.purple};font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:3px;">🔮 ${label} (from your research)</div>
-      <div style="color:${C.textSub};font-size:12px;line-height:1.5;">${text}</div>
-    </div>` : '';
 
   const howToReadCard = `
     <details style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:16px 18px;">
@@ -1821,10 +2704,11 @@ function renderTabAnalysis(s) {
       </div>
       <div style="color:${C.text};font-size:13px;line-height:1.7;margin-bottom:${narrative.waitingOn.length?'14px':'0'};">${narrative.read}</div>
       ${narrative.waitingOn.length?`
-      <div style="background:${C.cardHigh};border-radius:10px;padding:12px 14px;">
+      <div style="background:${C.cardHigh};border-radius:10px;padding:12px 14px;margin-bottom:14px;">
         <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.07em;margin-bottom:8px;">What This Stock Is Waiting For</div>
         ${narrative.waitingOn.map(w=>`<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:6px;"><span style="color:${C.textMuted};font-size:12px;">○</span><span style="color:${C.textSub};font-size:12px;line-height:1.5;">${w}</span></div>`).join('')}
       </div>`:''}
+      <button onclick="showTab('plan','${s.id}')" style="width:100%;padding:14px;background:${C.green};color:#000;border:none;border-radius:14px;font-size:14px;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">See My Game Plan <span>→</span></button>
     </div>`;
 
   const trajBox = `
@@ -1894,28 +2778,19 @@ function renderTabAnalysis(s) {
     const riskPct = budget>0 ? (dollarRisk/budget)*100 : null;
     if(riskPct!=null) riskRows.push(row('🎯','Position Size Fit', `${fmtP(budget)} position risks about ${fmtP(dollarRisk)} (${riskPct.toFixed(0)}%) on a 1.5× ATR stop.`, riskPct<15?'Good':'Tight', riskPct<15?C.green:C.yellow));
   }
-  const riskCard = riskRows.length ? categoryCard('Risk & Volatility', s.atr ? `${s.ticker} moves about ${fmtP(s.atr)} a day on average. That's normal — just size your position right.` : 'Add an ATR reading to see risk sizing.', riskRows) + (parsedResearch?researchCallout('Key Risk', parsedResearch.risk):'') : '';
+  const riskCard = riskRows.length ? categoryCard('Risk & Volatility', s.atr ? `${s.ticker} moves about ${fmtP(s.atr)} a day on average. That's normal — just size your position right.` : 'Add an ATR reading to see risk sizing.', riskRows) : '';
 
-  const researchContextCard = (parsedResearch && (parsedResearch.fundamentals||parsedResearch.sentiment)) ? `
+  // One consolidated research card instead of scattering the same pasted
+  // content across three separate cards — fixes the "everything repeats
+  // itself" complaint. Catalysts stay Overview-only; this covers the rest.
+  const researchCard = parsedResearch ? `
     <div style="background:${C.card};border-radius:16px;border:1px solid ${C.purple}33;padding:18px;">
       <div style="color:${C.purple};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">🔮 From Your Research</div>
-      ${parsedResearch.fundamentals?`<div style="margin-bottom:${parsedResearch.sentiment?'12px':'0'};"><div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:3px;">Fundamentals vs Technicals</div><p style="color:${C.textSub};font-size:12px;line-height:1.6;margin:0;">${parsedResearch.fundamentals}</p></div>`:''}
-      ${parsedResearch.sentiment?`<div><div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:3px;">Analyst Sentiment</div><p style="color:${C.textSub};font-size:12px;line-height:1.6;margin:0;">${parsedResearch.sentiment}</p></div>`:''}
+      ${['fundamentals','sentiment','risk','bottomLine'].filter(k=>parsedResearch[k]).map((k,i,arr)=>{
+        const labels = {fundamentals:'Fundamentals vs Technicals', sentiment:'Analyst Sentiment', risk:'Key Risk', bottomLine:'What The Research Says'};
+        return `<div style="margin-bottom:${i<arr.length-1?'12px':'0'};"><div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:3px;">${labels[k]}</div><p style="color:${C.textSub};font-size:12px;line-height:1.6;margin:0;">${parsedResearch[k]}</p></div>`;
+      }).join('')}
     </div>` : '';
-
-  const bottomLineCard = `
-    <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
-      <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">Bottom Line</div>
-      <div style="display:flex;gap:14px;align-items:flex-start;margin-bottom:16px;">
-        <p style="flex:1;color:${C.text};font-size:13px;line-height:1.7;margin:0;">${narrative.read}</p>
-        <div style="flex-shrink:0;text-align:center;min-width:74px;">
-          <div style="color:${narrative.color};font-size:15px;font-weight:900;letter-spacing:0.02em;">${narrative.verdict}</div>
-          <div style="color:${C.textMuted};font-size:10px;margin-top:2px;line-height:1.4;">${narrative.verdictSub}</div>
-        </div>
-      </div>
-      ${parsedResearch&&parsedResearch.bottomLine?researchCallout('What The Research Says', parsedResearch.bottomLine):''}
-      <button onclick="showTab('plan','${s.id}')" style="width:100%;padding:14px;background:${C.green};color:#000;border:none;border-radius:14px;font-size:14px;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;margin-top:${parsedResearch&&parsedResearch.bottomLine?'14px':'0'};">See My Game Plan <span>→</span></button>
-    </div>`;
 
   return `
     <div style="display:flex;flex-direction:column;gap:14px;">
@@ -1926,8 +2801,7 @@ function renderTabAnalysis(s) {
       ${momCard}
       ${volCard}
       ${riskCard}
-      ${researchContextCard}
-      ${bottomLineCard}
+      ${researchCard}
     </div>`;
 }
 
@@ -2083,9 +2957,48 @@ async function doDelete(id) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // BUILD BUY PLAN (creates tranches — previously nothing did this)
 // ═══════════════════════════════════════════════════════════════════════════════
+function showReclassifyFlow(stockId) {
+  const s = stocks.find(x=>String(x.id)===String(stockId));
+  if(!s) return;
+  showSheet(`
+    <div style="width:36px;height:4px;border-radius:2px;background:${C.border};margin:0 auto 20px;"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+      <span style="color:${C.textMuted};font-size:11px;">${s.ticker} · Strategy</span>
+      <button onclick="closeAllOverlays()" style="background:none;border:none;color:${C.textMuted};font-size:22px;cursor:pointer;">✕</button>
+    </div>
+    <div style="color:${C.text};font-size:22px;font-weight:900;letter-spacing:-0.01em;margin-bottom:8px;">What's your plan for this stock?</div>
+    <div style="color:${C.textMuted};font-size:12px;margin-bottom:20px;line-height:1.6;">Choose the strategy you will actually follow. The app uses different entry, exit, and risk rules for each one.</div>
+    <div style="display:flex;flex-direction:column;gap:10px;">
+      <button onclick="doReclassify('${stockId}','Swing Trade')" style="padding:16px 18px;border-radius:14px;font-size:15px;font-weight:700;border:1px solid ${C.border};background:none;color:${C.text};cursor:pointer;text-align:left;">Swing Trade — days to several weeks</button>
+      <button onclick="doReclassify('${stockId}','Position Trade')" style="padding:16px 18px;border-radius:14px;font-size:15px;font-weight:700;border:1px solid ${C.border};background:none;color:${C.text};cursor:pointer;text-align:left;">Position Trade — several weeks to months</button>
+      <button onclick="doReclassify('${stockId}','Long-Term Hold')" style="padding:16px 18px;border-radius:14px;font-size:15px;font-weight:700;border:1px solid ${C.border};background:none;color:${C.text};cursor:pointer;text-align:left;">Long-Term Hold — years</button>
+    </div>`);
+}
+
+async function doReclassify(stockId, newType) {
+  const s = stocks.find(x=>String(x.id)===String(stockId));
+  if(!s) return;
+  const updated = {...s, type:newType};
+  stocks = stocks.map(x=>String(x.id)===String(stockId)?updated:x);
+  reclassifyDismissed.delete(String(stockId));
+  closeAllOverlays();
+  await fbSaveStock(updated);
+  showSaveStatus('saved');
+  setTimeout(()=>showSaveStatus('ready'),2000);
+  renderDetail(updated);
+  renderHome();
+}
+
+function dismissReclassifyBanner(stockId) {
+  reclassifyDismissed.add(String(stockId));
+  const s = stocks.find(x=>String(x.id)===String(stockId));
+  if(s) renderDetail(s);
+}
+
 function showBuildPlanFlow(stockId) {
   const s = stocks.find(x=>String(x.id)===String(stockId));
   if(!s) return;
+  if(needsReclassify(s)) { showReclassifyFlow(stockId); return; }
   showSheet(`
     <div style="width:36px;height:4px;border-radius:2px;background:${C.border};margin:0 auto 20px;"></div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
@@ -2104,6 +3017,17 @@ function showBuildPlanFlow(stockId) {
 async function doBuildPlan(stockId, count) {
   const s = stocks.find(x=>String(x.id)===String(stockId));
   if(!s) return;
+  if(needsReclassify(s)) { closeAllOverlays(); showReclassifyFlow(stockId); return; }
+  if((s.tranche||[]).some(t=>t.status==='filled')) {
+    closeAllOverlays();
+    showModal(`
+      <div style="background:${C.card};border-radius:20px;padding:22px;border:1px solid ${C.red}44;">
+        <div style="color:${C.text};font-size:15px;font-weight:800;margin-bottom:10px;">Can't rebuild — you already bought a tranche</div>
+        <div style="color:${C.textSub};font-size:12px;line-height:1.6;margin-bottom:14px;">Rebuilding the plan would erase the record of what you already paid. That's protected on purpose.</div>
+        <button onclick="closeAllOverlays()" style="width:100%;padding:12px;border-radius:12px;border:none;background:${C.text};color:${C.bg};font-size:14px;font-weight:800;cursor:pointer;">Got it</button>
+      </div>`);
+    return;
+  }
   const step = s.atr ? s.atr : s.price*0.03; // fall back to 3% spacing if no ATR yet
   const labels = ['Tranche 1','Tranche 2','Tranche 3'];
   const notes = [
@@ -2136,6 +3060,8 @@ async function doBuildPlan(stockId, count) {
 // FILL / SELL MODALS
 // ═══════════════════════════════════════════════════════════════════════════════
 function showFillModal(stockId, trancheLabel) {
+  const _s = stocks.find(x=>String(x.id)===String(stockId));
+  if(_s && needsReclassify(_s)) { showReclassifyFlow(stockId); return; }
   showModal(`
     <div style="background:${C.card};border-radius:22px;padding:24px;border:1px solid ${C.green}44;">
       <div style="color:${C.text};font-size:20px;font-weight:900;margin-bottom:4px;">Confirm Buy</div>
@@ -2231,6 +3157,8 @@ const UPDATE_STEPS = [
   {key:'vol',       label:"Today's volume?",          hint:'e.g. 138M',    inputmode:'text', note:'Type 120M, 1.4B, or the full number'},
   {key:'avgvol',    label:"20-day avg volume?",       hint:'e.g. 120M',    inputmode:'text', note:'Type 120M, 1.4B, or the full number'},
   {key:'ma20',      label:"20-day moving average?",   hint:'e.g. 197.20',  prefix:'$', inputmode:'decimal'},
+  {key:'ma50',      label:"50-day moving average?",   hint:'e.g. 191.40',  prefix:'$', inputmode:'decimal', note:'Needed for Market State — same place you found the 20-day average'},
+  {key:'ma200',     label:"200-day moving average?",  hint:'e.g. 178.10',  prefix:'$', inputmode:'decimal', note:'Needed for Market State'},
   {key:'macdLine',  label:"MACD Line value?",         hint:'e.g. -1.234',  inputmode:'decimal', note:'From the MACD indicator in ThinkorSwim'},
   {key:'signalLine',label:"Signal Line value?",       hint:'e.g. -0.876',  inputmode:'decimal', note:'The dotted line on your MACD indicator'},
   {key:'atr',       label:"ATR today?",               hint:'e.g. 6.20',    prefix:'$', inputmode:'decimal', note:'How much the stock typically moves per day'},
@@ -2299,6 +3227,8 @@ async function doSaveUpdate() {
     vol:   parseVol(updateVals.vol),
     avgvol:parseVol(updateVals.avgvol),
     ma20:  parseFloat(updateVals.ma20)||null,
+    ma50:  parseFloat(updateVals.ma50)||null,
+    ma200: parseFloat(updateVals.ma200)||null,
     macdLine:   parseFloat(updateVals.macdLine)||null,
     signalLine: parseFloat(updateVals.signalLine)||null,
     atr:   parseFloat(updateVals.atr)||null,
@@ -2313,6 +3243,8 @@ async function doSaveUpdate() {
     vol:        snap.vol,
     avgvol:     snap.avgvol ?? s.avgvol,
     ma20:       snap.ma20,
+    ma50:       snap.ma50 ?? s.ma50,
+    ma200:      snap.ma200 ?? s.ma200,
     macdLine:   snap.macdLine,
     signalLine: snap.signalLine,
     atr:        snap.atr,
@@ -2331,22 +3263,36 @@ async function doSaveUpdate() {
 // ═══════════════════════════════════════════════════════════════════════════════
 // ADD STOCK FLOW
 // ═══════════════════════════════════════════════════════════════════════════════
-// Suggests Swing / Long Term / Both from what's already been typed into the
-// wizard — trend (price vs 50/200-day) and volatility (ATR as % of price).
-// A steady uptrend with small daily moves favors holding; real daily
-// movement on top of a trend supports doing both; no trend plus real
-// movement favors tactical swing trades. This is a suggestion, not a
-// verdict — the choice buttons below still let you override it.
+// Suggests Swing Trade / Position Trade / Long-Term Hold from what's already
+// typed into the wizard. Deliberately cautious — never confidently suggests
+// Long-Term Hold from technicals alone (needs business/valuation research),
+// and requires a real workable setup before suggesting Swing Trade. Mirrors
+// suggestHoldTypeLive's logic, adapted for raw wizard strings instead of a
+// full stock object with snapshot history.
 function suggestHoldType(vals) {
-  const price = parseFloat(vals.price), ma50 = parseFloat(vals.ma50), ma200 = parseFloat(vals.ma200), atr = parseFloat(vals.atr);
+  const price = parseFloat(vals.price), ma50 = parseFloat(vals.ma50), ma200 = parseFloat(vals.ma200), atr = parseFloat(vals.atr), hi52 = parseFloat(vals.hi52);
   if(!price || !ma50 || !ma200 || !atr) return null;
   const trendUp = price>ma50 && price>ma200;
   const atrPct = (atr/price)*100;
-  const pctStr = atrPct.toFixed(1)+'%';
-  if(trendUp && atrPct<2.5) return {label:'Long Term', reason:`Steady uptrend, small daily moves (ATR ${pctStr}) — better suited to holding than day-to-day trading.`};
-  if(trendUp && atrPct>=2.5) return {label:'Both', reason:`Strong uptrend AND real daily movement (ATR ${pctStr}) — this can support holding long-term while trading the pullbacks, like you described with NVDA.`};
-  if(!trendUp && atrPct>=2.5) return {label:'Swing', reason:`No confirmed long-term uptrend yet, but real daily movement (ATR ${pctStr}) — better suited to tactical in-and-out trades.`};
-  return {label:'Both', reason:`No strong trend and modest daily movement — genuinely a toss-up from the numbers alone. Your call.`};
+  const distFrom50 = ((price-ma50)/ma50)*100;
+  const notSeverelyExtended = distFrom50 < 20;
+  const hasWorkableSetup = !isNaN(hi52) && hi52>price;
+  const looksLongTermTechnically = trendUp && atrPct<2 && notSeverelyExtended;
+
+  if(looksLongTermTechnically) {
+    return {label:null, confident:false,
+      reason:`Technicals support a long-term uptrend, but business quality and valuation research are still required before classifying this as a Long-Term Hold.`};
+  }
+  if(trendUp && notSeverelyExtended) {
+    return {label:'Position Trade', confident:true,
+      reason:`Price is above its 200-day average, and the intermediate trend looks healthy without being severely extended.`};
+  }
+  if(hasWorkableSetup && atrPct>=2) {
+    return {label:'Swing Trade', confident:true,
+      reason:`There's a workable setup here — real room to a target with enough daily movement (ATR ${atrPct.toFixed(1)}%) — for a shorter-term trade.`};
+  }
+  return {label:null, confident:false,
+    reason:`Nothing here clearly supports one strategy over another right now — no defined setup, and the trend isn't confirmed either way.`};
 }
 
 const ADD_STEPS = [
@@ -2361,7 +3307,7 @@ const ADD_STEPS = [
   {key:'atr',     label:'ATR — typical daily move?', hint:'e.g. 6.20',      inputmode:'decimal', prefix:'$', note:'Find ATR on ThinkorSwim. Shows how much it typically moves per day.'},
   {key:'hi52',    label:'52-week high',           hint:'e.g. 236.54',        inputmode:'decimal', prefix:'$'},
   {key:'lo52',    label:'52-week low',            hint:'e.g. 158.39',        inputmode:'decimal', prefix:'$'},
-  {key:'holdtype',label:'How long will you hold?',hint:'',                   type:'choice', choices:['Swing — days to weeks','Long Term — months to years','Both — hold long-term, trade the swings']},
+  {key:'holdtype',label:'What is your plan for this stock?',hint:'Choose the strategy you will actually follow. The app uses different entry, exit, and risk rules for each one.', type:'choice', choices:['Swing Trade — days to several weeks','Position Trade — several weeks to several months','Long-Term Hold — years']},
 ];
 
 function showAddFlow() {
@@ -2384,9 +3330,12 @@ function renderAddStep() {
         <span style="color:${C.textMuted};font-size:11px;">${addStep+1} of ${ADD_STEPS.length}</span>
         <button onclick="closeAllOverlays()" style="background:none;border:none;color:${C.textMuted};font-size:22px;cursor:pointer;">✕</button>
       </div>
-      <div style="color:${C.text};font-size:22px;font-weight:900;letter-spacing:-0.01em;margin-bottom:${suggestion?'12px':'20px'};">${cur.label}</div>
-      ${suggestion?`<div style="background:${C.tealDim};border:1px solid ${C.teal}44;border-radius:10px;padding:12px 14px;margin-bottom:20px;">
+      <div style="color:${C.text};font-size:22px;font-weight:900;letter-spacing:-0.01em;margin-bottom:${suggestion?'12px':'8px'};">${cur.label}</div>
+      ${cur.hint&&cur.key==='holdtype'?`<div style="color:${C.textMuted};font-size:12px;margin-bottom:16px;line-height:1.5;">${cur.hint}</div>`:''}
+      ${suggestion&&suggestion.label?`<div style="background:${C.tealDim};border:1px solid ${C.teal}44;border-radius:10px;padding:12px 14px;margin-bottom:20px;">
         <div style="color:${C.teal};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">📊 Based on your numbers: ${suggestion.label}</div>
+        <div style="color:${C.textSub};font-size:12px;line-height:1.5;">${suggestion.reason}</div>
+      </div>`:suggestion?`<div style="background:${C.cardHigh};border:1px solid ${C.borderLight};border-radius:10px;padding:12px 14px;margin-bottom:20px;">
         <div style="color:${C.textSub};font-size:12px;line-height:1.5;">${suggestion.reason}</div>
       </div>`:''}
       <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:28px;">
@@ -2460,7 +3409,7 @@ async function doAddStock() {
     price:   parseFloat(addVals.price)||0,
     change:  0, pct: 0,
     verdict: 'Watch', score: 70,
-    type:    addVals.holdtype?.includes('Both')?'Both':addVals.holdtype?.includes('Swing')?'Swing':'Long Term',
+    type:    addVals.holdtype?.includes('Position Trade')?'Position Trade':addVals.holdtype?.includes('Swing Trade')?'Swing Trade':'Long-Term Hold',
     buyZone: 'Run full analysis',
     invested: 0,
     hi52:    parseFloat(addVals.hi52)||null,
