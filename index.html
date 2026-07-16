@@ -91,8 +91,8 @@ input[type=number]{-moz-appearance:textfield;}
   <div id="list-header" style="padding:10px 20px 4px;"></div>
   <!-- Stock list -->
   <div id="stock-list" style="padding:8px 16px 4px;display:flex;flex-direction:column;gap:14px;"></div>
-  <!-- Quick action tiles -->
-  <div id="quick-actions" style="padding:16px 16px 40px;"></div>
+  <!-- Quick action tiles — hidden per Kim's request; container kept (0 padding) rather than removed -->
+  <div id="quick-actions" style="padding:0;"></div>
 </div>
 
 <!-- BOTTOM NAV -->
@@ -569,7 +569,7 @@ function closeAllOverlays() {
 // ═══════════════════════════════════════════════════════════════════════════════
 // HOME RENDER
 // ═══════════════════════════════════════════════════════════════════════════════
-const TAGS = ['All','★ Favorites','Buy Zone','Watch','Wait','Pass','Swing Trade','Position Trade','Long-Term Hold'];
+const TAGS = ['All','★ Favorites','Buy Zone','Watch','Wait','Pass','Swing Trade','Position Trade','Long-Term Hold','Archived'];
 const TAG_COLORS = {'Buy Zone':C.green,'Watch':C.yellow,'Wait':C.orange,'Pass':C.red};
 
 // Generic "not built yet" notice — used for nav items / tiles that are visual
@@ -603,7 +603,9 @@ function renderHome() {
   renderFilterBar();
   renderListHeader();
   renderStockList();
-  renderQuickActions();
+  // renderQuickActions(); — hidden per Kim's request. Tiles (Scan New Stock,
+  // Market Overview, Journal, Alerts) are still fully intact below; re-add
+  // this call to bring them back.
   // renderBottomNav(); — hidden for now per Kim, not deleted. Nav bar and its
   // "Coming Soon" wiring are still intact below; just re-add this call to bring it back.
 }
@@ -699,12 +701,20 @@ function setTag(t) { activeTag=t; renderFilterBar(); renderStockList(); }
 
 function renderListHeader() {
   const el = document.getElementById('list-header');
-  const n = stocks.length;
+  const active = (stocks||[]).filter(s=>!s.archived);
+  const counts = {'Active Opportunity':0, 'Watch Closely':0, 'Low Priority':0};
+  active.forEach(s => {
+    const status = computeOpportunityStatus(s, s.type).status;
+    if(status==='Pass / Archive') return; // not yet archived, but not counted as a live bucket either
+    counts[status] = (counts[status]||0)+1;
+  });
+  const archivedCount = (stocks||[]).filter(s=>s.archived).length;
   el.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;">
-      <span style="color:${C.textMuted};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.06em;">My Watchlist (${n})</span>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+      <span style="color:${C.textMuted};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.06em;">My Watchlist (${active.length})</span>
       <span style="color:${C.textMuted};font-size:10px;">Best opportunities ranked at the top</span>
-    </div>`;
+    </div>
+    <div style="color:${C.textMuted};font-size:10.5px;">Active ${counts['Active Opportunity']} · Watching ${counts['Watch Closely']} · Low Priority ${counts['Low Priority']} · Archived ${archivedCount}</div>`;
 }
 
 // Compact 2-line trend label ("Uptrend / Strong", "Bottoming / Building", etc.)
@@ -742,6 +752,7 @@ function miniSparkline(s, color) {
 function computeGamePlanStatus(s) {
   const stage = computeGamePlanStage(s);
   const STAGE_BADGE = {
+    'Archived':  {icon:'📦', label:'Archived', color:C.textMuted},
     'Completed': {icon:'✅', label:'Completed', color:C.textSub},
     'Exiting':   {icon:'🔴', label:'Exiting', color:C.red},
     'Managing':  {icon:'🛡', label:'Managing', color:C.teal},
@@ -760,6 +771,8 @@ function renderStockList() {
   }
 
   const filtered = ranked.filter(s => {
+    if(activeTag==='Archived') return !!s.archived;
+    if(s.archived) return false; // archived stocks never appear outside the Archived tag
     if(activeTag==='All') return true;
     if(activeTag==='★ Favorites') return s.starred;
     if(activeTag==='Swing Trade') return s.type==='Swing Trade';
@@ -823,9 +836,11 @@ function renderStockCard(s, rank) {
   const tc = typeBadgeColors(s.type);
   const needsReclass = needsReclassify(s);
   const scoreRing = renderConvictionBadge(conviction.level, 'sm');
+  const opp = computeOpportunityStatus(s, s.type);
+  const oppMeta = OPPORTUNITY_STATUS_META[opp.status];
 
   return `
-    <div class="fade-in" style="background:${C.card};border-radius:20px;border:1px solid ${C.border};padding:16px;cursor:pointer;position:relative;overflow:hidden;" onclick="openDetail('${s.id}')">
+    <div class="fade-in" style="background:${C.card};border-radius:20px;border:1px solid ${C.border};padding:16px;cursor:pointer;position:relative;overflow:hidden;opacity:${s.archived?'0.6':'1'};" onclick="openDetail('${s.id}')">
       <div style="position:absolute;top:0;left:0;right:0;height:3px;background:${cfg.color};opacity:0.85;"></div>
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;">
         <div style="display:flex;gap:10px;align-items:center;min-width:0;">
@@ -838,7 +853,10 @@ function renderStockCard(s, rank) {
               <button onclick="event.stopPropagation();toggleStar('${s.id}')" style="background:none;border:none;cursor:pointer;font-size:14px;color:${s.starred?C.yellow:C.textMuted};padding:0;">${s.starred?'★':'☆'}</button>
             </div>
             <div style="color:${C.textMuted};font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px;">${s.name}</div>
-            <span style="display:inline-block;margin-top:3px;background:${tc.bg};color:${tc.fg};font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;">${needsReclass?'Needs Strategy':s.type||'—'}</span>
+            <div style="display:flex;gap:5px;margin-top:3px;flex-wrap:wrap;">
+              <span style="display:inline-block;background:${tc.bg};color:${tc.fg};font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;">${needsReclass?'Needs Strategy':s.type||'—'}</span>
+              <span style="display:inline-block;background:${oppMeta.color}22;color:${oppMeta.color};font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;">${oppMeta.icon} ${opp.status}</span>
+            </div>
           </div>
         </div>
         <button onclick="event.stopPropagation();showRowMenu('${s.id}')" style="background:none;border:none;color:${C.textMuted};cursor:pointer;padding:4px;flex-shrink:0;">
@@ -1001,6 +1019,7 @@ function renderDetail(s) {
         <div style="flex:1;">
           <div style="color:${C.text};font-size:26px;font-weight:900;letter-spacing:-0.02em;">${s.ticker}</div>
           <div style="color:${C.textSub};font-size:13px;">${s.name}</div>
+          ${s.scannerSource?`<div style="color:${C.textMuted};font-size:10.5px;margin-top:2px;">🔍 ${s.scannerSource}</div>`:''}
         </div>
         ${renderConvictionBadge(conviction.level, 'md')}
       </div>
@@ -1408,6 +1427,7 @@ function renderTabPlan(s) {
   return `
     <div style="display:flex;flex-direction:column;gap:14px;">
       ${missionCard}
+      ${renderOpportunityCard(s)}
       ${whyTypeCard}
       ${checklistCard}
       <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
@@ -1621,48 +1641,68 @@ function computeKeyLevels(s) {
 // already computed here. The AI's job is the part StockIQ structurally can't
 // do: news, catalysts, analyst sentiment, fundamentals.
 function buildAIPrompt(s) {
-  const setup = analyzeSetup(s);
-  const traj = computeTrajectory(s);
-  const narrative = brokerRead(s, setup, traj);
   const conviction = computeConviction(s);
+  const ms = computeMarketState(s);
+  const action = computeAction(s);
+  const stage = computeGamePlanStage(s);
+  const invalidation = computeInvalidation(s, s.type);
   const levels = computeKeyLevels(s);
   const gp = computeGamePlan(s);
-  const glance = computeAtAGlance(s);
+  const trendEv = computeTrendEvidence(s);
+  const momentumEv = computeMomentumEvidence(s);
+  const volumeEv = computeVolumeEvidence(s);
+  const volatilityEv = computeVolatilityEvidence(s);
 
   const lines = [];
-  lines.push(`Analyze ${s.ticker} (${s.name}) using the data below from my stock tracking app, plus your own knowledge of recent news, earnings, and analyst sentiment.`);
+  lines.push(`Analyze ${s.ticker} (${s.name}) using the StockIQ summary below, plus your own knowledge of recent news, earnings, analyst sentiment, valuation, and competitive position.`);
   lines.push('');
-  lines.push(`Please DON'T recompute the technical numbers — I already have those from real price data. Focus on what I can't get from a price chart: catalysts, competitive position, fundamentals, and risks.`);
+  lines.push(`Your primary job is to challenge this conclusion, not reinforce it. If the technical setup looks good but the fundamentals or current news materially increase the risk of this trade, say so clearly — don't just agree with StockIQ.`);
   lines.push('');
-  lines.push(`CURRENT DATA (from StockIQ):`);
+  lines.push(`Assume the technical data below is correct — don't recompute or re-explain RSI, moving averages, support, resistance, or ATR unless they materially conflict with the fundamental picture. Focus on what a price chart can't tell me: catalysts, valuation, competitive position, fundamentals, and risks.`);
+  lines.push('');
+  lines.push(`STOCKIQ SUMMARY:`);
   lines.push(`- Price: ${fmtP(s.price)} (${(s.pct||0)>=0?'+':''}${(s.pct||0).toFixed(2)}% since last update)`);
-  lines.push(`- Conviction: ${conviction.level} — ${conviction.reason}`);
-  lines.push(`- Verdict: ${narrative.verdict} — ${narrative.verdictSub}`);
-  lines.push(`- Trend: ${glance.trend.label} (${glance.trend.sub})`);
-  lines.push(`- Momentum: ${glance.momentum.label} (${glance.momentum.sub})`);
-  lines.push(`- Volume: ${glance.volume.label} (${glance.volume.sub})`);
-  lines.push(`- Risk Level: ${glance.riskLevel.label} (${glance.riskLevel.sub})`);
+  if(s.notes) lines.push(`- My Notes (why I added this stock): ${s.notes}`);
+  if(s.scannerSource) lines.push(`- Scanner Source: ${s.scannerSource}`);
+  lines.push(`- Market State: ${ms.state}${ms.evidence?` (${ms.evidence} evidence)`:''}`);
+  lines.push(`- Conviction: ${conviction.level} — ${conviction.reason}${conviction.level==='Insufficient Evidence'?' (this reflects thin logged history in the app, not necessarily a weak stock — the technical readings below are still real, current-day numbers.)':''}`);
+  lines.push(`- Current Stage / Action: ${stage} — ${action.action}`);
+  lines.push(`- Trend: ${trendEv.verdict} — ${trendEv.teach}`);
+  lines.push(`- Momentum: ${momentumEv.verdict} — ${momentumEv.teach}`);
+  lines.push(`- Volume: ${volumeEv.verdict} — ${volumeEv.teach}`);
+  lines.push(`- Volatility: ${volatilityEv.verdict} — ${volatilityEv.teach}`);
   if(levels.support) lines.push(`- Support: ${fmtP(levels.support.price)} (${levels.support.label})`);
   if(levels.resistance) lines.push(`- Resistance: ${fmtP(levels.resistance.price)} (${levels.resistance.label})`);
   lines.push(`- My Game Plan: Entry ${gp.buyZone}, Target ${gp.profit}, Stop ${gp.stopPrice!=null?fmtP(gp.stopPrice):'—'}`);
+  lines.push(`- Invalidation: ${invalidation.text}`);
+  if(s.earningsDate) lines.push(`- Next Earnings Date: ${s.earningsDate}`);
   lines.push(`- Position type: ${s.type||'—'}, typical position size ~${fmtP(s.invested||150)}`);
   lines.push('');
-  lines.push(`Please answer using EXACTLY these five headers, in this order, so I can drop each section into the right place in my app. Keep each section to 2-3 sentences, concise and specific to ${s.ticker}:`);
+  lines.push(`Respond using EXACTLY these headers, in this order, so I can drop each section into the right place in my app. Keep each section to 2-3 sentences, concise and specific to ${s.ticker}:`);
   lines.push('');
   lines.push(`CATALYSTS:`);
-  lines.push(`(Recent news, earnings, or events that could move this stock in the next 1-3 months)`);
+  lines.push(`(Recent events in the next 1-3 months that could materially move the stock)`);
   lines.push('');
   lines.push(`ANALYST SENTIMENT:`);
-  lines.push(`(Recent upgrades/downgrades, price targets, what Wall Street is currently saying)`);
+  lines.push(`(Recent upgrades/downgrades, consensus opinion, price targets, changes in expectations)`);
+  lines.push('');
+  lines.push(`VALUATION:`);
+  lines.push(`(Is the stock reasonably valued, expensive, or cheap relative to its history and peers? Would that make you more or less patient entering here?)`);
   lines.push('');
   lines.push(`FUNDAMENTALS VS TECHNICALS:`);
-  lines.push(`(Does the underlying business support or contradict this technical setup?)`);
+  lines.push(`(Does the underlying business support or contradict StockIQ's technical conclusion?)`);
   lines.push('');
   lines.push(`KEY RISK:`);
-  lines.push(`(The biggest risk here that a price chart wouldn't show)`);
+  lines.push(`(The biggest non-technical risk here that StockIQ cannot see)`);
+  lines.push('');
+  lines.push(`BLIND SPOTS:`);
+  lines.push(`(One important thing a chart-only investor would likely miss — regulation, insider selling, customer concentration, litigation, etc.)`);
+  lines.push('');
+  lines.push(`STRESS TEST:`);
+  lines.push(`(If you disagree with any part of StockIQ's analysis, Market State, or Game Plan, explain why. If nothing fundamentally contradicts the technical setup, say so explicitly instead of leaving this blank.)`);
   lines.push('');
   lines.push(`BOTTOM LINE:`);
-  lines.push(`(More or less confident in this trade, and why — one or two sentences)`);
+  lines.push(`(Would you be more confident, equally confident, or less confident taking this trade after considering the fundamentals? Explain briefly.)`);
   lines.push('');
   lines.push(`Keep the headers exactly as written above (all caps, with the colon) so I can paste your answer straight into my app.`);
 
@@ -1698,8 +1738,11 @@ function parseResearch(text) {
   const headerDefs = [
     {key:'catalysts',    re:/CATALYSTS:?/i},
     {key:'sentiment',    re:/ANALYST SENTIMENT:?/i},
+    {key:'valuation',    re:/VALUATION:?/i},
     {key:'fundamentals', re:/FUNDAMENTALS?\s*(VS|VERSUS)\s*TECHNICALS?:?/i},
     {key:'risk',         re:/KEY RISKS?:?/i},
+    {key:'blindSpots',   re:/BLIND SPOTS?:?/i},
+    {key:'stressTest',   re:/STRESS TEST:?/i},
     {key:'bottomLine',   re:/BOTTOM LINE:?/i},
   ];
   const found = [];
@@ -2711,15 +2754,8 @@ function computeBuyReadiness(s, type) {
   const inval = computeInvalidation(s, type);
   checks.push({label:'Invalidation level defined', pass: !inval.isThesisReview && inval.price!=null, required:true});
 
-  let rewardRiskOk = false;
-  if(gp.stopPrice!=null && gp.entryRef!=null) {
-    const riskDist = gp.entryRef - gp.stopPrice;
-    let targetPrice = null;
-    if(s.hi52 && gp.entryRef<s.hi52) targetPrice = s.hi52;
-    else if(s.atr) targetPrice = gp.entryRef + s.atr*3;
-    if(targetPrice!=null && riskDist>0) rewardRiskOk = ((targetPrice-gp.entryRef)/riskDist) >= 1.5;
-  }
-  checks.push({label:'Reward outweighs risk (1.5:1 or better)', pass:rewardRiskOk, required:true});
+  const rr = computeRewardRiskRatio(s);
+  checks.push({label:'Reward outweighs risk (1.5:1 or better)', pass: rr.ratio!=null && rr.ratio>=1.5, required:true});
 
   let sizingPass = false, sizingUnknown = true;
   if(s.atr && s.price) {
@@ -2844,21 +2880,32 @@ function isPositionFullyClosed(s) {
   return filled.length>0 && filled.every(t=>t.soldPrice!=null);
 }
 function computeGamePlanStage(s) {
+  if(s.archived) return 'Archived';
   if(isPositionFullyClosed(s)) return 'Completed';
   const action = computeAction(s);
   if(action.holding) return /EXIT|REDUCE|REVIEW THESIS/.test(action.action) ? 'Exiting' : 'Managing';
-  if(action.action==='Ready for Entry Review') return 'Ready';
-  if(action.action==='WAIT') {
+  let stage;
+  if(action.action==='Ready for Entry Review') stage = 'Ready';
+  else if(action.action==='WAIT') {
     const checks = action.readiness.checks;
     const metCount = checks.filter(c=>c.pass).length;
-    return metCount >= Math.ceil(checks.length/2) ? 'Preparing' : 'Watching';
+    stage = metCount >= Math.ceil(checks.length/2) ? 'Preparing' : 'Watching';
+  } else stage = 'Watching';
+
+  // Consistency rule (Section 6): Opportunity Status must never be
+  // contradicted by the Game Plan. A stock graded Pass/Archive can't
+  // simultaneously claim Ready or Preparing — downgrade to Watching and
+  // let the Opportunity Status badge carry the real explanation.
+  if((stage==='Ready'||stage==='Preparing') && computeOpportunityStatus(s, s.type).status==='Pass / Archive') {
+    stage = 'Watching';
   }
-  return 'Watching';
+  return stage;
 }
 const GAME_PLAN_STAGE_META = {
   'Watching':  {color:C.textSub, icon:'👁'}, 'Preparing': {color:C.yellow, icon:'📶'},
   'Ready':     {color:C.green,   icon:'🎯'}, 'Managing':  {color:C.teal,   icon:'🛡'},
   'Exiting':   {color:C.red,     icon:'🔴'}, 'Completed': {color:C.textMuted, icon:'✅'},
+  'Archived':  {color:C.textMuted, icon:'📦'},
 };
 
 // ── CURRENT MISSION & THE ONE SENTENCE ──────────────────────────────────────
@@ -2870,10 +2917,12 @@ function computeGamePlanMission(s, stage, action) {
     'Managing':  'Hold the position and follow the plan — no new decisions needed today.',
     'Exiting':   'The setup is deteriorating. Follow the exit plan below.',
     'Completed': 'This trade is closed. Nothing left to manage here.',
+    'Archived':  'This stock is archived — a good company, but not an active trade right now.',
   };
   return MISSION[stage] || MISSION['Watching'];
 }
 function computeOneSentence(s, stage, action, conviction) {
+  if(stage==='Archived') return 'Nothing wrong with the company. There\'s just no compelling trade here right now.';
   if(stage==='Completed') return 'This one\'s done — review it in Notes if you want to learn from it, then move on.';
   if(stage==='Exiting') return `Don't hope this turns around. The evidence says get out or reduce, not wait and see.`;
   if(stage==='Managing') return `You're already in — the job now is patience, not a new decision.`;
@@ -3000,6 +3049,225 @@ function computeWatchTomorrow(s, stage, type) {
   return firstFail ? `Watch ${firstFail.label.toLowerCase()} — that's the next box to check.` : 'Every box is checked — the only thing left to watch is your own follow-through.';
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// SECTION 6 — OPPORTUNITY QUALITY & ARCHIVE LOGIC
+// ═══════════════════════════════════════════════════════════════════════════════
+// Separates "is this a good stock" from "is this a good trade right now."
+// Entry Quality grades the trade math itself (reward:risk, distance to
+// resistance, extension). Opportunity Status is the actionable verdict on
+// top of it (Active / Watch Closely / Low Priority / Pass-Archive).
+//
+// Archiving is SUGGESTED, never automatic. The spec describes Pass/Archive
+// as something that "removes the stock from the active watchlist," but this
+// app has never taken a hiding/destructive action silently — the Section 1
+// reclassify banner is the precedent (persistent suggestion, hard block on
+// specific actions, never a silent auto-conversion). A stock the app grades
+// Pass/Archive stays visible with a clear badge and an Archive button; nothing
+// disappears until Kim taps it. Reactivation follows the same rule: the app
+// surfaces "conditions have changed, want to reactivate?" rather than
+// silently restoring a stock to the active list on its own.
+
+// Single source of truth for the profit target used anywhere reward:risk
+// math is needed — Section 4's Buy Readiness gate used to recompute this
+// same 52-week-high-or-3x-ATR logic inline; now both call this.
+function computeTargetPrice(s, entryRef) {
+  if(entryRef==null) return null;
+  if(s.hi52 && entryRef<s.hi52) return s.hi52;
+  if(s.atr) return entryRef + s.atr*3;
+  return null;
+}
+function computeRewardRiskRatio(s) {
+  const gp = computeGamePlan(s);
+  const result = {ratio:null, riskPerShare:null, rewardPerShare:null, entryRef:gp.entryRef, stopPrice:gp.stopPrice, targetPrice:null};
+  if(gp.entryRef==null || gp.stopPrice==null) return result;
+  const riskPerShare = gp.entryRef - gp.stopPrice;
+  const targetPrice = computeTargetPrice(s, gp.entryRef);
+  result.riskPerShare = riskPerShare;
+  result.targetPrice = targetPrice;
+  if(riskPerShare<=0 || targetPrice==null || targetPrice<=gp.entryRef) return result; // never fabricate a ratio from bad inputs
+  result.rewardPerShare = targetPrice - gp.entryRef;
+  result.ratio = result.rewardPerShare / riskPerShare;
+  return result;
+}
+// Classifies the raw ratio into the spec's 4 named bands. Kept distinct from
+// Entry Quality's own 3-tier scale (Excellent/Acceptable/Poor) since the
+// spec reuses overlapping names for two different scales — Strong folds
+// into Excellent for Entry Quality purposes, noted here rather than silently.
+function classifyRewardRiskBand(ratio) {
+  if(ratio==null) return null;
+  if(ratio>=3.0) return 'Excellent';
+  if(ratio>=2.0) return 'Strong';
+  if(ratio>=1.5) return 'Acceptable';
+  return 'Poor';
+}
+
+// ── ENTRY QUALITY ────────────────────────────────────────────────────────────
+function computeEntryQuality(s, type) {
+  const gp = computeGamePlan(s);
+  const levels = computeKeyLevels(s);
+  const rr = computeRewardRiskRatio(s);
+
+  if(type==='Long-Term Hold') {
+    // Spec: don't use short-term resistance as the sole target for LT holds —
+    // grade mainly by distance from support instead. No valuation data
+    // exists in this app (same gap flagged since Section 4), so this is a
+    // structural proxy, not a true valuation-aware grade.
+    if(s.price==null || !levels.support) return {quality:'Unavailable', reason:'Not enough data yet to judge entry quality for a long-term hold.', rr};
+    const distFromSupportPct = ((s.price - levels.support.price)/levels.support.price)*100;
+    let quality = distFromSupportPct<=5 ? 'Excellent' : distFromSupportPct<=12 ? 'Acceptable' : 'Poor';
+    return {quality, reason:`Long-term entries are judged mainly by distance from support (currently ${distFromSupportPct.toFixed(1)}% above ${fmtP(levels.support.price)}), not short-term resistance — StockIQ doesn't have valuation data yet to grade this more precisely.`, rr, distFromSupportPct};
+  }
+
+  if(rr.ratio==null || gp.entryRef==null) return {quality:'Unavailable', reason:'Reward-to-risk unavailable — not enough data to define entry, stop, and target yet.', rr};
+
+  const band = classifyRewardRiskBand(rr.ratio);
+  let quality = (band==='Excellent'||band==='Strong') ? 'Excellent' : band==='Acceptable' ? 'Acceptable' : 'Poor';
+
+  const upsideToResistancePct = levels.resistance ? ((levels.resistance.price - s.price)/s.price)*100 : null;
+  const downsideToStopPct = gp.stopPrice!=null ? ((s.price - gp.stopPrice)/s.price)*100 : null;
+  const limitedUpsideThreshold = type==='Swing Trade' ? 5 : 8; // Position Trade
+  const limitedUpside = upsideToResistancePct!=null && upsideToResistancePct < limitedUpsideThreshold;
+  const upsideSmallerThanDownside = upsideToResistancePct!=null && downsideToStopPct!=null && upsideToResistancePct < downsideToStopPct;
+  if(limitedUpside || upsideSmallerThanDownside) quality = 'Poor';
+
+  let reason;
+  if(quality==='Poor' && upsideSmallerThanDownside) reason = `Upside to resistance (${upsideToResistancePct.toFixed(1)}%) is smaller than downside to the stop (${downsideToStopPct.toFixed(1)}%) — the math doesn't favor this entry.`;
+  else if(quality==='Poor' && limitedUpside) reason = `Only ${upsideToResistancePct.toFixed(1)}% upside to resistance before this setup runs out of room.`;
+  else if(quality==='Poor') reason = `Reward-to-risk is below 1.5:1 (currently ${rr.ratio.toFixed(1)}:1) — the potential gain doesn't justify the risk.`;
+  else if(quality==='Acceptable') reason = `Reward-to-risk is workable (${rr.ratio.toFixed(1)}:1) but not outstanding.`;
+  else reason = `Reward-to-risk is strong (${rr.ratio.toFixed(1)}:1) with real room to the target before resistance.`;
+
+  return {quality, reason, rr, upsideToResistancePct, downsideToStopPct};
+}
+
+// ── OPPORTUNITY STATUS ───────────────────────────────────────────────────────
+function computeOpportunityStatus(s, type) {
+  const eq = computeEntryQuality(s, type);
+  const gp = computeGamePlan(s);
+  const ms = computeMarketState(s);
+
+  if(eq.quality==='Unavailable') return {status:'Watch Closely', reason:'Not enough data yet to judge this opportunity — worth checking again once more data is logged.', eq};
+
+  let extendedPct = null;
+  if(s.ma50 && s.price) extendedPct = ((s.price - s.ma50)/s.ma50)*100;
+  const extendedThreshold = type==='Swing Trade' ? 10 : type==='Position Trade' ? 15 : null;
+  const isExtended = extendedThreshold!=null && extendedPct!=null && extendedPct>extendedThreshold;
+
+  const tooCloseThreshold = type==='Swing Trade' ? 5 : type==='Position Trade' ? 8 : null;
+  const tooCloseToResistance = tooCloseThreshold!=null && eq.upsideToResistancePct!=null && eq.upsideToResistancePct < tooCloseThreshold;
+
+  const poorRR = eq.rr && eq.rr.ratio!=null && eq.rr.ratio < 1.5;
+
+  let noTriggerNearby = false;
+  if(gp.entryPending && gp.entryRef!=null && s.price!=null && s.atr) {
+    noTriggerNearby = (Math.abs(s.price - gp.entryRef)/s.atr) > 3;
+  }
+
+  if(type!=='Long-Term Hold' && (poorRR || tooCloseToResistance || isExtended || noTriggerNearby || eq.quality==='Poor')) {
+    const reasons = [];
+    if(poorRR) reasons.push(`reward-to-risk is below 1.5:1 (${eq.rr.ratio.toFixed(1)}:1)`);
+    if(tooCloseToResistance) reasons.push(`only ${eq.upsideToResistancePct.toFixed(1)}% upside before resistance`);
+    if(isExtended) reasons.push(`price is ${extendedPct.toFixed(0)}% above the 50-day average — more extended than this strategy should chase`);
+    if(noTriggerNearby) reasons.push(`the preferred entry is too far from current price for a realistic trigger soon`);
+    if(!reasons.length) reasons.push('the entry math doesn\'t work right now');
+    return {status:'Pass / Archive', reason:`${ms.state} trend, but ${reasons.join(' and ')}. This is a good stock with a poor entry.`, eq};
+  }
+  if(type==='Long-Term Hold' && eq.quality==='Poor') {
+    return {status:'Pass / Archive', reason:eq.reason, eq};
+  }
+
+  let watchClosely = false, watchReason = '';
+  if(gp.entryPending && gp.entryRef!=null && s.price!=null && s.atr && (Math.abs(s.price - gp.entryRef)/s.atr)<=1) {
+    watchClosely = true; watchReason = `Within about 1 ATR of the preferred entry near ${fmtP(gp.entryRef)} — one realistic move away from actionable.`;
+  }
+  if(!watchClosely && ms.state==='Normal Pullback') { watchClosely = true; watchReason = 'Pulling back toward support — one confirmation away from actionable.'; }
+  if(!watchClosely && ms.state==='Consolidation' && eq.upsideToResistancePct!=null && eq.upsideToResistancePct < (tooCloseThreshold||8)*2) { watchClosely = true; watchReason = 'Consolidating beneath resistance — a breakout or breakdown could make this actionable soon.'; }
+  if(watchClosely) return {status:'Watch Closely', reason:watchReason, eq};
+
+  if(!gp.entryPending && (eq.quality==='Excellent'||eq.quality==='Acceptable') && !['Confirmed Breakdown','Trend Weakening'].includes(ms.state)) {
+    return {status:'Active Opportunity', reason:'The setup is actionable or very close, with a favorable reward-to-risk.', eq};
+  }
+
+  return {status:'Low Priority', reason:'Nothing is wrong with the stock. There is simply no compelling trade here right now.', eq};
+}
+const OPPORTUNITY_STATUS_META = {
+  'Active Opportunity': {color:C.green,  icon:'🟢'},
+  'Watch Closely':      {color:C.yellow, icon:'🟡'},
+  'Low Priority':       {color:C.textMuted, icon:'⚪'},
+  'Pass / Archive':     {color:C.orange, icon:'📦'},
+};
+const OPPORTUNITY_STATUS_RANK = {'Pass / Archive':0, 'Low Priority':1, 'Watch Closely':2, 'Active Opportunity':3};
+
+// ── ARCHIVE MECHANICS (suggested, never automatic) ──────────────────────────
+function archiveStock(id) {
+  const s = stocks.find(x=>String(x.id)===String(id));
+  if(!s) return;
+  const opp = computeOpportunityStatus(s, s.type);
+  const ms = computeMarketState(s);
+  const rr = computeRewardRiskRatio(s);
+  const updated = {...s,
+    archived:true,
+    archiveDate: today(),
+    archiveReason: opp.reason,
+    archivePriceAtArchive: s.price,
+    archiveMarketStateAtArchive: ms.state,
+    archiveEntryQualityAtArchive: opp.eq.quality,
+    archiveOpportunityStatusAtArchive: opp.status,
+    archiveRewardRiskAtArchive: rr.ratio,
+  };
+  stocks = stocks.map(x=>String(x.id)===String(id)?updated:x);
+  scheduleSave(updated);
+  renderHome();
+  closeAllOverlays();
+}
+function reactivateStock(id) {
+  const s = stocks.find(x=>String(x.id)===String(id));
+  if(!s) return;
+  const updated = {...s, archived:false, archiveDate:null, archiveReason:null, archivePriceAtArchive:null,
+    archiveMarketStateAtArchive:null, archiveEntryQualityAtArchive:null, archiveOpportunityStatusAtArchive:null, archiveRewardRiskAtArchive:null};
+  stocks = stocks.map(x=>String(x.id)===String(id)?updated:x);
+  scheduleSave(updated);
+  renderHome();
+  closeAllOverlays();
+}
+// Review-based, never automatic. Only surfaces when the change is MATERIAL —
+// one of four specific triggers Kim approved, not "anything looks a little
+// different now." Returns an array of specific reasons, or null.
+function checkReactivationSuggested(s) {
+  if(!s.archived) return null;
+  const opp = computeOpportunityStatus(s, s.type);
+  const gp = computeGamePlan(s);
+  const rr = computeRewardRiskRatio(s);
+  const reasons = [];
+
+  // 1. Opportunity Status improved by a full level or more
+  const archivedRank = OPPORTUNITY_STATUS_RANK[s.archiveOpportunityStatusAtArchive];
+  const currentRank = OPPORTUNITY_STATUS_RANK[opp.status];
+  if(archivedRank!=null && currentRank!=null && currentRank - archivedRank >= 1) {
+    reasons.push(`Opportunity Status improved from ${s.archiveOpportunityStatusAtArchive} to ${opp.status}.`);
+  }
+
+  // 2. Reward-to-risk crosses above the 1.5:1 threshold
+  const wasBelowThreshold = s.archiveRewardRiskAtArchive!=null ? s.archiveRewardRiskAtArchive<1.5 : true;
+  if(rr.ratio!=null && rr.ratio>=1.5 && wasBelowThreshold) {
+    reasons.push(`Reward-to-risk is now ${rr.ratio.toFixed(1)}:1, above the 1.5:1 threshold.`);
+  }
+
+  // 3. Entry Quality moved from Poor to Acceptable or better
+  if(s.archiveEntryQualityAtArchive==='Poor' && ['Acceptable','Excellent'].includes(opp.eq.quality)) {
+    reasons.push(`Entry Quality improved from Poor to ${opp.eq.quality}.`);
+  }
+
+  // 4. Price within about 1 ATR of the preferred entry zone
+  if(gp.entryPending && gp.entryRef!=null && s.price!=null && s.atr && (Math.abs(s.price-gp.entryRef)/s.atr)<=1) {
+    reasons.push(`Price is now within about 1 ATR of the preferred entry near ${fmtP(gp.entryRef)}.`);
+  } else if(!gp.entryPending && gp.buyZone && gp.buyZone!=='Waiting on more data') {
+    reasons.push('Price has reached the preferred entry zone.');
+  }
+
+  return reasons.length ? reasons : null;
+}
+
 // Price line chart from your snapshot history, with 50/200-day SMA overlays
 // when that data is present. Plain SVG — no chart library, matches app style.
 function renderPriceChart(s) {
@@ -3111,6 +3379,50 @@ function renderMarketStateCard(s) {
   </div>`;
 }
 
+function renderOpportunityCard(s) {
+  const opp = computeOpportunityStatus(s, s.type);
+  const meta = OPPORTUNITY_STATUS_META[opp.status];
+  const reactivationNote = checkReactivationSuggested(s);
+  return `
+  <div style="background:${C.card};border-radius:16px;border:2px solid ${meta.color}44;padding:18px;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;">
+      <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;">Opportunity</div>
+      ${s.archived?`<span style="background:${C.textMuted}22;color:${C.textMuted};border-radius:20px;padding:4px 12px;font-size:10px;font-weight:800;">📦 ARCHIVED</span>`:''}
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;">
+      <span style="font-size:20px;">${meta.icon}</span>
+      <span style="color:${meta.color};font-size:16px;font-weight:900;">${opp.status}</span>
+    </div>
+    <div style="color:${C.textSub};font-size:12.5px;line-height:1.6;margin-bottom:12px;">${opp.reason}</div>
+    <div style="display:flex;gap:10px;padding-top:10px;border-top:1px solid ${C.border};">
+      <div style="flex:1;"><div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;margin-bottom:3px;">Entry Quality</div><div style="color:${C.text};font-size:13px;font-weight:800;">${opp.eq.quality}</div></div>
+      ${opp.eq.rr && opp.eq.rr.ratio!=null ? `<div style="flex:1;"><div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;margin-bottom:3px;">Reward : Risk</div><div style="color:${C.text};font-size:13px;font-weight:800;">${opp.eq.rr.ratio.toFixed(1)}:1</div></div>` : ''}
+    </div>
+    ${s.archived ? `
+      <div style="margin-top:12px;padding-top:12px;border-top:1px solid ${C.border};">
+        <div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;">Then vs. Now</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
+          <div style="background:${C.cardHigh};border-radius:10px;padding:10px;">
+            <div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;margin-bottom:6px;">Archived ${s.archiveDate}</div>
+            <div style="color:${C.textSub};font-size:11px;line-height:1.7;">${fmtP(s.archivePriceAtArchive)}<br>${s.archiveMarketStateAtArchive||'—'}<br>Entry: ${s.archiveEntryQualityAtArchive||'—'}<br>${s.archiveOpportunityStatusAtArchive||'—'}</div>
+          </div>
+          <div style="background:${C.cardHigh};border-radius:10px;padding:10px;">
+            <div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;margin-bottom:6px;">Now</div>
+            <div style="color:${C.text};font-size:11px;font-weight:700;line-height:1.7;">${fmtP(s.price)}<br>${computeMarketState(s).state}<br>Entry: ${opp.eq.quality}<br>${opp.status}</div>
+          </div>
+        </div>
+        <div style="color:${C.textMuted};font-size:11px;line-height:1.5;margin-bottom:10px;">Originally archived because: ${s.archiveReason}</div>
+        ${reactivationNote?`<div style="background:${C.tealDim};border:1px solid ${C.teal}44;border-radius:10px;padding:10px 12px;margin-bottom:10px;">
+          <div style="color:${C.teal};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px;">💡 Worth a Second Look</div>
+          ${reactivationNote.map(r=>`<div style="color:${C.teal};font-size:11.5px;line-height:1.5;margin-bottom:4px;">• ${r}</div>`).join('')}
+        </div>`:''}
+        <button onclick="reactivateStock('${s.id}')" style="width:100%;padding:12px;background:${C.teal};color:#000;border:none;border-radius:12px;font-size:13px;font-weight:800;cursor:pointer;">↺ Reactivate</button>
+      </div>` :
+      opp.status==='Pass / Archive' ? `
+      <button onclick="archiveStock('${s.id}')" style="width:100%;margin-top:12px;padding:12px;background:${C.cardHigh};color:${C.orange};border:1px solid ${C.orange}44;border-radius:12px;font-size:13px;font-weight:800;cursor:pointer;">📦 Archive This Stock</button>` : ''}
+  </div>`;
+}
+
 function renderTabOverview(s) {
   const setup = analyzeSetup(s);
   const traj = computeTrajectory(s);
@@ -3216,6 +3528,7 @@ function renderTabOverview(s) {
   return `
     <div style="display:flex;flex-direction:column;gap:14px;">
       ${renderMarketStateCard(s)}
+      ${renderOpportunityCard(s)}
       ${takeCard}
       ${glanceGrid}
       ${renderPriceChart(s)}
@@ -3234,6 +3547,14 @@ function renderTabAnalysis(s) {
   const convictionColor = (CONVICTION_META[conviction.level]||CONVICTION_META['Insufficient Evidence']).color;
 
   if(ms.state==='Insufficient Data' || conviction.level==='Insufficient Evidence') {
+    const earlyResearchCard = parsedResearch ? `
+    <div style="background:${C.card};border-radius:16px;border:1px solid ${C.purple}33;padding:18px;">
+      <div style="color:${C.purple};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">🔮 From Your Research</div>
+      ${['sentiment','valuation','fundamentals','risk','blindSpots','stressTest','bottomLine'].filter(k=>parsedResearch[k]).map((k,i,arr)=>{
+        const labels = {sentiment:'Analyst Sentiment', valuation:'Valuation', fundamentals:'Fundamentals vs Technicals', risk:'Key Risk', blindSpots:'Blind Spots', stressTest:'Stress Test — Where the AI Disagreed', bottomLine:'Bottom Line'};
+        return `<div style="margin-bottom:${i<arr.length-1?'12px':'0'};"><div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:3px;">${labels[k]}</div><p style="color:${C.textSub};font-size:12px;line-height:1.6;margin:0;">${parsedResearch[k]}</p></div>`;
+      }).join('')}
+    </div>` : '';
     return `
     <div style="display:flex;flex-direction:column;gap:14px;">
       <div style="background:${C.card};border-radius:16px;border:2px solid ${C.textMuted}44;padding:18px;">
@@ -3241,6 +3562,7 @@ function renderTabAnalysis(s) {
         <p style="color:${C.text};font-size:13.5px;line-height:1.7;margin:0 0 14px;">${computeExecutiveSummary(s, conviction)}</p>
         <div style="color:${C.textSub};font-size:12px;line-height:1.6;">${(ms.missing||[]).length ? `Still missing: ${ms.missing.join(', ')}.` : ''} Keep logging daily updates, or import a CSV, to unlock the full Analysis Engine.</div>
       </div>
+      ${earlyResearchCard}
     </div>`;
   }
 
@@ -3336,8 +3658,8 @@ function renderTabAnalysis(s) {
   const researchCard = parsedResearch ? `
     <div style="background:${C.card};border-radius:16px;border:1px solid ${C.purple}33;padding:18px;">
       <div style="color:${C.purple};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">🔮 From Your Research</div>
-      ${['fundamentals','sentiment','risk','bottomLine'].filter(k=>parsedResearch[k]).map((k,i,arr)=>{
-        const labels = {fundamentals:'Fundamentals vs Technicals', sentiment:'Analyst Sentiment', risk:'Key Risk', bottomLine:'What The Research Says'};
+      ${['sentiment','valuation','fundamentals','risk','blindSpots','stressTest','bottomLine'].filter(k=>parsedResearch[k]).map((k,i,arr)=>{
+        const labels = {sentiment:'Analyst Sentiment', valuation:'Valuation', fundamentals:'Fundamentals vs Technicals', risk:'Key Risk', blindSpots:'Blind Spots', stressTest:'Stress Test — Where the AI Disagreed', bottomLine:'Bottom Line'};
         return `<div style="margin-bottom:${i<arr.length-1?'12px':'0'};"><div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:3px;">${labels[k]}</div><p style="color:${C.textSub};font-size:12px;line-height:1.6;margin:0;">${parsedResearch[k]}</p></div>`;
       }).join('')}
     </div>` : '';
@@ -3863,6 +4185,7 @@ function suggestHoldType(vals) {
 
 const ADD_STEPS = [
   {key:'ticker',  label:'Ticker symbol',          hint:'e.g. NVDA',          inputmode:'text', upper:true},
+  {key:'scannerSource', label:'Which scan found this stock?', hint:'e.g. Pullback Opportunity', inputmode:'text', note:'The name of your ThinkorSwim scan, if this came from one. Optional — skip if you added this manually.', optional:true},
   {key:'price',   label:'Current price',          hint:'e.g. 194.32',        inputmode:'decimal', prefix:'$'},
   {key:'ma20',    label:'20-day moving average',  hint:'From ThinkorSwim',   inputmode:'decimal', prefix:'$'},
   {key:'ma50',    label:'50-day moving average',  hint:'From ThinkorSwim',   inputmode:'decimal', prefix:'$'},
@@ -3921,20 +4244,36 @@ function renderAddStep() {
       <span style="color:${C.textMuted};font-size:11px;">${addStep+1} of ${ADD_STEPS.length}</span>
       <button onclick="closeAllOverlays()" style="background:none;border:none;color:${C.textMuted};font-size:22px;cursor:pointer;">✕</button>
     </div>
-    <div style="color:${C.text};font-size:22px;font-weight:900;letter-spacing:-0.01em;margin-bottom:${cur.note?'8px':'20px'};">${cur.label}</div>
+    <div style="color:${C.text};font-size:22px;font-weight:900;letter-spacing:-0.01em;margin-bottom:${cur.note?'8px':'20px'};">${cur.label}${cur.optional?` <span style="color:${C.textMuted};font-size:13px;font-weight:600;">(optional)</span>`:''}</div>
     ${cur.note?`<div style="color:${C.textMuted};font-size:12px;background:${C.cardHigh};border-radius:8px;padding:8px 12px;margin-bottom:16px;">${cur.note}</div>`:''}
+    ${cur.key==='scannerSource'&&recentScannerSources().length?`
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;">
+      ${recentScannerSources().map(src=>`<button onclick="pickScannerSource('${src.replace(/'/g,"\\'")}')" style="background:${C.cardHigh};color:${C.textSub};border:1px solid ${C.border};border-radius:20px;padding:8px 14px;font-size:12px;font-weight:700;cursor:pointer;">${src}</button>`).join('')}
+    </div>`:''}
     <div style="position:relative;margin-bottom:28px;">
       ${cur.prefix?`<span style="position:absolute;left:16px;top:50%;transform:translateY(-50%);color:${C.textSub};font-size:20px;font-weight:600;">${cur.prefix}</span>`:''}
       <input id="add-input" type="text" inputmode="${cur.inputmode||'text'}" placeholder="${cur.hint}" value="${addVals[cur.key]||''}" style="width:100%;background:${C.card};border:1px solid ${C.borderLight};border-radius:14px;color:${C.text};font-size:${cur.upper?'26':'20'}px;font-weight:${cur.upper?'900':'600'};padding:${cur.prefix?'16px 16px 16px 34px':'16px'};outline:none;box-sizing:border-box;" autofocus>
     </div>
     <div style="display:flex;gap:10px;">
       ${addStep>0?`<button onclick="addBack()" style="flex:1;padding:16px;border-radius:14px;border:1px solid ${C.border};background:none;color:${C.textSub};font-size:14px;font-weight:700;cursor:pointer;">Back</button>`:''}
-      <button onclick="addNext()" style="flex:2;padding:16px;border-radius:14px;border:none;background:${C.text};color:${C.bg};font-size:15px;font-weight:800;cursor:pointer;">${isLast?'Add to Playbook →':'Next →'}</button>
+      <button onclick="addNext()" style="flex:2;padding:16px;border-radius:14px;border:none;background:${C.text};color:${C.bg};font-size:15px;font-weight:800;cursor:pointer;">${cur.optional&&!addVals[cur.key]?'Skip →':isLast?'Add to Playbook →':'Next →'}</button>
     </div>`);
   setTimeout(()=>{
     const inp=document.getElementById('add-input');
     if(inp){ inp.focus(); if(cur.upper) inp.addEventListener('input',()=>inp.value=inp.value.toUpperCase()); }
   },100);
+}
+
+// Distinct, previously-typed scanner source names across all stocks —
+// tap-to-fill instead of retyping the same TOS scan name every time.
+function recentScannerSources() {
+  const seen = new Set();
+  (stocks||[]).forEach(s=>{ if(s.scannerSource) seen.add(s.scannerSource); });
+  return [...seen].slice(0,6);
+}
+function pickScannerSource(src) {
+  addVals.scannerSource = src;
+  addNext();
 }
 
 function addChoiceSelect(ch) {
@@ -3950,8 +4289,8 @@ function addNext() {
   } else {
     const inp=document.getElementById('add-input');
     const val=inp?.value?.trim();
-    if(!val) return;
-    addVals[cur.key]=cur.upper?val.toUpperCase():val;
+    if(!val && !cur.optional) return;
+    if(val) addVals[cur.key]=cur.upper?val.toUpperCase():val;
   }
   if(addStep===ADD_STEPS.length-1) {
     doAddStock();
@@ -3972,6 +4311,7 @@ async function doAddStock() {
     id: Date.now(),
     ticker:  addVals.ticker||'???',
     name:    addVals.ticker||'New Stock',
+    scannerSource: addVals.scannerSource||null,
     price:   parseFloat(addVals.price)||0,
     change:  0, pct: 0,
     verdict: 'Watch', score: 70,
