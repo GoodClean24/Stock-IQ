@@ -734,13 +734,22 @@ function miniSparkline(s, color) {
 }
 
 // Game-plan status chip for the list row — icon + short label + color.
-function computeGamePlanStatus(s, narrative, hasPos) {
-  if(hasPos) return {icon:'🛡', label:'Core Holding', color:C.teal};
-  if(narrative.verdict==='BUY NOW') return {icon:'🎯', label:'Ready to Act', color:C.green};
-  if(narrative.verdict==='AVOID') return {icon:'⏰', label:'Extended', color:C.red};
-  const missing = narrative.waitingOn.length;
-  if(missing<=2) return {icon:'📶', label:`${4-missing} of 4 Signals Lining Up`, color:C.yellow};
-  return {icon:'👁', label:'Watching', color:C.textSub};
+// Rewired onto the Section 4 Action engine (computeAction/computeMarketState)
+// instead of the older brokerRead-based four-signal system. Keeping the old
+// logic here would let the watchlist badge contradict the Game Plan tab on
+// the same stock — one source of truth for "what's happening," same as
+// everywhere else in the app.
+function computeGamePlanStatus(s) {
+  const stage = computeGamePlanStage(s);
+  const STAGE_BADGE = {
+    'Completed': {icon:'✅', label:'Completed', color:C.textSub},
+    'Exiting':   {icon:'🔴', label:'Exiting', color:C.red},
+    'Managing':  {icon:'🛡', label:'Managing', color:C.teal},
+    'Ready':     {icon:'🎯', label:'Ready', color:C.green},
+    'Preparing': {icon:'📶', label:'Preparing', color:C.yellow},
+    'Watching':  {icon:'👁', label:'Watching', color:C.textSub},
+  };
+  return STAGE_BADGE[stage] || STAGE_BADGE['Watching'];
 }
 
 function renderStockList() {
@@ -806,7 +815,7 @@ function renderStockCard(s, rank) {
   const filledTr = (s.tranche||[]).filter(t=>t.status==='filled');
   const hasPos = filledTr.length>0;
   const trend = computeTrendLabel(s);
-  const gpStatus = computeGamePlanStatus(s, narrative, hasPos);
+  const gpStatus = computeGamePlanStatus(s);
   const initials = (s.ticker||'??').slice(0,2);
   const avatarHue = Array.from(s.ticker||'XX').reduce((a,c)=>a+c.charCodeAt(0),0)%360;
 
@@ -1233,6 +1242,70 @@ function renderTabPlan(s) {
   }
   const splits = splitBudget(s.invested||0, (s.tranche||[]).length);
   const gp = computeGamePlan(s);
+  const action = computeAction(s);
+  const conviction = computeConviction(s);
+  const stage = computeGamePlanStage(s);
+  const stageMeta = GAME_PLAN_STAGE_META[stage];
+  const mission = computeGamePlanMission(s, stage, action);
+  const oneSentence = computeOneSentence(s, stage, action, conviction);
+  const invalidation = computeInvalidation(s, s.type);
+  const reviewTrigger = computeReviewTrigger(s, stage, s.type);
+  const watchNext = computeWatchTomorrow(s, stage, s.type);
+  // Risk-based sizing stays advisory for now (real money, real budget field
+  // untouched). Planned next step, not built yet: compare the user's actual
+  // tranche allocation against this risk-based suggestion and surface the
+  // gap, rather than just showing the two numbers side by side unremarked.
+  const riskSizing = computeRiskBasedSizing(s);
+  const isHolding = (s.tranche||[]).some(t=>t.status==='filled');
+  const readinessObj = isHolding ? null : computeBuyReadiness(s, s.type);
+  const managingChecklist = isHolding ? computeManagingChecklist(s, s.type) : null;
+
+  const missionCard = `
+    <div style="background:${C.card};border-radius:16px;border:2px solid ${stageMeta.color}44;padding:18px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <span style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;">Current Stage</span>
+        <span style="background:${stageMeta.color}22;color:${stageMeta.color};border-radius:20px;padding:4px 12px;font-size:11px;font-weight:800;">${stageMeta.icon} ${stage.toUpperCase()}</span>
+      </div>
+      <div style="color:${C.text};font-size:14px;font-weight:700;line-height:1.5;margin-bottom:10px;">${mission}</div>
+      <div style="color:${C.textSub};font-size:12.5px;line-height:1.6;padding-top:10px;border-top:1px solid ${C.border};">💬 ${oneSentence}</div>
+    </div>`;
+
+  const checklistCard = isHolding ? `
+    <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
+      <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">Exit Watch</div>
+      ${managingChecklist.map(c=>`<div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:10px;"><span style="font-size:15px;flex-shrink:0;">${c.pass?'☑️':'⬜'}</span><span style="color:${c.pass?C.text:C.textSub};font-size:12.5px;line-height:1.5;">${c.label}</span></div>`).join('')}
+    </div>` : `
+    <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
+      ${renderRequiredSupportingChecklist(readinessObj.checks)}
+    </div>`;
+
+  const riskSizingCard = riskSizing ? `
+    <div style="background:${C.card};border-radius:16px;border:1px solid ${C.teal}44;padding:18px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <span style="color:${C.teal};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;">📐 Risk-Based Size (advisory)</span>
+      </div>
+      <div style="color:${C.textSub};font-size:11.5px;line-height:1.6;margin-bottom:12px;">Sized backward from a max dollar loss, not forward from a budget. ${riskSizing.usingDefault ? `Using a default of 15% of your budget (${fmtP(riskSizing.maxRisk)}) since no max-risk amount is set.` : `Based on your max risk of ${fmtP(riskSizing.maxRisk)}.`}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
+        <div style="background:${C.cardHigh};border-radius:10px;padding:10px 12px;"><div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;margin-bottom:3px;">Suggested Shares</div><div style="color:${C.text};font-size:14px;font-weight:800;">${riskSizing.shares}</div></div>
+        <div style="background:${C.cardHigh};border-radius:10px;padding:10px 12px;"><div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;margin-bottom:3px;">Total Allocation</div><div style="color:${C.text};font-size:14px;font-weight:800;">${fmtP(riskSizing.totalAllocation)}</div></div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span style="color:${C.textMuted};font-size:11px;">Max $ willing to lose:</span>
+        <div style="position:relative;">
+          <span style="position:absolute;left:8px;top:50%;transform:translateY(-50%);color:${C.textSub};font-size:13px;">$</span>
+          <input type="text" inputmode="decimal" value="${s.maxRisk||''}" placeholder="auto" onchange="updateMaxRisk('${s.id}',this.value)" style="width:80px;background:${C.cardHigh};border:1px solid ${C.borderLight};border-radius:8px;color:${C.text};font-size:13px;font-weight:700;padding:6px 8px 6px 18px;outline:none;">
+        </div>
+      </div>
+    </div>` : '';
+
+  const invalidationCard = `
+    <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
+      <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;">🛑 ${invalidation.isThesisReview?'Thesis Review Trigger':'Invalidation'}</div>
+      <div style="color:${C.text};font-size:12.5px;line-height:1.65;">${invalidation.text}</div>
+      <div style="color:${C.textMuted};font-size:10.5px;line-height:1.5;margin-top:8px;">This is why the setup would be wrong — separate from your actual stop order below.</div>
+    </div>`;
+
+
 
   const tranches = (s.tranche||[]).map((t,i) => {
     const isFilled = t.status==='filled';
@@ -1289,17 +1362,20 @@ function renderTabPlan(s) {
       </div>`;
   }).join('');
 
-  const watchOuts = computeWatchOuts(s).map(w=>`
+  const watchOutItems = computeWatchOuts(s).map(w=>`
     <div style="display:flex;gap:12px;align-items:flex-start;margin-bottom:12px;">
       <span style="color:${C.yellow};font-size:16px;flex-shrink:0;line-height:1.4;">⚠</span>
       <span style="color:${C.textSub};font-size:13px;line-height:1.6;">${w}</span>
     </div>`).join('');
+  const nextCatalystCard = `
+    <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
+      <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">🔭 Next Catalyst</div>
+      <div style="color:${C.text};font-size:12.5px;line-height:1.65;${watchOutItems?`margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid ${C.border};`:''}">${watchNext}</div>
+      ${watchOutItems}
+    </div>`;
 
-  const setup = analyzeSetup(s);
-  const narrative = brokerRead(s, setup, computeTrajectory(s));
   const exitSignal = checkExitSignal(s);
   const suggestion = suggestHoldTypeLive(s);
-  const expiry = computePlanExpiry(s);
 
   const exitCheckCard = exitSignal ? `
     <div style="background:${C.card};border-radius:16px;border:1px solid ${exitSignal.color}44;padding:18px;">
@@ -1331,14 +1407,12 @@ function renderTabPlan(s) {
 
   return `
     <div style="display:flex;flex-direction:column;gap:14px;">
-      <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
-        <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">What's happening</div>
-        <p style="color:${C.text};font-size:14px;line-height:1.7;margin:0;">${narrative.read}</p>
-      </div>
+      ${missionCard}
       ${whyTypeCard}
+      ${checklistCard}
       <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-          <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;">Buy Plan · ${s.tranche.length} ${s.tranche.length===1?'entry':'entries'} ${!s.tranche.some(t=>t.status==='filled')?`<button onclick="showBuildPlanFlow('${s.id}')" style="background:none;border:none;color:${C.teal};font-size:10px;font-weight:700;cursor:pointer;padding:0;text-transform:none;letter-spacing:normal;">(change)</button>`:''}</div>
+          <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;">Preferred Entry Zone · ${s.tranche.length} ${s.tranche.length===1?'entry':'entries'} ${!s.tranche.some(t=>t.status==='filled')?`<button onclick="showBuildPlanFlow('${s.id}')" style="background:none;border:none;color:${C.teal};font-size:10px;font-weight:700;cursor:pointer;padding:0;text-transform:none;letter-spacing:normal;">(change)</button>`:''}</div>
           <div style="display:flex;align-items:center;gap:8px;">
             <span style="color:${C.textMuted};font-size:11px;">Budget:</span>
             <div style="position:relative;">
@@ -1349,30 +1423,29 @@ function renderTabPlan(s) {
         </div>
         ${tranches}
       </div>
+      ${riskSizingCard}
       ${exitCheckCard}
+      ${invalidationCard}
       ${gp.profit&&gp.profit!=='—'?`
       <div style="background:${C.greenDim};border-radius:16px;border:1px solid ${C.green}33;padding:16px;display:flex;align-items:center;gap:14px;">
         <span style="font-size:26px;">🎯</span>
         <div>
-          <div style="color:${C.green};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">Take Profit</div>
+          <div style="color:${C.green};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">Profit Plan</div>
           <div style="color:${C.text};font-size:18px;font-weight:900;">${gp.profit}</div>
-          <div style="color:${C.textSub};font-size:12px;margin-top:3px;">Sell half here. Move your exit to what you paid. Let the rest ride.</div>
+          <div style="color:${C.textSub};font-size:12px;margin-top:3px;">When price reaches this level: consider selling 25%, move your stop to breakeven, and let the remainder run.</div>
         </div>
       </div>`:''}
       <div style="background:${C.redDim};border-radius:16px;border:1px solid ${C.red}33;padding:16px;display:flex;align-items:flex-start;gap:14px;">
         <span style="font-size:26px;flex-shrink:0;">🛑</span>
         <div>
-          <div style="color:${C.red};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">When to Get Out</div>
+          <div style="color:${C.red};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">Initial Stop</div>
           <div style="color:${C.textSub};font-size:13px;line-height:1.6;">${gp.stopRule||'Define your exit rule.'}</div>
         </div>
       </div>
-      ${watchOuts?`<div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
-        <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">Keep an Eye On</div>
-        ${watchOuts}
-      </div>`:''}
-      <div style="background:${C.card};border-radius:12px;border:1px solid ${expiry.overdue?C.red+'44':C.border};padding:12px 16px;display:flex;align-items:center;gap:10px;">
-        <span style="font-size:16px;">${expiry.overdue?'⏰':'⏱'}</span>
-        <span style="color:${C.textSub};font-size:13px;">${expiry.overdue?expiry.text:`Plan expires in <span style="color:${C.yellow};font-weight:700;">${expiry.text}</span> if nothing triggers.`}</span>
+      ${watchOutItems || watchNext ? nextCatalystCard : ''}
+      <div style="background:${C.card};border-radius:12px;border:1px solid ${reviewTrigger.overdue?C.red+'44':C.border};padding:12px 16px;display:flex;align-items:center;gap:10px;">
+        <span style="font-size:16px;">${reviewTrigger.overdue?'⏰':'⏱'}</span>
+        <span style="color:${C.textSub};font-size:13px;">${reviewTrigger.text}</span>
       </div>
     </div>`;
 }
@@ -2633,10 +2706,10 @@ function computeBuyReadiness(s, type) {
   const checks = [];
 
   const hasEntryZone = !gp.entryPending && gp.buyZone && gp.buyZone!=='Waiting on more data';
-  checks.push({label:'Entry zone defined', pass:!!hasEntryZone});
+  checks.push({label:'Entry zone defined', pass:!!hasEntryZone, required:true});
 
   const inval = computeInvalidation(s, type);
-  checks.push({label:'Invalidation level defined', pass: !inval.isThesisReview && inval.price!=null});
+  checks.push({label:'Invalidation level defined', pass: !inval.isThesisReview && inval.price!=null, required:true});
 
   let rewardRiskOk = false;
   if(gp.stopPrice!=null && gp.entryRef!=null) {
@@ -2646,7 +2719,7 @@ function computeBuyReadiness(s, type) {
     else if(s.atr) targetPrice = gp.entryRef + s.atr*3;
     if(targetPrice!=null && riskDist>0) rewardRiskOk = ((targetPrice-gp.entryRef)/riskDist) >= 1.5;
   }
-  checks.push({label:'Reward outweighs risk (1.5:1 or better)', pass:rewardRiskOk});
+  checks.push({label:'Reward outweighs risk (1.5:1 or better)', pass:rewardRiskOk, required:true});
 
   let sizingPass = false, sizingUnknown = true;
   if(s.atr && s.price) {
@@ -2654,17 +2727,17 @@ function computeBuyReadiness(s, type) {
     const riskPct = budget>0 ? ((budget/s.price)*(s.atr*1.5)/budget)*100 : null;
     if(riskPct!=null) { sizingUnknown=false; sizingPass = riskPct<15; }
   }
-  checks.push({label:'Position sizing reasonable for normal daily movement', pass:sizingPass, unknown:sizingUnknown});
+  checks.push({label:'Position sizing reasonable for normal daily movement', pass:sizingPass, unknown:sizingUnknown, required:false});
 
   const earningsKnown = s.earningsDate!=null && String(s.earningsDate).trim()!=='';
-  checks.push({label:'No earnings event imminent', pass: earningsKnown ? !isEarningsSoon(s.earningsDate) : false, unknown:!earningsKnown});
+  checks.push({label:'No earnings event imminent', pass: earningsKnown ? !isEarningsSoon(s.earningsDate) : false, unknown:!earningsKnown, required:false});
 
   const ms = computeMarketState(s);
   let strategyOk = false;
   if(type==='Swing Trade') strategyOk = ['Healthy Uptrend','Normal Pullback'].includes(ms.state) && ms.evidence!=='Weak';
   else if(type==='Position Trade') strategyOk = ['Healthy Uptrend','Normal Pullback'].includes(ms.state);
   else if(type==='Long-Term Hold') strategyOk = !['Confirmed Breakdown','Trend Weakening'].includes(ms.state);
-  checks.push({label:'Strategy-specific structure check', pass:strategyOk});
+  checks.push({label:'Strategy-specific structure check', pass:strategyOk, required:true});
 
   return {ready: checks.every(c=>c.pass), checks};
 }
@@ -2749,6 +2822,182 @@ function renderEvidenceTableRow(category, verdict, why) {
       <div style="min-width:64px;"><span style="color:${color};font-size:11.5px;font-weight:800;">${verdict}</span></div>
       <div style="flex:1;"><span style="color:${C.textSub};font-size:11.5px;line-height:1.5;">${why}</span></div>
     </div>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SECTION 5 — THE GAME PLAN ENGINE
+// ═══════════════════════════════════════════════════════════════════════════════
+// Turns the Game Plan tab from "here's what's happening" into "here's your
+// next move." Reuses Section 4's Action/Conviction engine and Section 2's
+// Market State engine throughout — this is a presentation and checklist
+// layer, not a third parallel decision system. The existing editable
+// tranche/budget UI (Build Buy Plan, Fill, Sell) is untouched: the user can
+// still override position size, tranche split, and risk tolerance, per
+// Kim's explicit "not a notebook" rule — everything else here is computed,
+// not free-text.
+
+// ── STAGE ────────────────────────────────────────────────────────────────────
+// "Completed" only fires when every filled tranche has actually been sold —
+// a real closed-position detection, not a guess.
+function isPositionFullyClosed(s) {
+  const filled = (s.tranche||[]).filter(t=>t.status==='filled');
+  return filled.length>0 && filled.every(t=>t.soldPrice!=null);
+}
+function computeGamePlanStage(s) {
+  if(isPositionFullyClosed(s)) return 'Completed';
+  const action = computeAction(s);
+  if(action.holding) return /EXIT|REDUCE|REVIEW THESIS/.test(action.action) ? 'Exiting' : 'Managing';
+  if(action.action==='Ready for Entry Review') return 'Ready';
+  if(action.action==='WAIT') {
+    const checks = action.readiness.checks;
+    const metCount = checks.filter(c=>c.pass).length;
+    return metCount >= Math.ceil(checks.length/2) ? 'Preparing' : 'Watching';
+  }
+  return 'Watching';
+}
+const GAME_PLAN_STAGE_META = {
+  'Watching':  {color:C.textSub, icon:'👁'}, 'Preparing': {color:C.yellow, icon:'📶'},
+  'Ready':     {color:C.green,   icon:'🎯'}, 'Managing':  {color:C.teal,   icon:'🛡'},
+  'Exiting':   {color:C.red,     icon:'🔴'}, 'Completed': {color:C.textMuted, icon:'✅'},
+};
+
+// ── CURRENT MISSION & THE ONE SENTENCE ──────────────────────────────────────
+function computeGamePlanMission(s, stage, action) {
+  const MISSION = {
+    'Watching':  'Wait patiently for the setup to develop — nothing to do yet.',
+    'Preparing': 'Watch closely — several conditions are already lining up.',
+    'Ready':     'The entry checklist is complete. Review the plan below before acting.',
+    'Managing':  'Hold the position and follow the plan — no new decisions needed today.',
+    'Exiting':   'The setup is deteriorating. Follow the exit plan below.',
+    'Completed': 'This trade is closed. Nothing left to manage here.',
+  };
+  return MISSION[stage] || MISSION['Watching'];
+}
+function computeOneSentence(s, stage, action, conviction) {
+  if(stage==='Completed') return 'This one\'s done — review it in Notes if you want to learn from it, then move on.';
+  if(stage==='Exiting') return `Don't hope this turns around. The evidence says get out or reduce, not wait and see.`;
+  if(stage==='Managing') return `You're already in — the job now is patience, not a new decision.`;
+  if(stage==='Ready') return conviction.level==='High' ? 'This is one of your higher-quality setups right now, and the checklist agrees — worth a real look.' : 'The checklist is complete, but conviction is only moderate — review before sizing up.';
+  if(stage==='Preparing') return 'Momentum is building toward a real entry, but patience is still the correct trade today.';
+  return `Don't buy today. You're waiting for confirmation, not hoping for one.`;
+}
+
+// ── TRIGGER CHECKLIST / EXIT WATCH ──────────────────────────────────────────
+// Not holding: reuses Section 4's own Buy Readiness gate as the checklist —
+// same six gates, same pass/fail math, just presented as checkboxes.
+// Holding: a distinct exit-watch list built from the invalidation level and
+// the existing exit-confirmation logic, since "should I enter" and "should I
+// exit" are different questions with different evidence.
+function computeManagingChecklist(s, type) {
+  const inval = computeInvalidation(s, type);
+  const exitSignal = checkExitSignal(s);
+  const ms = computeMarketState(s);
+  const checks = [];
+  checks.push({label: inval.isThesisReview ? 'Original thesis still holds' : `Price still above invalidation (${inval.price!=null?fmtP(inval.price):'—'})`, pass: !(exitSignal && exitSignal.confirmed)});
+  checks.push({label:'Long-term trend still intact', pass: !['Confirmed Breakdown','Trend Weakening'].includes(ms.state)});
+  checks.push({label:'No confirmed breakdown on volume', pass: !(exitSignal && exitSignal.triggered && exitSignal.confirmed)});
+  return checks;
+}
+
+// ── RISK-BASED POSITION SIZING (the "risk engine") ──────────────────────────
+// Genuinely risk-first: pick a max dollar loss, size shares backward from
+// entry-minus-stop distance — instead of the existing budget-first flow
+// (pick a dollar budget, whatever it risks is whatever it risks). This is
+// ADVISORY, shown alongside the existing editable Budget/tranche system,
+// not wired to replace it — changing what an already-trusted, real-money
+// field does under the hood is a worse risk than adding a second number.
+// Defaults maxRisk to 15% of budget when s.maxRisk isn't set, matching the
+// same 15% tight-sizing threshold already used elsewhere in the app.
+function computeRiskBasedSizing(s) {
+  const gp = computeGamePlan(s);
+  if(gp.entryRef==null || gp.stopPrice==null) return null;
+  const stopDistance = gp.entryRef - gp.stopPrice;
+  if(stopDistance<=0) return null;
+  const budget = s.invested||150;
+  const maxRisk = (s.maxRisk!=null && s.maxRisk>0) ? s.maxRisk : budget*0.15;
+  const usingDefault = !(s.maxRisk!=null && s.maxRisk>0);
+  const shares = Math.max(0, Math.floor(maxRisk/stopDistance));
+  const totalAllocation = shares*gp.entryRef;
+  const tranches = (s.tranche||[]).length || 2;
+  const splits = splitBudget(totalAllocation, tranches);
+  return {maxRisk, usingDefault, shares, totalAllocation, stopDistance, splits, entryRef:gp.entryRef};
+}
+
+// ── REVIEW DATE (now event-driven wherever the app has real data for it) ────
+// Priority order: a fully closed/exiting position needs no future date at
+// all; a known earnings date beats everything; price actually approaching
+// the invalidation level is a real event worth naming; an open, waiting
+// setup ties to the next weekly close (real calendar math, no new data
+// needed); a stock with nothing to watch yet ties to Kim's own workflow —
+// her next evening scanner pass — rather than an arbitrary day count.
+// Scanner refresh and support-test are genuine events; earnings still
+// depends on a field the app doesn't collect yet (same gap flagged in
+// Section 4), so that branch only fires once s.earningsDate is actually set.
+// Time-based REVIEW_WINDOW_DAYS is now the LAST resort, not the default.
+const REVIEW_WINDOW_DAYS = {'Swing Trade':21, 'Position Trade':60, 'Long-Term Hold':180};
+function computeReviewDate(s) {
+  const created = s.id;
+  const windowDays = REVIEW_WINDOW_DAYS[s.type] || 60;
+  if(!created || typeof created !== 'number') return {text:`${windowDays} days`, overdue:false, windowDays};
+  const daysElapsed = Math.floor((Date.now()-created)/(1000*60*60*24));
+  const daysLeft = windowDays-daysElapsed;
+  if(daysLeft<0) return {text:`Overdue by ${Math.abs(daysLeft)} day${Math.abs(daysLeft)===1?'':'s'} — reassess this thesis`, overdue:true, windowDays};
+  if(daysLeft===0) return {text:'Review today — reassess this thesis', overdue:true, windowDays};
+  return {text:`${daysLeft} day${daysLeft===1?'':'s'}`, overdue:false, windowDays};
+}
+function nextWeekdayDate(targetDow) {
+  const d = new Date();
+  const diff = (targetDow - d.getDay() + 7) % 7;
+  d.setDate(d.getDate()+diff);
+  return d;
+}
+function fmtDateShort(d) { return d.toLocaleDateString('en-US',{month:'short',day:'numeric'}); }
+function computeReviewTrigger(s, stage, type) {
+  if(stage==='Completed') return {kind:'event', overdue:false, text:'Nothing to review — this one is closed.'};
+  if(stage==='Exiting') return {kind:'event', overdue:true, text:'Review now, not on a future date — the exit plan is already active.'};
+
+  if(s.earningsDate) {
+    const d = new Date(s.earningsDate);
+    if(!isNaN(d)) return {kind:'event', overdue:false, text:`Review before earnings on ${fmtDateShort(d)}.`};
+  }
+
+  const inval = computeInvalidation(s, type);
+  if(inval.price!=null && s.price!=null) {
+    const distPct = Math.abs((s.price-inval.price)/inval.price)*100;
+    if(distPct<=3) return {kind:'event', overdue:false, text:`Review as soon as price tests ${fmtP(inval.price)} — you're within 3% of that level right now.`};
+  }
+
+  if(stage==='Watching') return {kind:'event', overdue:false, text:'Review the next time you run your evening scan — nothing time-sensitive here yet.'};
+  if(['Preparing','Ready','Managing'].includes(stage)) return {kind:'event', overdue:false, text:`Review at this week's close (${fmtDateShort(nextWeekdayDate(5))}) if nothing triggers sooner.`};
+
+  const rd = computeReviewDate(s);
+  return {kind:'time', overdue:rd.overdue, text: rd.overdue ? rd.text : `No specific event to anchor to yet — defaulting to a ${rd.windowDays}-day check-in (${rd.text} left).`};
+}
+
+// ── REQUIRED vs SUPPORTING CHECKLIST DISPLAY ────────────────────────────────
+// Presentation only: which checks are shown under which heading. The pass/
+// fail math for "ready" (computeBuyReadiness) is untouched — still every
+// one of the 6 checks, required or supporting, has to pass. Splitting the
+// display just stops a nice-to-have (earnings clear) from visually
+// outweighing a load-bearing one (entry zone defined).
+function renderRequiredSupportingChecklist(checks) {
+  const req = checks.filter(c=>c.required);
+  const sup = checks.filter(c=>!c.required);
+  const row = c => `<div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:10px;"><span style="font-size:15px;flex-shrink:0;">${c.pass?'☑️':c.unknown?'▫️':'⬜'}</span><span style="color:${c.pass?C.text:C.textSub};font-size:12.5px;line-height:1.5;">${c.label}${c.unknown?' (not tracked yet)':''}</span></div>`;
+  return `
+    <div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;">Required Conditions</div>
+    ${req.map(row).join('')}
+    ${sup.length?`<div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin:14px 0 8px;">Supporting Evidence</div>${sup.map(row).join('')}`:''}`;
+}
+
+// ── WHAT I'M WATCHING NEXT ───────────────────────────────────────────────────
+function computeWatchTomorrow(s, stage, type) {
+  if(stage==='Managing') return 'Watch for a confirmed breakdown, not just a red day — a single down day inside a healthy trend is noise, not a signal.';
+  if(stage==='Exiting') return 'Watch whether the exit trigger you\'re following actually completes — don\'t act early on a partial signal.';
+  if(stage==='Completed') return 'Nothing to watch — this one\'s closed.';
+  const readiness = computeBuyReadiness(s, type);
+  const firstFail = readiness.checks.find(c=>!c.pass);
+  return firstFail ? `Watch ${firstFail.label.toLowerCase()} — that's the next box to check.` : 'Every box is checked — the only thing left to watch is your own follow-through.';
 }
 
 // Price line chart from your snapshot history, with 50/200-day SMA overlays
@@ -3048,9 +3297,6 @@ function renderTabAnalysis(s) {
       <div style="color:${C.textMuted};font-size:10.5px;line-height:1.5;margin-top:8px;">${invalidation.isThesisReview?'This tells you when to reassess, not when to sell — a long-term thesis doesn\'t break on price alone.':'This tells you what would prove this analysis wrong, not just where a stop order sits.'}</div>
     </div>`;
 
-  const readinessRows = action.readiness.checks.map(c=>`
-    <div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:6px;"><span style="color:${c.pass?C.green:C.textMuted};font-size:12px;">${c.pass?'✓':c.unknown?'○':'✗'}</span><span style="color:${C.textSub};font-size:11.5px;line-height:1.5;">${c.label}${c.unknown?' (not tracked yet)':''}</span></div>`).join('');
-
   const actionColor = action.action==='Ready for Entry Review'?C.green : /HOLD|CONTINUE/.test(action.action)?C.teal : /WAIT/.test(action.action)?C.yellow : /EXIT|AVOID/.test(action.action)?C.red : /REDUCE|REVIEW/.test(action.action)?C.orange : C.textMuted;
   const actionCard = `
     <div style="background:${C.card};border-radius:16px;border:2px solid ${actionColor}44;padding:18px;">
@@ -3060,8 +3306,7 @@ function renderTabAnalysis(s) {
       <div style="color:${actionColor};font-size:19px;font-weight:900;letter-spacing:0.02em;margin-bottom:12px;">${action.action}</div>
       ${action.action==='WAIT'||action.action==='Ready for Entry Review'?`
       <div style="border-top:1px solid ${C.border};padding-top:10px;">
-        <div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;">Entry Readiness Checklist</div>
-        ${readinessRows}
+        ${renderRequiredSupportingChecklist(action.readiness.checks)}
       </div>`:''}
       <button onclick="showTab('plan','${s.id}')" style="width:100%;margin-top:14px;padding:14px;background:${C.cardHigh};color:${C.text};border:1px solid ${C.border};border-radius:14px;font-size:13px;font-weight:800;cursor:pointer;">See My Game Plan →</button>
     </div>`;
@@ -3201,6 +3446,20 @@ function updateBudget(id, val) {
   stocks = stocks.map(x=>String(x.id)===String(id)?updated:x);
   scheduleSave(updated);
   // Re-render plan tab with new splits
+  const el = document.getElementById('tab-content');
+  if(el) el.innerHTML = renderTabPlan(updated);
+}
+
+// Updates the optional "max $ willing to lose" input that drives the
+// risk-based sizing advisory card. Blank/0 falls back to the 15%-of-budget
+// default inside computeRiskBasedSizing — never left undefined mid-render.
+function updateMaxRisk(id, val) {
+  const s = stocks.find(x=>String(x.id)===String(id));
+  if(!s) return;
+  const parsed = parseFloat(val);
+  const updated = {...s, maxRisk: (parsed>0) ? parsed : null};
+  stocks = stocks.map(x=>String(x.id)===String(id)?updated:x);
+  scheduleSave(updated);
   const el = document.getElementById('tab-content');
   if(el) el.innerHTML = renderTabPlan(updated);
 }
