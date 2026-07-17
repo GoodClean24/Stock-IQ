@@ -1280,7 +1280,6 @@ function renderTabPlan(s) {
   // untouched). Planned next step, not built yet: compare the user's actual
   // tranche allocation against this risk-based suggestion and surface the
   // gap, rather than just showing the two numbers side by side unremarked.
-  const riskSizing = computeRiskBasedSizing(s);
   const isHolding = (s.tranche||[]).some(t=>t.status==='filled');
   const readinessObj = isHolding ? null : computeBuyReadiness(s, s.type);
   const managingChecklist = isHolding ? computeManagingChecklist(s, s.type) : null;
@@ -1304,24 +1303,7 @@ function renderTabPlan(s) {
       ${renderRequiredSupportingChecklist(readinessObj.checks)}
     </div>`;
 
-  const riskSizingCard = riskSizing ? `
-    <div style="background:${C.card};border-radius:16px;border:1px solid ${C.teal}44;padding:18px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-        <span style="color:${C.teal};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;">📐 Risk-Based Size (advisory)</span>
-      </div>
-      <div style="color:${C.textSub};font-size:11.5px;line-height:1.6;margin-bottom:12px;">Sized backward from a max dollar loss, not forward from a budget. ${riskSizing.usingDefault ? `Using a default of 15% of your budget (${fmtP(riskSizing.maxRisk)}) since no max-risk amount is set.` : `Based on your max risk of ${fmtP(riskSizing.maxRisk)}.`}</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
-        <div style="background:${C.cardHigh};border-radius:10px;padding:10px 12px;"><div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;margin-bottom:3px;">Suggested Shares</div><div style="color:${C.text};font-size:14px;font-weight:800;">${riskSizing.shares}</div></div>
-        <div style="background:${C.cardHigh};border-radius:10px;padding:10px 12px;"><div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;margin-bottom:3px;">Total Allocation</div><div style="color:${C.text};font-size:14px;font-weight:800;">${fmtP(riskSizing.totalAllocation)}</div></div>
-      </div>
-      <div style="display:flex;align-items:center;gap:8px;">
-        <span style="color:${C.textMuted};font-size:11px;">Max $ willing to lose:</span>
-        <div style="position:relative;">
-          <span style="position:absolute;left:8px;top:50%;transform:translateY(-50%);color:${C.textSub};font-size:13px;">$</span>
-          <input type="text" inputmode="decimal" value="${s.maxRisk||''}" placeholder="auto" onchange="updateMaxRisk('${s.id}',this.value)" style="width:80px;background:${C.cardHigh};border:1px solid ${C.borderLight};border-radius:8px;color:${C.text};font-size:13px;font-weight:700;padding:6px 8px 6px 18px;outline:none;">
-        </div>
-      </div>
-    </div>` : '';
+  const tradeEconomicsCard = renderTradeEconomicsCard(s, s.type);
 
   const invalidationCard = `
     <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
@@ -1387,17 +1369,7 @@ function renderTabPlan(s) {
       </div>`;
   }).join('');
 
-  const watchOutItems = computeWatchOuts(s).map(w=>`
-    <div style="display:flex;gap:12px;align-items:flex-start;margin-bottom:12px;">
-      <span style="color:${C.yellow};font-size:16px;flex-shrink:0;line-height:1.4;">⚠</span>
-      <span style="color:${C.textSub};font-size:13px;line-height:1.6;">${w}</span>
-    </div>`).join('');
-  const nextCatalystCard = `
-    <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
-      <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">🔭 Next Catalyst</div>
-      <div style="color:${C.text};font-size:12.5px;line-height:1.65;${watchOutItems?`margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid ${C.border};`:''}">${watchNext}</div>
-      ${watchOutItems}
-    </div>`;
+  const concernTriggerCards = renderConcernTriggerCards(s, s.type);
 
   const exitSignal = checkExitSignal(s);
   const suggestion = suggestHoldTypeLive(s);
@@ -1449,7 +1421,7 @@ function renderTabPlan(s) {
         </div>
         ${tranches}
       </div>
-      ${riskSizingCard}
+      ${tradeEconomicsCard}
       ${exitCheckCard}
       ${invalidationCard}
       ${gp.profit&&gp.profit!=='—'?`
@@ -1468,7 +1440,7 @@ function renderTabPlan(s) {
           <div style="color:${C.textSub};font-size:13px;line-height:1.6;">${gp.stopRule||'Define your exit rule.'}</div>
         </div>
       </div>
-      ${watchOutItems || watchNext ? nextCatalystCard : ''}
+      ${concernTriggerCards}
       <div style="background:${C.card};border-radius:12px;border:1px solid ${reviewTrigger.overdue?C.red+'44':C.border};padding:12px 16px;display:flex;align-items:center;gap:10px;">
         <span style="font-size:16px;">${reviewTrigger.overdue?'⏰':'⏱'}</span>
         <span style="color:${C.textSub};font-size:13px;">${reviewTrigger.text}</span>
@@ -3535,6 +3507,128 @@ function showPillExplain(kind, id) {
   else if(kind==='entryQuality') showEntryQualitySheet(id);
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// BIGGEST CONCERN / NEXT TRIGGER
+// ═══════════════════════════════════════════════════════════════════════════════
+// Replaces the old "What Concerns Me" (Analysis tab) and "Next Catalyst"
+// (Game Plan tab) — which both drew from computeWatchOuts and ended up
+// saying the same thing two ways ("buyers haven't defended the 50-day" /
+// "watch for buyers to defend the 50-day"). These now have distinct jobs:
+// Biggest Concern explains why you're cautious (one risk, prioritized).
+// Next Trigger is the one specific, numeric event that would change today's
+// call — never a vague "watch volume."
+function computeBiggestConcern(s, type) {
+  const opp = computeOpportunityStatus(s, type);
+  const eq = opp.eq;
+  const levels = computeKeyLevels(s);
+  const candidates = [];
+
+  if(opp.flags.insufficientHistory) candidates.push({p:0, text:'StockIQ doesn\'t have enough logged history yet to be confident in this read.'});
+  if(eq.upsideToResistancePct!=null && levels.resistance) {
+    const threshold = type==='Swing Trade'?5:type==='Position Trade'?8:12;
+    if(eq.upsideToResistancePct < threshold) candidates.push({p:1, text:`The stock is only ${eq.upsideToResistancePct.toFixed(1)}% below ${levels.resistance.label.toLowerCase()}, limiting upside.`});
+  }
+  if(s.earningsDate) {
+    const days = Math.round((new Date(s.earningsDate) - new Date())/(1000*60*60*24));
+    if(days>=0 && days<=14) candidates.push({p:2, text:`Earnings are in ${days} day${days===1?'':'s'} and could invalidate the current setup.`});
+  }
+  const upDayVol = computeVolumeOnUpDays(s);
+  if(upDayVol && upDayVol.ratio<1) candidates.push({p:3, text:'Institutions are not yet buying aggressively — volume on down days still outweighs volume on up days.'});
+  else { const setup = analyzeSetup(s); if(setup.volRatio!=null && !setup.volConfirmed) candidates.push({p:3, text:'Volume is quiet right now — the current move doesn\'t have strong conviction behind it yet.'}); }
+  if(opp.flags.isExtended) candidates.push({p:4, text:`Price is ${opp.flags.extendedPct.toFixed(0)}% above the 50-day average — more extended than usual for this strategy.`});
+  if(opp.flags.trendDeteriorating) candidates.push({p:5, text:`${opp.ms.state} — the trend itself is showing real cracks, not just a normal pullback.`});
+  const rz = rsiZone(s.rsi);
+  if(rz && rz.zone==='hot') candidates.push({p:6, text:'RSI is stretched — a pullback could come at any time.'});
+  if(eq.rr && eq.rr.ratio!=null && eq.rr.ratio<1.5) candidates.push({p:7, text:`Reward-to-risk doesn't favor this trade right now (about ${eq.rr.ratio.toFixed(1)}:1).`});
+
+  candidates.sort((a,b)=>a.p-b.p);
+  return candidates.length ? candidates[0].text : 'Nothing significant is working against this case right now — that itself is worth noting, not just assuming.';
+}
+function computeNextTrigger(s, type) {
+  const ms = computeMarketState(s);
+  const gp = computeGamePlan(s);
+  const levels = computeKeyLevels(s);
+  switch(ms.state) {
+    case 'Normal Pullback':
+      return `Close above ${fmtP(s.ma20)} on above-average volume, or a bounce off ${fmtP(s.ma50)} (the 50-day) with increasing volume.`;
+    case 'Consolidation':
+      return levels.resistance ? `A close above ${fmtP(levels.resistance.price)} on above-average volume would confirm a breakout.` : 'A clear break of the current range on above-average volume.';
+    case 'Trend Weakening':
+      return `Price reclaiming ${fmtP(s.ma20)}, with RSI rising back above 50 while price holds support.`;
+    case 'Confirmed Breakdown':
+      return `A close back above ${fmtP(s.ma50)} on above-average volume — anything less is just a bounce.`;
+    case 'Recovery Attempt':
+      return `A higher low holding above the recent bottom, confirmed by price reclaiming ${fmtP(s.ma50)}.`;
+    case 'Healthy Uptrend':
+      return gp.entryPending && gp.entryRef!=null ? `A pullback toward ${fmtP(gp.entryRef)} would offer a better entry than chasing here.` : 'Nothing specific to wait for — the setup is already healthy and actionable.';
+    default:
+      return 'Not enough data yet to define a specific trigger.';
+  }
+}
+function renderConcernTriggerCards(s, type) {
+  return `
+    <div style="background:${C.card};border-radius:16px;border:1px solid ${C.orange}44;padding:18px;">
+      <div style="color:${C.orange};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">🚩 Biggest Concern</div>
+      <p style="color:${C.text};font-size:13px;line-height:1.7;margin:0;">${computeBiggestConcern(s, type)}</p>
+    </div>
+    <div style="background:${C.card};border-radius:16px;border:1px solid ${C.teal}44;padding:18px;">
+      <div style="color:${C.teal};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">🎯 Next Trigger</div>
+      <p style="color:${C.text};font-size:13px;line-height:1.7;margin:0;">${computeNextTrigger(s, type)}</p>
+    </div>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TRADE ECONOMICS (replaces bare "Reward/Risk 2.7:1" wherever it appeared)
+// ═══════════════════════════════════════════════════════════════════════════════
+// Forward math from the user's actual planned investment (the existing,
+// already-editable budget field) — Investment / Entry -> Shares -> dollar
+// Risk and Reward. This supersedes the earlier "Risk-Based Size (advisory)"
+// card, which worked backward from a max-dollar-risk input; that was a
+// reasonable first cut, but this is what Kim actually asked for: the real
+// dollar consequence of the position she's already planning to take, not a
+// second, competing sizing philosophy. The max-risk input is retired.
+const REWARD_RISK_MIN = {'Swing Trade':2.0, 'Position Trade':1.5};
+function computeTradeEconomics(s, type) {
+  const gp = computeGamePlan(s);
+  const rr = computeRewardRiskRatio(s);
+  if(gp.entryRef==null) return {available:false};
+  const investment = s.invested||150;
+  const shares = investment / gp.entryRef;
+  const riskDollar = rr.riskPerShare!=null ? shares*rr.riskPerShare : null;
+  const rewardDollar = rr.rewardPerShare!=null ? shares*rr.rewardPerShare : null;
+  const threshold = REWARD_RISK_MIN[type] || 1.5;
+  const meets = rr.ratio!=null && rr.ratio>=threshold;
+  let verdict, verdictText;
+  if(rr.ratio==null) { verdict='Unavailable'; verdictText='Reward-to-risk isn\'t available yet — not enough data to define entry, stop, and target.'; }
+  else if(meets) { verdict='Yes'; verdictText=`You're risking about $${riskDollar.toFixed(0)} to potentially make $${rewardDollar.toFixed(0)}. The reward is approximately ${rr.ratio.toFixed(1)} times the risk, which meets your ${type||'strategy'} rules.`; }
+  else { verdict='No'; verdictText=`You're risking about $${riskDollar.toFixed(0)} to potentially make only $${rewardDollar.toFixed(0)}. This trade does not justify the risk.`; }
+  return {available:true, investment, shares, riskDollar, rewardDollar, ratio:rr.ratio, threshold, verdict, verdictText};
+}
+function renderTradeEconomicsCard(s, type) {
+  const te = computeTradeEconomics(s, type);
+  if(!te.available) return `
+    <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
+      <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;">Trade Economics</div>
+      <div style="color:${C.textSub};font-size:12.5px;line-height:1.6;">Not enough data yet to define entry, stop, and target.</div>
+    </div>`;
+  const verdictColor = te.verdict==='Yes'?C.green:te.verdict==='No'?C.red:C.textMuted;
+  return `
+    <div style="background:${C.card};border-radius:16px;border:2px solid ${verdictColor}44;padding:18px;">
+      <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">Trade Economics</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
+        <div style="background:${C.cardHigh};border-radius:10px;padding:11px;"><div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;margin-bottom:3px;">Planned Investment</div><div style="color:${C.text};font-size:14px;font-weight:800;">${fmtP(te.investment)}</div></div>
+        <div style="background:${C.cardHigh};border-radius:10px;padding:11px;"><div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;margin-bottom:3px;">Estimated Shares</div><div style="color:${C.text};font-size:14px;font-weight:800;">${te.shares.toFixed(1)}</div></div>
+        <div style="background:${C.redDim};border-radius:10px;padding:11px;"><div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;margin-bottom:3px;">🔴 Max Risk</div><div style="color:${C.red};font-size:14px;font-weight:800;">${te.riskDollar!=null?`-$${te.riskDollar.toFixed(0)}`:'—'}</div></div>
+        <div style="background:${C.greenDim};border-radius:10px;padding:11px;"><div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;margin-bottom:3px;">🟢 Potential Reward</div><div style="color:${C.green};font-size:14px;font-weight:800;">${te.rewardDollar!=null?`+$${te.rewardDollar.toFixed(0)}`:'—'}</div></div>
+      </div>
+      ${te.ratio!=null?`<div style="color:${C.textMuted};font-size:10.5px;margin-bottom:10px;">Reward/Risk: ${te.ratio.toFixed(1)}:1 (needs ${te.threshold.toFixed(1)}:1 for ${type||'this strategy'})</div>`:''}
+      <div style="padding-top:10px;border-top:1px solid ${C.border};">
+        <div style="color:${verdictColor};font-size:13px;font-weight:900;margin-bottom:4px;">Is it worth it? ${te.verdict}</div>
+        <div style="color:${C.textSub};font-size:12.5px;line-height:1.6;">${te.verdictText}</div>
+      </div>
+    </div>`;
+}
+
 function renderPriceChart(s) {
   const snaps = (s.snapshots||[]).filter(sn=>sn.price!=null);
   if(snaps.length<2) {
@@ -3661,7 +3755,7 @@ function renderOpportunityCard(s) {
     <div style="color:${C.textSub};font-size:12.5px;line-height:1.6;margin-bottom:12px;">${opp.reason}</div>
     <div style="display:flex;gap:10px;padding-top:10px;border-top:1px solid ${C.border};">
       <div style="flex:1;"><div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;margin-bottom:3px;">Entry Quality</div><div style="color:${C.text};font-size:13px;font-weight:800;">${opp.eq.quality}</div></div>
-      ${opp.eq.rr && opp.eq.rr.ratio!=null ? `<div style="flex:1;"><div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;margin-bottom:3px;">Reward : Risk</div><div style="color:${C.text};font-size:13px;font-weight:800;">${opp.eq.rr.ratio.toFixed(1)}:1</div></div>` : ''}
+      ${opp.eq.rr && opp.eq.rr.ratio!=null ? `<div style="flex:1;"><div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;margin-bottom:3px;">Risk → Reward</div><div style="color:${C.text};font-size:13px;font-weight:800;">$${opp.eq.rr.riskPerShare.toFixed(2)} → $${opp.eq.rr.rewardPerShare.toFixed(2)}</div><div style="color:${C.textMuted};font-size:9.5px;margin-top:1px;">${opp.eq.rr.ratio.toFixed(1)}:1</div></div>` : ''}
     </div>
     ${s.archived ? `
       <div style="margin-top:12px;padding-top:12px;border-top:1px solid ${C.border};">
@@ -3834,7 +3928,6 @@ function renderTabAnalysis(s) {
   const trendEv = conviction.trendEv, momentumEv = conviction.momentumEv, volumeEv = conviction.volumeEv, volatilityEv = computeVolatilityEvidence(s);
   const action = computeAction(s);
   const invalidation = computeInvalidation(s, type);
-  const contradictory = computeWatchOuts(s);
   const missing = computeMissingEvidence(ms);
 
   const execSummaryCard = `
@@ -3865,11 +3958,7 @@ function renderTabAnalysis(s) {
       ${evidenceRow('Volatility', volatilityEv)}
     </div>`;
 
-  const contradictoryCard = `
-    <div style="background:${C.card};border-radius:16px;border:1px solid ${C.orange}44;padding:18px;">
-      <div style="color:${C.orange};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">⚖️ What Concerns Me</div>
-      ${contradictory.length ? contradictory.map(w=>`<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:8px;"><span style="color:${C.orange};font-size:12px;">•</span><span style="color:${C.textSub};font-size:12.5px;line-height:1.6;">${w}</span></div>`).join('') : `<div style="color:${C.textSub};font-size:12.5px;line-height:1.6;">Nothing significant is working against this case right now — that itself is worth noting, not just assuming.</div>`}
-    </div>`;
+  const concernTriggerCards = renderConcernTriggerCards(s, type);
 
   const missingCard = `
     <div style="background:${C.card};border-radius:16px;border:1px solid ${C.blue}44;padding:18px;">
@@ -3933,7 +4022,7 @@ function renderTabAnalysis(s) {
     <div style="display:flex;flex-direction:column;gap:14px;">
       ${execSummaryCard}
       ${buildCaseCard}
-      ${contradictoryCard}
+      ${concernTriggerCards}
       ${missingCard}
       ${invalidationCard}
       ${actionCard}
