@@ -999,17 +999,23 @@ function openDetail(id) {
 }
 
 function renderDetail(s) {
-  const cfg = vCfg(s.verdict);
   const filled = (s.tranche||[]).filter(t=>t.status==='filled');
   const totalInv = filled.reduce((a,t)=>a+(t.entryPrice||0)*(t.shares||0),0);
   const totalVal = filled.reduce((a,t)=>a+s.price*(t.shares||0),0);
   const gl = totalVal-totalInv;
   const conviction = computeConviction(s);
+  const opp = computeOpportunityStatus(s, s.type);
+  const oppMeta = OPPORTUNITY_STATUS_META[opp.status];
+  const ms = computeMarketState(s);
+  const msMeta = MARKET_STATE_META[ms.state]||MARKET_STATE_META['Insufficient Data'];
 
   const typeSuggestion = suggestHoldTypeLive(s);
   const typeDrift = typeSuggestion && typeSuggestion.confident && typeSuggestion.label !== s.type;
   const tc = typeBadgeColors(s.type);
   const needsReclass = needsReclassify(s);
+
+  // Clickable pill — each opens a short "why did you decide that?" sheet.
+  const pill = (icon, label, color, kind) => `<button onclick="showPillExplain('${kind}','${s.id}')" style="background:${color}18;color:${color};border:1px solid ${color}44;border-radius:20px;padding:6px 13px;font-size:11.5px;font-weight:800;cursor:pointer;display:inline-flex;align-items:center;gap:4px;">${icon?icon+' ':''}${label}</button>`;
 
   document.getElementById('detail-content').innerHTML = `
     <!-- Header -->
@@ -1028,18 +1034,18 @@ function renderDetail(s) {
         <span style="color:${(s.pct||0)>=0?C.green:C.red};font-size:14px;font-weight:700;">${(s.pct||0)>=0?'▲':'▼'} ${Math.abs(s.pct||0).toFixed(2)}%</span>
         ${totalInv>0?`<span style="margin-left:auto;color:${gl>=0?C.green:C.red};font-size:14px;font-weight:800;">${gl>=0?'+':''}${gl.toFixed(2)} P&L</span>`:''}
       </div>
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:${typeDrift?'6px':'0'};">
-        <div style="display:flex;gap:8px;">
-          <span style="background:${cfg.dim};color:${cfg.color};border:1px solid ${cfg.color}44;border-radius:20px;padding:5px 14px;font-size:12px;font-weight:800;letter-spacing:0.05em;">${cfg.label}</span>
-          <span style="background:${tc.bg};color:${tc.fg};border-radius:20px;padding:5px 14px;font-size:12px;font-weight:700;">${needsReclass?'Needs Strategy':s.type||'—'}</span>
-        </div>
-        <div style="display:flex;gap:8px;">
-          <button onclick="openMentor('${s.id}')" style="background:${C.cardHigh};color:${C.purple};border:1px solid ${C.purple}44;border-radius:20px;padding:7px 14px;font-size:12px;font-weight:800;cursor:pointer;">🎓 Mentor</button>
-          <button onclick="showImportFlow('${s.id}')" style="background:${C.cardHigh};color:${C.teal};border:1px solid ${C.teal}44;border-radius:20px;padding:7px 14px;font-size:12px;font-weight:800;cursor:pointer;">📂 Import</button>
-          <button onclick="showDailyUpdate('${s.id}')" style="background:${C.teal};color:#000;border:none;border-radius:20px;padding:7px 16px;font-size:12px;font-weight:800;cursor:pointer;">↻ Update</button>
-        </div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:${typeDrift?'6px':'12px'};">
+        ${pill(oppMeta.icon, opp.status, oppMeta.color, 'opportunity')}
+        ${pill(msMeta.icon, ms.state, msMeta.color, 'marketState')}
+        ${pill(null, needsReclass?'Needs Strategy':(s.type||'—'), tc.fg, 'positionType')}
+        ${pill(null, `Entry: ${opp.eq.quality}`, opp.eq.quality==='Excellent'?C.green:opp.eq.quality==='Acceptable'?C.yellow:opp.eq.quality==='Poor'?C.red:C.textMuted, 'entryQuality')}
       </div>
-      ${typeDrift ? `<div style="margin-top:6px;color:${C.yellow};font-size:11px;">📊 Data currently suggests <b>${typeSuggestion.label}</b> — see Game Plan for why.</div>` : ''}
+      ${typeDrift ? `<div style="margin-bottom:12px;color:${C.yellow};font-size:11px;">📊 Data currently suggests <b>${typeSuggestion.label}</b> — see Game Plan for why.</div>` : ''}
+      <div style="display:flex;gap:8px;">
+        <button onclick="openMentor('${s.id}')" style="background:${C.cardHigh};color:${C.purple};border:1px solid ${C.purple}44;border-radius:20px;padding:7px 14px;font-size:12px;font-weight:800;cursor:pointer;flex:1;">🎓 Mentor</button>
+        <button onclick="showImportFlow('${s.id}')" style="background:${C.cardHigh};color:${C.teal};border:1px solid ${C.teal}44;border-radius:20px;padding:7px 14px;font-size:12px;font-weight:800;cursor:pointer;flex:1;">📂 Import</button>
+        <button onclick="showDailyUpdate('${s.id}')" style="background:${C.teal};color:#000;border:none;border-radius:20px;padding:7px 16px;font-size:12px;font-weight:800;cursor:pointer;flex:1;">↻ Update</button>
+      </div>
     </div>
     ${needsReclass && !reclassifyDismissed.has(String(s.id)) ? `
     <div style="background:${C.orangeDim};border-bottom:1px solid ${C.orange}44;padding:14px 20px;">
@@ -1321,7 +1327,7 @@ function renderTabPlan(s) {
     <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
       <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;">🛑 ${invalidation.isThesisReview?'Thesis Review Trigger':'Invalidation'}</div>
       <div style="color:${C.text};font-size:12.5px;line-height:1.65;">${invalidation.text}</div>
-      <div style="color:${C.textMuted};font-size:10.5px;line-height:1.5;margin-top:8px;">This is why the setup would be wrong — separate from your actual stop order below.</div>
+      <div style="color:${C.text};font-size:12px;line-height:1.5;margin-top:8px;">This is why the setup would be wrong — separate from your actual stop order below.</div>
     </div>`;
 
 
@@ -2267,7 +2273,7 @@ function openMentor(stockId) {
       <div style="color:${C.textSub};font-size:12px;line-height:1.5;">Assumes your 4 views are already built. Walks through them using what StockIQ already knows, and teaches you how to read the rest on the chart.</div>
     </div>` : `
     <div style="background:${C.card};border:1px dashed ${C.border};border-radius:14px;padding:16px;">
-      <div style="color:${C.textMuted};font-size:12px;line-height:1.6;">Open a specific stock to run Guided Analysis on it.</div>
+      <div style="color:${C.text};font-size:12px;line-height:1.6;">Open a specific stock to run Guided Analysis on it.</div>
     </div>`}
   `);
 }
@@ -2309,7 +2315,7 @@ function renderMentorSetupStep() {
       <div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px;">Why this chart exists</div>
       <div style="color:${C.text};font-size:12.5px;line-height:1.6;">${tab.whyItMatters}</div>
     </div>
-    <div style="color:${C.textMuted};font-size:11px;line-height:1.5;margin-bottom:24px;">${tab.excludeNote}</div>
+    <div style="color:${C.text};font-size:12.5px;line-height:1.5;margin-bottom:24px;">${tab.excludeNote}</div>
     <div style="display:flex;gap:10px;">
       ${mentorStep>0?`<button onclick="mentorBack()" style="flex:1;padding:15px;border-radius:14px;border:1px solid ${C.border};background:none;color:${C.textSub};font-size:14px;font-weight:700;cursor:pointer;">Back</button>`:''}
       <button onclick="mentorNext()" style="flex:2;padding:15px;border-radius:14px;border:none;background:${C.purple};color:#000;font-size:15px;font-weight:800;cursor:pointer;">${isLast?'Done ✓':'Next Chart →'}</button>
@@ -2429,7 +2435,7 @@ function renderMentorAnalysisStep() {
         <span style="color:${meta.color};font-size:17px;font-weight:900;">${ms.state}</span>
       </div>
       <div style="color:${C.textSub};font-size:12.5px;margin-bottom:12px;">${meta.tagline}</div>
-      <div style="color:${C.textMuted};font-size:10px;margin-bottom:8px;">${ms.evidenceCount} support this reading — this is your Setup and Structure chart, translated into words.</div>
+      <div style="color:${C.text};font-size:11.5px;margin-bottom:8px;">${ms.evidenceCount} support this reading — this is your Setup and Structure chart, translated into words.</div>
       ${met.map(c=>`<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:6px;"><span style="color:${C.green};font-size:12px;">✓</span><span style="color:${C.textSub};font-size:12px;line-height:1.5;">${c.label}</span></div>`).join('')}
       ${unmet.map(c=>`<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:6px;"><span style="color:${C.textMuted};font-size:12px;">✗</span><span style="color:${C.textSub};font-size:12px;line-height:1.5;">${c.label}</span></div>`).join('')}
       ${needsHistory.length?`
@@ -2510,7 +2516,7 @@ function renderMentorLimitedIntroStep() {
       <div style="color:${C.blue};font-size:10px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;">🔍 What still needs history</div>
       ${MENTOR_NEEDS_HISTORY.map(t=>`<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:6px;"><span style="color:${C.blue};font-size:12px;">•</span><span style="color:${C.textSub};font-size:12px;line-height:1.5;">${t}</span></div>`).join('')}
     </div>
-    <div style="color:${C.textMuted};font-size:11px;line-height:1.6;margin-bottom:20px;">The walkthrough still continues below — anywhere StockIQ can't confirm something from saved data, it'll show you exactly what to check yourself on the chart.</div>
+    <div style="color:${C.text};font-size:12.5px;line-height:1.6;margin-bottom:20px;">The walkthrough still continues below — anywhere StockIQ can't confirm something from saved data, it'll show you exactly what to check yourself on the chart.</div>
     <button onclick="mentorNext()" style="width:100%;padding:15px;border-radius:14px;border:none;background:${C.purple};color:#000;font-size:15px;font-weight:800;cursor:pointer;">Continue →</button>`);
 }
 
@@ -3146,7 +3152,10 @@ function computeOpportunityStatus(s, type) {
   const gp = computeGamePlan(s);
   const ms = computeMarketState(s);
 
-  if(eq.quality==='Unavailable') return {status:'Watch Closely', reason:'Not enough data yet to judge this opportunity — worth checking again once more data is logged.', eq};
+  if(eq.quality==='Unavailable' || ms.state==='Insufficient Data') {
+    return {status:'Watch Closely', reason:'Not enough data yet to judge this opportunity — worth checking again once more data is logged.', eq, ms, gp,
+      flags:{tooCloseToResistance:false, isExtended:false, poorRR:false, noTriggerNearby:false, trendDeteriorating:false, insufficientHistory:true}};
+  }
 
   let extendedPct = null;
   if(s.ma50 && s.price) extendedPct = ((s.price - s.ma50)/s.ma50)*100;
@@ -3157,11 +3166,14 @@ function computeOpportunityStatus(s, type) {
   const tooCloseToResistance = tooCloseThreshold!=null && eq.upsideToResistancePct!=null && eq.upsideToResistancePct < tooCloseThreshold;
 
   const poorRR = eq.rr && eq.rr.ratio!=null && eq.rr.ratio < 1.5;
+  const trendDeteriorating = ['Trend Weakening','Confirmed Breakdown'].includes(ms.state);
 
   let noTriggerNearby = false;
   if(gp.entryPending && gp.entryRef!=null && s.price!=null && s.atr) {
     noTriggerNearby = (Math.abs(s.price - gp.entryRef)/s.atr) > 3;
   }
+
+  const flags = {tooCloseToResistance, isExtended, poorRR, noTriggerNearby, trendDeteriorating, insufficientHistory:false, extendedPct, tooCloseThreshold, extendedThreshold};
 
   if(type!=='Long-Term Hold' && (poorRR || tooCloseToResistance || isExtended || noTriggerNearby || eq.quality==='Poor')) {
     const reasons = [];
@@ -3170,10 +3182,10 @@ function computeOpportunityStatus(s, type) {
     if(isExtended) reasons.push(`price is ${extendedPct.toFixed(0)}% above the 50-day average — more extended than this strategy should chase`);
     if(noTriggerNearby) reasons.push(`the preferred entry is too far from current price for a realistic trigger soon`);
     if(!reasons.length) reasons.push('the entry math doesn\'t work right now');
-    return {status:'Pass / Archive', reason:`${ms.state} trend, but ${reasons.join(' and ')}. This is a good stock with a poor entry.`, eq};
+    return {status:'Pass / Archive', reason:`${ms.state} trend, but ${reasons.join(' and ')}. This is a good stock with a poor entry.`, eq, ms, gp, flags};
   }
   if(type==='Long-Term Hold' && eq.quality==='Poor') {
-    return {status:'Pass / Archive', reason:eq.reason, eq};
+    return {status:'Pass / Archive', reason:eq.reason, eq, ms, gp, flags:{...flags, tooCloseToResistance:false, isExtended:false}};
   }
 
   let watchClosely = false, watchReason = '';
@@ -3182,13 +3194,13 @@ function computeOpportunityStatus(s, type) {
   }
   if(!watchClosely && ms.state==='Normal Pullback') { watchClosely = true; watchReason = 'Pulling back toward support — one confirmation away from actionable.'; }
   if(!watchClosely && ms.state==='Consolidation' && eq.upsideToResistancePct!=null && eq.upsideToResistancePct < (tooCloseThreshold||8)*2) { watchClosely = true; watchReason = 'Consolidating beneath resistance — a breakout or breakdown could make this actionable soon.'; }
-  if(watchClosely) return {status:'Watch Closely', reason:watchReason, eq};
+  if(watchClosely) return {status:'Watch Closely', reason:watchReason, eq, ms, gp, flags};
 
   if(!gp.entryPending && (eq.quality==='Excellent'||eq.quality==='Acceptable') && !['Confirmed Breakdown','Trend Weakening'].includes(ms.state)) {
-    return {status:'Active Opportunity', reason:'The setup is actionable or very close, with a favorable reward-to-risk.', eq};
+    return {status:'Active Opportunity', reason:'The setup is actionable or very close, with a favorable reward-to-risk.', eq, ms, gp, flags};
   }
 
-  return {status:'Low Priority', reason:'Nothing is wrong with the stock. There is simply no compelling trade here right now.', eq};
+  return {status:'Low Priority', reason:'Nothing is wrong with the stock. There is simply no compelling trade here right now.', eq, ms, gp, flags};
 }
 const OPPORTUNITY_STATUS_META = {
   'Active Opportunity': {color:C.green,  icon:'🟢'},
@@ -3270,6 +3282,259 @@ function checkReactivationSuggested(s) {
 
 // Price line chart from your snapshot history, with 50/200-day SMA overlays
 // when that data is present. Plain SVG — no chart library, matches app style.
+// ═══════════════════════════════════════════════════════════════════════════════
+// DECISION EXPLANATION PILLS
+// ═══════════════════════════════════════════════════════════════════════════════
+// Makes the four header pills (Opportunity, Market State, Position Type,
+// Entry Quality) clickable, each opening a short sheet answering "why did
+// you decide that?" — reusing the existing engines (computeOpportunityStatus,
+// computeMarketState, suggestHoldTypeLive, computeEntryQuality) rather than
+// building a second opinion. Reward:risk always leads with real dollar
+// language ("you're risking about $X to potentially make $Y"); the X:1
+// ratio is demoted to secondary "trader shorthand" detail, never the lead.
+
+// ── PASS / ARCHIVE: single main reason, up to 2 supporting ──────────────────
+// Fixed priority order per spec — first true flag wins as the main reason.
+const PASS_REASON_PRIORITY = [
+  {key:'tooCloseToResistance', label:'Too close to resistance'},
+  {key:'isExtended',           label:'Too extended above support'},
+  {key:'poorRR',                label:'Weak reward compared with potential loss'},
+  {key:'trendDeteriorating',   label:'Trend is deteriorating'},
+  {key:'noTriggerNearby',      label:'Setup lacks confirmation'},
+  {key:'insufficientHistory',  label:'Insufficient historical data'},
+];
+function passReasonDetail(key, s, type, opp) {
+  const eq = opp.eq, gp = opp.gp, flags = opp.flags;
+  const levels = computeKeyLevels(s);
+  switch(key) {
+    case 'tooCloseToResistance':
+      return `Only ${eq.upsideToResistancePct.toFixed(1)}% upside remains before the stock reaches ${levels.resistance?levels.resistance.label.toLowerCase():'resistance'}. Your proposed stop allows roughly ${eq.downsideToStopPct!=null?eq.downsideToStopPct.toFixed(1):'—'}% downside, so the upside doesn't justify the risk.`;
+    case 'isExtended':
+      return `Price is ${flags.extendedPct.toFixed(0)}% above the 50-day average — more extended than a ${type||'this strategy'} should chase. Entries this far from support tend to give back the move before it's confirmed.`;
+    case 'poorRR':
+      return (eq.rr && eq.rr.riskPerShare!=null && eq.rr.rewardPerShare!=null)
+        ? `You'd be risking about $${eq.rr.riskPerShare.toFixed(2)} to potentially make $${eq.rr.rewardPerShare.toFixed(2)} — the potential gain doesn't cover the risk.`
+        : `Reward-to-risk doesn't work out favorably here.`;
+    case 'trendDeteriorating':
+      return `The trend itself is showing real weakness right now (${opp.ms.state}), not just a normal pullback — chasing an entry into a deteriorating trend adds risk on top of a weak setup.`;
+    case 'noTriggerNearby':
+      return `The preferred entry near ${gp.entryRef!=null?fmtP(gp.entryRef):'—'} is too far from today's price for a realistic trigger anytime soon.`;
+    case 'insufficientHistory':
+      return `StockIQ doesn't have enough logged history yet to responsibly grade this opportunity.`;
+    default:
+      return 'The entry math doesn\'t work right now.';
+  }
+}
+function computePassReasons(s, type) {
+  const opp = computeOpportunityStatus(s, type);
+  const trueFlags = PASS_REASON_PRIORITY.filter(r => opp.flags[r.key]);
+  return {main: trueFlags[0]||null, supporting: trueFlags.slice(1,3), opp};
+}
+
+// ── OPPORTUNITY STATUS PILL ──────────────────────────────────────────────────
+function explainOpportunityStatus(s, type) {
+  const opp = computeOpportunityStatus(s, type);
+  if(opp.status!=='Pass / Archive') return {status:opp.status, isPass:false, headline:opp.reason, opp};
+
+  const {main, supporting} = computePassReasons(s, type);
+  const gp = opp.gp, eq = opp.eq, rr = eq.rr;
+  const gainDollar = rr && rr.rewardPerShare!=null ? rr.rewardPerShare : null;
+  const gainPct = (rr && rr.targetPrice!=null && gp.entryRef!=null) ? ((rr.targetPrice-gp.entryRef)/gp.entryRef)*100 : null;
+  const lossDollar = rr && rr.riskPerShare!=null ? rr.riskPerShare : null;
+  const lossPct = (gp.stopPrice!=null && gp.entryRef!=null) ? ((gp.entryRef-gp.stopPrice)/gp.entryRef)*100 : null;
+  const plainDollar = (lossDollar!=null && gainDollar!=null) ? `You're risking about $${lossDollar.toFixed(2)} to potentially make $${gainDollar.toFixed(2)}.` : null;
+
+  return {
+    status:opp.status, isPass:true, opp,
+    mainReasonLabel: main ? main.label : 'Weak setup',
+    mainReasonText: main ? passReasonDetail(main.key, s, type, opp) : 'The entry math doesn\'t work right now.',
+    supportingReasons: supporting.map(r=>({label:r.label, text:passReasonDetail(r.key, s, type, opp)})),
+    plainDollar, gainDollar, gainPct, lossDollar, lossPct, ratio: rr?rr.ratio:null,
+  };
+}
+
+// ── MARKET STATE PILL ────────────────────────────────────────────────────────
+const MARKET_STATE_EXPLAIN = {
+  'Healthy Uptrend':   'The trend is strong because price remains above its key moving averages, and the longer-term averages are rising. That describes the health of the trend — not whether today is a good entry.',
+  'Normal Pullback':   'The long-term trend remains healthy, but price is cooling off toward support. That\'s normal, healthy behavior inside an uptrend — not a change in the trend itself.',
+  'Consolidation':     'Neither buyers nor sellers are currently in control. The stock is resting, not confirming a new direction yet.',
+  'Trend Weakening':   'Momentum and structure are both showing real cracks — this isn\'t just a normal pullback anymore.',
+  'Confirmed Breakdown':'The prior trend has actually failed on the data — support broke, and volume confirmed it.',
+  'Recovery Attempt':  'A previous breakdown is trying to reverse, but it isn\'t confirmed yet — early strength can still fail.',
+  'Insufficient Data': 'StockIQ doesn\'t have enough saved history yet to characterize the trend.',
+};
+function explainMarketState(s) {
+  const ms = computeMarketState(s);
+  const meta = MARKET_STATE_META[ms.state] || MARKET_STATE_META['Insufficient Data'];
+  const metConditions = ms.conditions.filter(c=>c.evaluable&&c.met);
+  return {state:ms.state, meta, ms, explain: MARKET_STATE_EXPLAIN[ms.state]||MARKET_STATE_EXPLAIN['Insufficient Data'], metConditions};
+}
+
+// ── POSITION TYPE PILL ───────────────────────────────────────────────────────
+// "Selected Strategy" (s.type) vs "Current Technical Fit" (suggestHoldTypeLive)
+// stay explicitly separate — this pill recommends, it never silently changes
+// the user's chosen strategy.
+function explainPositionType(s) {
+  const type = s.type;
+  const fit = suggestHoldTypeLive(s);
+  const slope = computeMASlope(s);
+  const gp = computeGamePlan(s);
+  const fitLabel = fit && fit.confident ? fit.label : (fit && fit.longTermCandidate ? 'Long-Term Hold (needs research)' : 'Unclear from current data');
+  const agrees = !!(fit && fit.confident && fit.label===type);
+
+  const whyFits = [];
+  if(type==='Position Trade') {
+    if(s.price!=null && s.ma200!=null && s.price>s.ma200) whyFits.push('Price remains above the 200-day average.');
+    if(slope && slope.rising50) whyFits.push('The 50-day trend is rising.');
+    if(s.atr && s.price) whyFits.push(`Daily movement (ATR ${((s.atr/s.price)*100).toFixed(1)}%) is meaningful but not extreme.`);
+    whyFits.push('Setup may need several weeks to develop.');
+  } else if(type==='Swing Trade') {
+    if(gp.stopPrice!=null && gp.profit!=='—') whyFits.push('There\'s a defined technical setup here — a real stop and target.');
+    if(s.atr && s.price && (s.atr/s.price)*100>=2) whyFits.push(`Daily movement (ATR ${((s.atr/s.price)*100).toFixed(1)}%) is enough to create a shorter-term opportunity.`);
+    if(!whyFits.length) whyFits.push('Not enough data yet to confirm a clean short-term setup.');
+  } else if(type==='Long-Term Hold') {
+    if(s.price!=null && s.ma200!=null && s.price>s.ma200) whyFits.push('Price remains above the 200-day average.');
+    whyFits.push('Technical data can confirm a long-term trend, but business quality, valuation, earnings growth, and competitive strength still require research StockIQ can\'t do from a chart.');
+  }
+
+  const whyNotOthers = {};
+  ['Swing Trade','Position Trade','Long-Term Hold'].filter(t=>t!==type).forEach(t=>{
+    if(t==='Swing Trade') whyNotOthers[t] = (gp.stopPrice==null||gp.profit==='—') ? 'The entry is too close to resistance, or a short-term confirmation is still missing.' : 'A swing setup exists technically, but that\'s not the strategy chosen for this stock.';
+    else if(t==='Position Trade') whyNotOthers[t] = 'The steadier, several-weeks-to-months trend context a Position Trade relies on isn\'t what\'s being tracked for this stock.';
+    else if(t==='Long-Term Hold') whyNotOthers[t] = 'Technical data alone can\'t confirm a long-term thesis — business quality, valuation, and competitive strength require research outside the chart.';
+  });
+
+  return {type, fit, fitLabel, agrees, whyFits, whyNotOthers};
+}
+
+// ── ENTRY QUALITY PILL ───────────────────────────────────────────────────────
+function explainEntryQuality(s, type) {
+  const eq = computeEntryQuality(s, type);
+  const levels = computeKeyLevels(s);
+  const gp = computeGamePlan(s);
+  let betterEntry = null;
+  if(eq.quality==='Poor' && gp.entryRef!=null && !gp.entryPending) {
+    betterEntry = `Better entry: wait for price near ${fmtP(gp.entryRef)}, where the same target would offer more upside with less risk.`;
+  } else if(eq.quality==='Poor' && gp.entryPending && gp.entryRef!=null) {
+    betterEntry = `Better entry: this is already what StockIQ suggests — wait for the pullback to ${fmtP(gp.entryRef)}.`;
+  }
+  return {eq, levels, gp, betterEntry};
+}
+
+// ── SHEET RENDERERS ──────────────────────────────────────────────────────────
+function pillSheetHeader(title, color) {
+  return `
+    <div style="width:36px;height:4px;border-radius:2px;background:${C.border};margin:0 auto 18px;"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <span style="color:${color};font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;">${title}</span>
+      <button onclick="closeAllOverlays()" style="background:none;border:none;color:${C.textMuted};font-size:20px;cursor:pointer;">✕</button>
+    </div>`;
+}
+
+function showOpportunitySheet(id) {
+  const s = stocks.find(x=>String(x.id)===String(id));
+  if(!s) return;
+  const ex = explainOpportunityStatus(s, s.type);
+  const meta = OPPORTUNITY_STATUS_META[ex.status];
+
+  if(!ex.isPass) {
+    showSheet(`
+      ${pillSheetHeader('Opportunity Status', meta.color)}
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;"><span style="font-size:22px;">${meta.icon}</span><span style="color:${meta.color};font-size:19px;font-weight:900;">${ex.status}</span></div>
+      <p style="color:${C.text};font-size:14px;line-height:1.7;margin:0;">${ex.headline}</p>`);
+    return;
+  }
+
+  const supportingHtml = ex.supportingReasons.length ? `
+    <div style="margin-top:14px;padding-top:14px;border-top:1px solid ${C.border};">
+      <div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;">Also worth noting</div>
+      ${ex.supportingReasons.map(r=>`<div style="margin-bottom:8px;"><div style="color:${C.text};font-size:12.5px;font-weight:700;margin-bottom:2px;">${r.label}</div><div style="color:${C.textSub};font-size:12px;line-height:1.6;">${r.text}</div></div>`).join('')}
+    </div>` : '';
+
+  showSheet(`
+    ${pillSheetHeader('Why This Is a Pass', meta.color)}
+    <div style="color:${C.orange};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px;">Main reason: ${ex.mainReasonLabel}</div>
+    <p style="color:${C.text};font-size:14px;line-height:1.7;margin:0 0 16px;">${ex.mainReasonText}</p>
+    ${ex.plainDollar?`<div style="background:${C.cardHigh};border-radius:12px;padding:14px;margin-bottom:14px;">
+      <div style="color:${C.text};font-size:14px;font-weight:700;line-height:1.6;margin-bottom:6px;">${ex.plainDollar}</div>
+      ${ex.ratio!=null?`<div style="color:${C.textMuted};font-size:11px;">Trader shorthand: ${ex.ratio.toFixed(2)}-to-1</div>`:''}
+    </div>` : ''}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px;">
+      <div style="background:${C.greenDim};border-radius:10px;padding:12px;"><div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;margin-bottom:4px;">Potential Gain</div><div style="color:${C.green};font-size:14px;font-weight:800;">${ex.gainDollar!=null?`$${ex.gainDollar.toFixed(2)}`:'—'}${ex.gainPct!=null?` / ${ex.gainPct.toFixed(1)}%`:''}</div></div>
+      <div style="background:${C.redDim};border-radius:10px;padding:12px;"><div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;margin-bottom:4px;">Potential Loss</div><div style="color:${C.red};font-size:14px;font-weight:800;">${ex.lossDollar!=null?`$${ex.lossDollar.toFixed(2)}`:'—'}${ex.lossPct!=null?` / ${ex.lossPct.toFixed(1)}%`:''}</div></div>
+    </div>
+    <div style="color:${C.textSub};font-size:12.5px;line-height:1.6;margin-bottom:${supportingHtml?'0':'4px'};">Plain-English conclusion: more downside than worthwhile upside.</div>
+    ${supportingHtml}`);
+}
+
+function showMarketStateSheet(id) {
+  const s = stocks.find(x=>String(x.id)===String(id));
+  if(!s) return;
+  const ex = explainMarketState(s);
+  showSheet(`
+    ${pillSheetHeader(`Why This Is ${ex.state}`, ex.meta.color)}
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;"><span style="font-size:22px;">${ex.meta.icon}</span><span style="color:${ex.meta.color};font-size:19px;font-weight:900;">${ex.state}</span></div>
+    <p style="color:${C.text};font-size:14px;line-height:1.7;margin:0 0 16px;">${ex.explain}</p>
+    ${ex.metConditions.length?`
+    <div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;">Supporting evidence</div>
+    ${ex.metConditions.map(c=>`<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:6px;"><span style="color:${C.green};font-size:12px;">✓</span><span style="color:${C.textSub};font-size:12.5px;line-height:1.5;">${c.label}</span></div>`).join('')}`:''}
+    <div style="background:${C.cardHigh};border-radius:12px;padding:14px;margin-top:14px;">
+      <div style="color:${C.yellow};font-size:12px;font-weight:800;margin-bottom:4px;">⚖️ Strong trend does not mean good trade.</div>
+      <div style="color:${C.textSub};font-size:12px;line-height:1.6;">This stock can have a ${ex.state} read and still be a Pass, because the current entry offers too little upside. Check the Opportunity Status pill for that answer.</div>
+    </div>`);
+}
+
+function showPositionTypeSheet(id) {
+  const s = stocks.find(x=>String(x.id)===String(id));
+  if(!s) return;
+  const ex = explainPositionType(s);
+  const tc = typeBadgeColors(s.type);
+  showSheet(`
+    ${pillSheetHeader(`Why StockIQ Suggests ${s.type||'—'}`, tc.fg)}
+    <div style="background:${C.cardHigh};border-radius:12px;padding:14px;margin-bottom:16px;">
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px;"><span style="color:${C.textMuted};font-size:11px;">Your Strategy</span><span style="color:${C.text};font-size:12.5px;font-weight:800;">${s.type||'—'}</span></div>
+      <div style="display:flex;justify-content:space-between;">
+        <span style="color:${C.textMuted};font-size:11px;">Current Technical Fit</span><span style="color:${ex.agrees?C.green:C.yellow};font-size:12.5px;font-weight:800;">${ex.fitLabel}</span>
+      </div>
+      <div style="color:${ex.agrees?C.green:C.yellow};font-size:11.5px;line-height:1.5;margin-top:8px;padding-top:8px;border-top:1px solid ${C.border};">${ex.agrees?'The two agree.':(ex.fit?ex.fit.reason:'')}</div>
+    </div>
+    <div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;">Why it fits ${s.type||'this strategy'}</div>
+    ${ex.whyFits.map(w=>`<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:6px;"><span style="color:${C.green};font-size:12px;">✓</span><span style="color:${C.textSub};font-size:12.5px;line-height:1.5;">${w}</span></div>`).join('')}
+    <div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin:16px 0 8px;">Why not the others</div>
+    ${Object.keys(ex.whyNotOthers).map(t=>`<div style="margin-bottom:8px;"><div style="color:${C.text};font-size:12px;font-weight:700;margin-bottom:2px;">${t}</div><div style="color:${C.textSub};font-size:12px;line-height:1.5;">${ex.whyNotOthers[t]}</div></div>`).join('')}
+    <div style="color:${C.textMuted};font-size:11px;line-height:1.5;margin-top:12px;padding-top:12px;border-top:1px solid ${C.border};">StockIQ recommends — it never changes your selected strategy automatically. Use "Needs Strategy" reclassify flow if you want to switch.</div>`);
+}
+
+function showEntryQualitySheet(id) {
+  const s = stocks.find(x=>String(x.id)===String(id));
+  if(!s) return;
+  const ex = explainEntryQuality(s, s.type);
+  const eq = ex.eq;
+  const qualityColor = eq.quality==='Excellent'?C.green:eq.quality==='Acceptable'?C.yellow:eq.quality==='Poor'?C.red:C.textMuted;
+  showSheet(`
+    ${pillSheetHeader(`Why Entry Quality Is ${eq.quality}`, qualityColor)}
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;"><span style="color:${qualityColor};font-size:19px;font-weight:900;">${eq.quality}</span></div>
+    <p style="color:${C.text};font-size:14px;line-height:1.7;margin:0 0 16px;">${eq.reason}</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+      <div style="background:${C.cardHigh};border-radius:10px;padding:12px;"><div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;margin-bottom:3px;">Current Price</div><div style="color:${C.text};font-size:13px;font-weight:800;">${fmtP(s.price)}</div></div>
+      <div style="background:${C.cardHigh};border-radius:10px;padding:12px;"><div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;margin-bottom:3px;">Preferred Entry</div><div style="color:${C.text};font-size:13px;font-weight:800;">${ex.gp.buyZone}</div></div>
+      ${ex.levels.support?`<div style="background:${C.cardHigh};border-radius:10px;padding:12px;"><div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;margin-bottom:3px;">Distance to Support</div><div style="color:${C.text};font-size:13px;font-weight:800;">${fmtP(ex.levels.support.price)}</div></div>`:''}
+      ${ex.levels.resistance?`<div style="background:${C.cardHigh};border-radius:10px;padding:12px;"><div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;margin-bottom:3px;">Distance to Resistance</div><div style="color:${C.text};font-size:13px;font-weight:800;">${fmtP(ex.levels.resistance.price)}</div></div>`:''}
+    </div>
+    ${eq.rr&&eq.rr.ratio!=null?`<div style="background:${C.cardHigh};border-radius:10px;padding:12px;margin-bottom:10px;">
+      <div style="color:${C.text};font-size:13px;font-weight:700;line-height:1.6;">${eq.rr.riskPerShare!=null&&eq.rr.rewardPerShare!=null?`You're risking about $${eq.rr.riskPerShare.toFixed(2)} to potentially make $${eq.rr.rewardPerShare.toFixed(2)}.`:''}</div>
+      <div style="color:${C.textMuted};font-size:10.5px;margin-top:4px;">Trader shorthand: ${eq.rr.ratio.toFixed(2)}-to-1</div>
+    </div>`:''}
+    ${ex.betterEntry?`<div style="color:${C.teal};font-size:13px;font-weight:700;line-height:1.6;margin-top:6px;">${ex.betterEntry}</div>`:''}`);
+}
+
+function showPillExplain(kind, id) {
+  if(kind==='opportunity') showOpportunitySheet(id);
+  else if(kind==='marketState') showMarketStateSheet(id);
+  else if(kind==='positionType') showPositionTypeSheet(id);
+  else if(kind==='entryQuality') showEntryQualitySheet(id);
+}
+
 function renderPriceChart(s) {
   const snaps = (s.snapshots||[]).filter(sn=>sn.price!=null);
   if(snaps.length<2) {
@@ -3319,7 +3584,7 @@ function renderPriceChart(s) {
       <span style="color:${C.textMuted};font-size:10px;">${first.date}</span>
       <span style="color:${C.textMuted};font-size:10px;">${last.date}</span>
     </div>
-    ${(!has50||!has200)?`<div style="color:${C.textMuted};font-size:10px;margin-top:8px;line-height:1.5;">${!has50&&!has200?'50 & 200-day lines need a CSV import — the daily update wizard doesn\'t collect those.':!has50?'50-day line needs a CSV import to appear.':'200-day line needs a CSV import to appear.'}</div>`:''}
+    ${(!has50||!has200)?`<div style="color:${C.text};font-size:11.5px;margin-top:8px;line-height:1.5;">${!has50&&!has200?'50 & 200-day lines need a CSV import — the daily update wizard doesn\'t collect those.':!has50?'50-day line needs a CSV import to appear.':'200-day line needs a CSV import to appear.'}</div>`:''}
   </div>`;
 }
 
@@ -3365,7 +3630,7 @@ function renderMarketStateCard(s) {
       <span style="color:${meta.color};font-size:18px;font-weight:900;">${ms.state}</span>
     </div>
     <div style="color:${C.textSub};font-size:12.5px;margin-bottom:12px;">${meta.tagline}${ms.closestMatch?' (closest match — no state fully qualified)':''}</div>
-    <div style="color:${C.textMuted};font-size:10px;margin-bottom:8px;">${ms.evidenceCount} support this state</div>
+    <div style="color:${C.text};font-size:11.5px;margin-bottom:8px;">${ms.evidenceCount} support this state</div>
     ${metConditions.length?`
     <div style="margin-bottom:${unmetConditions.length?'10px':'0'};">
       ${metConditions.map(c=>`<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:5px;"><span style="color:${C.green};font-size:12px;">✓</span><span style="color:${C.textSub};font-size:12px;line-height:1.5;">${c.label}</span></div>`).join('')}
@@ -3411,7 +3676,7 @@ function renderOpportunityCard(s) {
             <div style="color:${C.text};font-size:11px;font-weight:700;line-height:1.7;">${fmtP(s.price)}<br>${computeMarketState(s).state}<br>Entry: ${opp.eq.quality}<br>${opp.status}</div>
           </div>
         </div>
-        <div style="color:${C.textMuted};font-size:11px;line-height:1.5;margin-bottom:10px;">Originally archived because: ${s.archiveReason}</div>
+        <div style="color:${C.text};font-size:12.5px;line-height:1.5;margin-bottom:10px;">Originally archived because: ${s.archiveReason}</div>
         ${reactivationNote?`<div style="background:${C.tealDim};border:1px solid ${C.teal}44;border-radius:10px;padding:10px 12px;margin-bottom:10px;">
           <div style="color:${C.teal};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px;">💡 Worth a Second Look</div>
           ${reactivationNote.map(r=>`<div style="color:${C.teal};font-size:11.5px;line-height:1.5;margin-bottom:4px;">• ${r}</div>`).join('')}
@@ -3442,14 +3707,14 @@ function renderTabOverview(s) {
           <div style="color:${C.textSub};font-size:12px;">${conviction.level} Conviction · ${narrative.verdictSub}</div>
         </div>
       </div>
-      <div style="color:${C.textMuted};font-size:11px;line-height:1.5;margin-top:10px;padding-top:10px;border-top:1px solid ${C.border};">${conviction.reason}</div>
+      <div style="color:${C.text};font-size:12.5px;line-height:1.5;margin-top:10px;padding-top:10px;border-top:1px solid ${C.border};">${conviction.reason}</div>
     </div>`;
 
   const glanceCell = (label, cell) => `
     <div style="background:${C.cardHigh};border-radius:12px;padding:12px;">
       <div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px;">${label}</div>
-      <div style="color:${cell.color};font-size:13px;font-weight:800;margin-bottom:2px;">${cell.label}</div>
-      <div style="color:${C.textMuted};font-size:10px;">${cell.sub}</div>
+      <div style="color:${cell.color};font-size:13px;font-weight:800;margin-bottom:3px;">${cell.label}</div>
+      <div style="color:${C.text};font-size:12px;line-height:1.4;">${cell.sub}</div>
     </div>`;
 
   const glanceGrid = `
@@ -3481,7 +3746,7 @@ function renderTabOverview(s) {
         ${levelCell('Resistance', levels.resistance, C.red)}
         ${levelCell('Next Resistance', levels.nextResistance, C.red)}
       </div>
-      <div style="color:${C.textMuted};font-size:10px;margin-top:10px;line-height:1.5;">Approximated from moving averages and the 52-week range — not exact swing highs/lows.</div>
+      <div style="color:${C.text};font-size:11.5px;margin-top:10px;line-height:1.5;">Approximated from moving averages and the 52-week range — not exact swing highs/lows.</div>
     </div>`;
 
   const hasPlan = s.tranche && s.tranche.length>0;
@@ -3519,9 +3784,9 @@ function renderTabOverview(s) {
         <span style="color:${C.purple};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;">🔮 AI Research</span>
         <button onclick="showTab('notes','${s.id}')" style="background:none;border:none;color:${C.purple};font-size:12px;font-weight:700;cursor:pointer;">${s.research?'View Full →':'Add Research →'}</button>
       </div>
-      ${!s.research ? `<div style="color:${C.textMuted};font-size:12px;line-height:1.6;">No qualitative research added yet. This stays separate from your score — it's here for context, not the math.</div>` :
+      ${!s.research ? `<div style="color:${C.text};font-size:12px;line-height:1.6;">No qualitative research added yet. This stays separate from your score — it's here for context, not the math.</div>` :
         parsedResearch ? `
-        ${parsedResearch.catalysts?`<p style="color:${C.textSub};font-size:12px;line-height:1.6;margin:0;">${parsedResearch.catalysts}</p>`:`<p style="color:${C.textMuted};font-size:12px;line-height:1.6;margin:0;">See the full breakdown in Analysis or Notes.</p>`}
+        ${parsedResearch.catalysts?`<p style="color:${C.textSub};font-size:12px;line-height:1.6;margin:0;">${parsedResearch.catalysts}</p>`:`<p style="color:${C.text};font-size:12px;line-height:1.6;margin:0;">See the full breakdown in Analysis or Notes.</p>`}
         ` : `<p style="color:${C.textSub};font-size:12px;line-height:1.6;margin:0;">${s.research.length>220?s.research.slice(0,220)+'…':s.research}</p>`}
     </div>`;
 
@@ -3593,7 +3858,7 @@ function renderTabAnalysis(s) {
   const buildCaseCard = `
     <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
       <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:4px;">Build the Case</div>
-      <div style="color:${C.textMuted};font-size:11px;line-height:1.5;margin-bottom:10px;">Why the evidence points where it does — not just what the numbers say.</div>
+      <div style="color:${C.text};font-size:12.5px;line-height:1.5;margin-bottom:10px;">Why the evidence points where it does — not just what the numbers say.</div>
       ${evidenceRow('Trend', trendEv)}
       ${evidenceRow('Momentum', momentumEv)}
       ${evidenceRow('Volume', volumeEv)}
@@ -3616,7 +3881,7 @@ function renderTabAnalysis(s) {
     <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
       <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">🛑 ${invalidation.isThesisReview?'Thesis Review Trigger':'Invalidation'}</div>
       <div style="color:${C.text};font-size:12.5px;line-height:1.7;">${invalidation.text}</div>
-      <div style="color:${C.textMuted};font-size:10.5px;line-height:1.5;margin-top:8px;">${invalidation.isThesisReview?'This tells you when to reassess, not when to sell — a long-term thesis doesn\'t break on price alone.':'This tells you what would prove this analysis wrong, not just where a stop order sits.'}</div>
+      <div style="color:${C.text};font-size:12px;line-height:1.5;margin-top:8px;">${invalidation.isThesisReview?'This tells you when to reassess, not when to sell — a long-term thesis doesn\'t break on price alone.':'This tells you what would prove this analysis wrong, not just where a stop order sits.'}</div>
     </div>`;
 
   const actionColor = action.action==='Ready for Entry Review'?C.green : /HOLD|CONTINUE/.test(action.action)?C.teal : /WAIT/.test(action.action)?C.yellow : /EXIT|AVOID/.test(action.action)?C.red : /REDUCE|REVIEW/.test(action.action)?C.orange : C.textMuted;
@@ -3730,13 +3995,13 @@ function renderTabNotes(s) {
           <span style="font-size:14px;">🔮</span>
           <span style="color:${C.purple};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;">AI Research</span>
         </div>
-        <div style="color:${C.textMuted};font-size:11px;line-height:1.6;margin-bottom:12px;">Step 1: copy a prompt pre-filled with this stock's real numbers. Step 2: paste it into Claude (or ChatGPT) and let it research news, earnings, and analyst sentiment. Step 3: paste the answer back below — it saves automatically as you paste, no submit needed. StockIQ shows it alongside your score, but never factors it into the math — that stays pure and auditable.</div>
+        <div style="color:${C.text};font-size:12.5px;line-height:1.6;margin-bottom:12px;">Step 1: copy a prompt pre-filled with this stock's real numbers. Step 2: paste it into Claude (or ChatGPT) and let it research news, earnings, and analyst sentiment. Step 3: paste the answer back below — it saves automatically as you paste, no submit needed. StockIQ shows it alongside your score, but never factors it into the math — that stays pure and auditable.</div>
         <button id="copy-prompt-btn" onclick="copyAIPrompt('${s.id}')" style="width:100%;padding:12px;background:${C.purple}22;color:${C.purple};border:1px solid ${C.purple}66;border-radius:10px;font-size:13px;font-weight:800;cursor:pointer;margin-bottom:12px;">📋 Copy Analysis Prompt (with live data)</button>
         <div style="display:flex;justify-content:flex-end;margin-bottom:6px;">
           <span id="research-save-flag" style="color:${C.green};font-size:10px;font-weight:800;opacity:0;transition:opacity 0.3s;">✓ Saved</span>
         </div>
         <textarea oninput="updateResearch('${s.id}',this.value)" style="width:100%;background:${C.cardHigh};border:1px solid ${C.purple}33;border-radius:10px;color:${C.text};font-size:13px;padding:14px;resize:none;outline:none;line-height:1.7;box-sizing:border-box;min-height:140px;" placeholder="Paste the AI's answer here...">${s.research||''}</textarea>
-        ${s.research ? (parsedResearch ? `<div style="color:${C.green};font-size:11px;font-weight:700;margin-top:8px;">✓ Recognized ${Object.keys(parsedResearch).length} section${Object.keys(parsedResearch).length===1?'':'s'} — pulled into Overview and Analysis tabs</div>` : `<div style="color:${C.textMuted};font-size:11px;margin-top:8px;">Didn't recognize the section headers, so this is shown as-is. Use the copy-prompt button above to get the format StockIQ can split into sections.</div>`) : ''}
+        ${s.research ? (parsedResearch ? `<div style="color:${C.green};font-size:12.5px;font-weight:700;margin-top:8px;">✓ Recognized ${Object.keys(parsedResearch).length} section${Object.keys(parsedResearch).length===1?'':'s'} — pulled into Overview and Analysis tabs</div>` : `<div style="color:${C.text};font-size:11px;margin-top:8px;">Didn't recognize the section headers, so this is shown as-is. Use the copy-prompt button above to get the format StockIQ can split into sections.</div>`) : ''}
       </div>
       <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
         <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:14px;">Daily Update History</div>
@@ -3855,7 +4120,7 @@ function showReclassifyFlow(stockId) {
       <button onclick="closeAllOverlays()" style="background:none;border:none;color:${C.textMuted};font-size:22px;cursor:pointer;">✕</button>
     </div>
     <div style="color:${C.text};font-size:22px;font-weight:900;letter-spacing:-0.01em;margin-bottom:8px;">What's your plan for this stock?</div>
-    <div style="color:${C.textMuted};font-size:12px;margin-bottom:20px;line-height:1.6;">Choose the strategy you will actually follow. The app uses different entry, exit, and risk rules for each one.</div>
+    <div style="color:${C.text};font-size:12px;margin-bottom:20px;line-height:1.6;">Choose the strategy you will actually follow. The app uses different entry, exit, and risk rules for each one.</div>
     <div style="display:flex;flex-direction:column;gap:10px;">
       <button onclick="doReclassify('${stockId}','Swing Trade')" style="padding:16px 18px;border-radius:14px;font-size:15px;font-weight:700;border:1px solid ${C.border};background:none;color:${C.text};cursor:pointer;text-align:left;">Swing Trade — days to several weeks</button>
       <button onclick="doReclassify('${stockId}','Position Trade')" style="padding:16px 18px;border-radius:14px;font-size:15px;font-weight:700;border:1px solid ${C.border};background:none;color:${C.text};cursor:pointer;text-align:left;">Position Trade — several weeks to months</button>
@@ -3894,7 +4159,7 @@ function showBuildPlanFlow(stockId) {
       <button onclick="closeAllOverlays()" style="background:none;border:none;color:${C.textMuted};font-size:22px;cursor:pointer;">✕</button>
     </div>
     <div style="color:${C.text};font-size:22px;font-weight:900;letter-spacing:-0.01em;margin-bottom:8px;">How many entries?</div>
-    <div style="color:${C.textMuted};font-size:12px;margin-bottom:20px;line-height:1.6;">Spreading your budget across 2-3 entries lets you buy more if it dips further, instead of going all-in at one price.</div>
+    <div style="color:${C.text};font-size:12px;margin-bottom:20px;line-height:1.6;">Spreading your budget across 2-3 entries lets you buy more if it dips further, instead of going all-in at one price.</div>
     <div style="display:flex;flex-direction:column;gap:10px;">
       <button onclick="doBuildPlan('${stockId}',1)" style="padding:16px 18px;border-radius:14px;font-size:15px;font-weight:700;border:1px solid ${C.border};background:none;color:${C.text};cursor:pointer;text-align:left;">1 entry — go all in at once</button>
       <button onclick="doBuildPlan('${stockId}',2)" style="padding:16px 18px;border-radius:14px;font-size:15px;font-weight:700;border:1px solid ${C.border};background:none;color:${C.text};cursor:pointer;text-align:left;">2 entries — split into a first buy and an add</button>
@@ -4220,7 +4485,7 @@ function renderAddStep() {
         <button onclick="closeAllOverlays()" style="background:none;border:none;color:${C.textMuted};font-size:22px;cursor:pointer;">✕</button>
       </div>
       <div style="color:${C.text};font-size:22px;font-weight:900;letter-spacing:-0.01em;margin-bottom:${suggestion?'12px':'8px'};">${cur.label}</div>
-      ${cur.hint&&cur.key==='holdtype'?`<div style="color:${C.textMuted};font-size:12px;margin-bottom:16px;line-height:1.5;">${cur.hint}</div>`:''}
+      ${cur.hint&&cur.key==='holdtype'?`<div style="color:${C.text};font-size:12px;margin-bottom:16px;line-height:1.5;">${cur.hint}</div>`:''}
       ${suggestion&&suggestion.label?`<div style="background:${C.tealDim};border:1px solid ${C.teal}44;border-radius:10px;padding:12px 14px;margin-bottom:20px;">
         <div style="color:${C.teal};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">📊 Based on your numbers: ${suggestion.label}</div>
         <div style="color:${C.textSub};font-size:12px;line-height:1.5;">${suggestion.reason}</div>
