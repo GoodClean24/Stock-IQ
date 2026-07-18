@@ -85,6 +85,8 @@ input[type=number]{-moz-appearance:textfield;}
   </div>
   <!-- Portfolio box -->
   <div id="portfolio-box"></div>
+  <!-- Tonight's Best Opportunities — the ranking engine -->
+  <div id="tonights-opportunities"></div>
   <!-- Filter tags + sort -->
   <div id="filter-bar" style="background:#11141C;border-bottom:1px solid #1E2230;padding:9px 20px;"></div>
   <!-- List header -->
@@ -221,7 +223,7 @@ let mentorTabOrder = [];    // computed per-stock plan for 'analysis' mode
 let mentorHistoryTier = 'full';   // 'full' | 'limited' — how much saved history the stock has
 let mentorShowLimitedIntro = false; // whether step 0 is the Limited History intro screen
 let searchQuery = '';
-let sortMode = 'score'; // 'score' | 'price' | 'pct' | 'name'
+let sortMode = 'opportunity'; // 'opportunity' | 'price' | 'pct' | 'name'
 let portfolioHidden = false;
 let reclassifyDismissed = new Set(); // session-only — "Review Later" on the Both-strategy banner
 
@@ -437,14 +439,22 @@ function splitBudget(budget, count) {
   return Array(count).fill(each);
 }
 
+// Default list order now comes from the Opportunity Ranking Engine's
+// decision tree (Opportunity Status > Entry Quality > Conviction > AI
+// Research), not the old oppScore heuristic — Score is retired, per the
+// review; starred stocks still float to the top regardless, since that's
+// an explicit user signal the ranking engine doesn't try to second-guess.
 function getRanked() {
-  return [...stocks]
-    .map(s => {const o=oppScore(s);return{...s,...o};})
-    .sort((a,b) => {
-      if(a.starred&&!b.starred) return -1;
-      if(!a.starred&&b.starred) return 1;
-      return b.oppScore-a.oppScore;
-    });
+  const rankMap = new Map(computeOpportunityRanking(stocks).map(item => [String(item.s.id), item]));
+  return [...stocks].sort((a,b) => {
+    if(a.starred&&!b.starred) return -1;
+    if(!a.starred&&b.starred) return 1;
+    const itemA = rankMap.get(String(a.id)), itemB = rankMap.get(String(b.id));
+    if(itemA && itemB) return compareOpportunityRank(itemA, itemB);
+    if(itemA) return -1;
+    if(itemB) return 1;
+    return 0;
+  });
 }
 
 function getSignal(s) {
@@ -600,6 +610,7 @@ function setSortMode(v) { sortMode = v; renderStockList(); }
 function renderHome() {
   renderMarket();
   renderPortfolioBox();
+  renderTonightsOpportunities();
   renderFilterBar();
   renderListHeader();
   renderStockList();
@@ -689,7 +700,7 @@ function renderFilterBar() {
     <div style="display:flex;justify-content:flex-end;align-items:center;">
       <span style="color:${C.textMuted};font-size:11px;margin-right:6px;">Sort by:</span>
       <select onchange="setSortMode(this.value)" style="background:${C.cardHigh};border:1px solid ${C.borderLight};border-radius:8px;color:${C.textSub};font-size:11px;font-weight:700;padding:5px 8px;outline:none;">
-        <option value="score" ${sortMode==='score'?'selected':''}>Score</option>
+        <option value="opportunity" ${sortMode==='opportunity'?'selected':''}>⭐ Opportunity</option>
         <option value="price" ${sortMode==='price'?'selected':''}>Price</option>
         <option value="pct" ${sortMode==='pct'?'selected':''}>% Change</option>
         <option value="name" ${sortMode==='name'?'selected':''}>Name</option>
@@ -782,7 +793,7 @@ function renderStockList() {
   });
 
   // Secondary sort on top of the starred-first ranking, per the Sort by control
-  if(sortMode!=='score') {
+  if(sortMode!=='opportunity') {
     filtered.sort((a,b) => {
       if(a.starred&&!b.starred) return -1;
       if(!a.starred&&b.starred) return 1;
@@ -1034,6 +1045,7 @@ function renderDetail(s) {
         <span style="color:${(s.pct||0)>=0?C.green:C.red};font-size:14px;font-weight:700;">${(s.pct||0)>=0?'▲':'▼'} ${Math.abs(s.pct||0).toFixed(2)}%</span>
         ${totalInv>0?`<span style="margin-left:auto;color:${gl>=0?C.green:C.red};font-size:14px;font-weight:800;">${gl>=0?'+':''}${gl.toFixed(2)} P&L</span>`:''}
       </div>
+      <div style="color:${C.text};font-size:14px;font-weight:600;line-height:1.5;margin-bottom:12px;">${computeWhyThisStock(s)}</div>
       <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:${typeDrift?'6px':'12px'};">
         ${pill(oppMeta.icon, opp.status, oppMeta.color, 'opportunity')}
         ${pill(msMeta.icon, ms.state, msMeta.color, 'marketState')}
@@ -1662,7 +1674,7 @@ function buildAIPrompt(s) {
   lines.push(`(Recent events in the next 1-3 months that could materially move the stock)`);
   lines.push('');
   lines.push(`ANALYST SENTIMENT:`);
-  lines.push(`(Recent upgrades/downgrades, consensus opinion, price targets, changes in expectations)`);
+  lines.push(`(Don't just summarize consensus. Where might Wall Street be wrong about this stock right now? Recent upgrades/downgrades and price targets only matter here if they reveal disagreement or a shift in thinking.)`);
   lines.push('');
   lines.push(`VALUATION:`);
   lines.push(`(Is the stock reasonably valued, expensive, or cheap relative to its history and peers? Would that make you more or less patient entering here?)`);
@@ -1795,7 +1807,7 @@ function computeVolumeOnUpDays(s) {
     ratio,
     label: ratio>1.15?'Buyers Showing Up':ratio<0.85?'Needs Work':'Neutral',
     color: ratio>1.15?C.green:ratio<0.85?C.red:C.yellow,
-    text: ratio>1.15 ? 'Buyers are showing up with real volume on up days — a healthy sign.' : ratio<0.85 ? "Volume is heavier on down days than up days — sellers are more active than buyers right now." : 'Volume is fairly even between up and down days. No clear signal yet.'
+    text: ratio>1.15 ? 'Buyers are showing up with real volume on up days — a healthy sign.' : ratio<0.85 ? "Volume is heavier on down days than up days — sellers are more active than buyers right now." : 'Volume does not confirm buyers yet — up and down days are pulling roughly even.'
   };
 }
 
@@ -3544,6 +3556,9 @@ function computeBiggestConcern(s, type) {
   candidates.sort((a,b)=>a.p-b.p);
   return candidates.length ? candidates[0].text : 'Nothing significant is working against this case right now — that itself is worth noting, not just assuming.';
 }
+// computeNextTrigger retired in favor of computeTodaysFocus below — left
+// defined, unused, same pattern as every other retired function this
+// session (computeSetupScore, computeRiskBasedSizing, etc.).
 function computeNextTrigger(s, type) {
   const ms = computeMarketState(s);
   const gp = computeGamePlan(s);
@@ -3565,15 +3580,139 @@ function computeNextTrigger(s, type) {
       return 'Not enough data yet to define a specific trigger.';
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TODAY'S FOCUS — one thing to watch, one thing to ignore, backed by real numbers
+// ═══════════════════════════════════════════════════════════════════════════════
+// Replaces Next Trigger. Same "one specific numeric condition" job, plus the
+// genuinely new half: what's safe to tune out today. Every level named here
+// also appears in the Supporting Data Box directly below it — no coaching
+// statement points at a number the user can't immediately see.
+function computeTodaysFocus(s, type) {
+  const ms = computeMarketState(s);
+  const gp = computeGamePlan(s);
+  const levels = computeKeyLevels(s);
+  switch(ms.state) {
+    case 'Healthy Uptrend':
+      if(gp.entryPending && gp.entryRef!=null) return {watchLabel:'Pullback toward', watchValue:fmtP(gp.entryRef), ignore:['RSI — momentum is already confirmed, it won\'t tell you anything new today'], why:'The trend is healthy. The only open question is entry timing, not direction.'};
+      return {watchLabel:'Trend continuation', watchValue:null, ignore:['Short-term RSI wobble — it\'s noise inside a confirmed trend'], why:'Nothing specific to wait for — the setup is already healthy and actionable.'};
+    case 'Normal Pullback':
+      return {watchLabel:'Reclaim of', watchValue:fmtP(s.ma20), ignore:['RSI and MACD — they lag during a normal pullback and won\'t lead the decision'], why:'Today\'s question is whether buyers defend support, not what the indicators say.'};
+    case 'Consolidation':
+      return {watchLabel:'Breakout above', watchValue: levels.resistance?fmtP(levels.resistance.price):null, ignore:['Day-to-day price noise inside the range'], why:'Nothing here means anything until the range actually breaks.'};
+    case 'Trend Weakening':
+      return {watchLabel:'Reclaim of', watchValue:fmtP(s.ma20), ignore:['Any single green day without volume behind it'], why:'Real deterioration needs a real reversal to prove it wrong — not hope.'};
+    case 'Confirmed Breakdown':
+      return {watchLabel:'Reclaim of', watchValue:fmtP(s.ma50), ignore:['Any bullish MACD blip — that\'s a bounce, not a reversal'], why:'The trend already broke. Only a real reclaim on volume changes that.'};
+    case 'Recovery Attempt':
+      return {watchLabel:'Higher low holding above', watchValue:fmtP(s.ma50), ignore:['Single green days without volume to confirm them'], why:'Early strength can still fail — confirmation is what matters, not hope.'};
+    default:
+      return {watchLabel:null, watchValue:null, ignore:[], why:'Not enough data yet to tell you what to watch or ignore.'};
+  }
+}
+// Every number a coaching statement references, in one place — no hunting
+// elsewhere in the app for the figure being discussed.
+function computeSupportingData(s) {
+  const levels = computeKeyLevels(s);
+  return {
+    price: s.price,
+    resistance: levels.resistance ? levels.resistance.price : null,
+    support: levels.support ? levels.support.price : null,
+    ma50: s.ma50,
+    volRatio: (s.vol && s.avgvol) ? s.vol/s.avgvol : null,
+  };
+}
+function renderSupportingDataBox(s) {
+  const d = computeSupportingData(s);
+  const row = (label, val) => `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid ${C.border};"><span style="color:${C.textMuted};font-size:11px;">${label}</span><span style="color:${C.text};font-size:12.5px;font-weight:700;">${val}</span></div>`;
+  return `
+    <div style="background:${C.cardHigh};border-radius:12px;padding:10px 14px;margin-top:12px;">
+      ${row('Current Price', fmtP(d.price))}
+      ${d.resistance!=null?row('Resistance', fmtP(d.resistance)):''}
+      ${d.support!=null?row('Support', fmtP(d.support)):''}
+      ${d.ma50!=null?row('50 SMA', fmtP(d.ma50)):''}
+      <div style="display:flex;justify-content:space-between;padding:6px 0 0;"><span style="color:${C.textMuted};font-size:11px;">Volume</span><span style="color:${C.text};font-size:12.5px;font-weight:700;">${d.volRatio!=null?d.volRatio.toFixed(2)+'x Avg':'—'}</span></div>
+    </div>`;
+}
+function renderTodaysFocusCard(s, type) {
+  const focus = computeTodaysFocus(s, type);
+  return `
+    <div style="background:${C.card};border-radius:16px;border:1px solid ${C.teal}44;padding:18px;">
+      <div style="color:${C.teal};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">🎯 Today's Focus</div>
+      ${focus.watchValue!=null?`
+      <div style="margin-bottom:10px;">
+        <div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;margin-bottom:3px;">Watch</div>
+        <div style="color:${C.text};font-size:14px;font-weight:800;">${focus.watchLabel} ${focus.watchValue}</div>
+      </div>`:''}
+      ${focus.ignore.length?`
+      <div style="margin-bottom:10px;">
+        <div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;margin-bottom:3px;">Ignore</div>
+        ${focus.ignore.map(i=>`<div style="color:${C.textSub};font-size:12.5px;line-height:1.5;">${i}</div>`).join('')}
+      </div>`:''}
+      <div style="color:${C.textSub};font-size:12.5px;line-height:1.6;padding-top:10px;border-top:1px solid ${C.border};">${focus.why}</div>
+      ${renderSupportingDataBox(s)}
+    </div>`;
+}
 function renderConcernTriggerCards(s, type) {
   return `
     <div style="background:${C.card};border-radius:16px;border:1px solid ${C.orange}44;padding:18px;">
       <div style="color:${C.orange};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">🚩 Biggest Concern</div>
       <p style="color:${C.text};font-size:13px;line-height:1.7;margin:0;">${computeBiggestConcern(s, type)}</p>
     </div>
-    <div style="background:${C.card};border-radius:16px;border:1px solid ${C.teal}44;padding:18px;">
-      <div style="color:${C.teal};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">🎯 Next Trigger</div>
-      <p style="color:${C.text};font-size:13px;line-height:1.7;margin:0;">${computeNextTrigger(s, type)}</p>
+    ${renderTodaysFocusCard(s, type)}`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// INVESTMENT POTENTIAL — rare, binary, no manufactured 1-5 scale
+// ═══════════════════════════════════════════════════════════════════════════════
+// Only appears when technicals AND the AI research signal both genuinely
+// support a long-term case. No middling rating — this app has no real
+// valuation data, only whatever's pasted from research, so a star scale
+// would fake precision the app doesn't have. It's binary: exceptional, or
+// nothing shown at all. Independent of the stock's selected Position Type —
+// a Swing Trade candidate can still be a business worth owning long-term.
+function computeInvestmentPotential(s) {
+  const ms = computeMarketState(s);
+  const conviction = computeConviction(s);
+  const aiSignal = computeAIResearchSignal(s);
+  const strongTechnical = ['Healthy Uptrend','Normal Pullback'].includes(ms.state) && conviction.level==='High';
+  const strongFundamental = aiSignal.signal==='Supports';
+  if(!strongTechnical || !strongFundamental) return null;
+
+  const reasons = [ms.state==='Healthy Uptrend' ? 'Healthy long-term trend' : 'Long-term trend intact through a normal pullback',
+    'High conviction across trend, momentum, and volume', 'Your AI research supports the long-term case'];
+  return {reasons, action:'Use pullbacks to build a long-term position rather than chasing strength.'};
+}
+function renderInvestmentPotentialCard(s) {
+  const ip = computeInvestmentPotential(s);
+  if(!ip) return ''; // not exceptional — no placeholder, no wasted space
+  return `
+    <div style="background:${C.purpleDim};border:1px solid ${C.purple}44;border-radius:16px;padding:18px;">
+      <div style="color:${C.purple};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:10px;">⭐ Exceptional Long-Term Opportunity</div>
+      ${ip.reasons.map(r=>`<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:6px;"><span style="color:${C.purple};font-size:12px;">✓</span><span style="color:${C.text};font-size:12.5px;line-height:1.5;">${r}</span></div>`).join('')}
+      <div style="color:${C.textSub};font-size:12.5px;line-height:1.6;margin-top:10px;padding-top:10px;border-top:1px solid ${C.purple}33;"><b style="color:${C.purple};">Action:</b> ${ip.action}</div>
+    </div>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TODAY'S VERDICT — the first thing you see, everything else supports it
+// ═══════════════════════════════════════════════════════════════════════════════
+function renderTodaysVerdictCard(s) {
+  const opp = computeOpportunityStatus(s, s.type);
+  const meta = OPPORTUNITY_STATUS_META[opp.status];
+  const action = computeAction(s);
+  const conviction = computeConviction(s);
+  return `
+    <div style="background:${C.card};border-radius:16px;border:2px solid ${meta.color}44;padding:18px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <div style="display:flex;align-items:center;gap:8px;"><span style="font-size:20px;">${meta.icon}</span><span style="color:${meta.color};font-size:17px;font-weight:900;">${opp.status}</span></div>
+        ${renderConvictionBadge(conviction.level,'sm')}
+      </div>
+      <div style="color:${C.text};font-size:13px;line-height:1.6;margin-bottom:12px;">${computeWhyThisStock(s)}</div>
+      <div style="display:flex;align-items:center;gap:8px;padding-top:10px;border-top:1px solid ${C.border};">
+        <span style="color:${C.textMuted};font-size:11px;">Action:</span>
+        <span style="color:${meta.color};font-size:14px;font-weight:900;">${action.action}</span>
+      </div>
     </div>`;
 }
 
@@ -3629,6 +3768,156 @@ function renderTradeEconomicsCard(s, type) {
     </div>`;
 }
 
+// ── WHY THIS STOCK? ──────────────────────────────────────────────────────────
+// One sentence, first thing visible, right under the price. Everything else
+// on the page supports this sentence — it doesn't compete with it.
+function computeWhyThisStock(s) {
+  const type = s.type;
+  const opp = computeOpportunityStatus(s, type);
+  const ms = opp.ms, eq = opp.eq;
+  const stateAdj = {
+    'Healthy Uptrend': 'a healthy uptrend', 'Normal Pullback': 'a normal pullback inside a healthy uptrend',
+    'Consolidation': 'consolidation, without clear direction yet', 'Trend Weakening': 'a weakening trend',
+    'Confirmed Breakdown': 'a confirmed breakdown', 'Recovery Attempt': 'an unconfirmed recovery attempt',
+    'Insufficient Data': 'not enough history to characterize the trend',
+  }[ms.state] || 'an unclear setup';
+
+  if(opp.status==='Pass / Archive') {
+    const {main} = computePassReasons(s, type);
+    const goodCompany = ['Healthy Uptrend','Normal Pullback'].includes(ms.state);
+    return `${goodCompany?'Solid trend, poor entry':'Weak setup'} — ${main?main.label.toLowerCase():'the entry math doesn\'t work'} right now.`;
+  }
+  if(opp.status==='Active Opportunity') return `In ${stateAdj}, with a ${eq.quality.toLowerCase()} entry — one of the more actionable setups on your list right now.`;
+  if(opp.status==='Watch Closely') return `In ${stateAdj} — close, but not confirmed yet.`;
+  if(opp.status==='Low Priority') return `In ${stateAdj}, but no compelling trade here right now.`;
+  return 'Not enough data yet to size up this opportunity.';
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// OPPORTUNITY RANKING ENGINE
+// ═══════════════════════════════════════════════════════════════════════════════
+// Answers "where should my next dollar go" — not "which stock has the
+// nicest chart." Two stages: eliminate anything not actionable, then order
+// survivors by a fixed decision tree (never a weighted score, so there's
+// nothing to silently re-litigate later): Opportunity Status > Entry
+// Quality > Conviction > AI Research. Reward:risk and dollar figures are
+// deliberately excluded — those belong to the Game Plan, once a stock is
+// already selected, not to deciding which stock gets attention first.
+
+// Reads the AI-research "Bottom Line" for exactly the three phrases the
+// prompt itself asks the external AI to use ("more/equally/less
+// confident"). This is a deterministic phrase match on wording StockIQ
+// controls, not a sentiment-analysis guess at freeform text — the
+// "never manufacture precision" rule applies here most of all.
+function computeAIResearchSignal(s) {
+  const parsed = parseResearch(s.research);
+  if(!parsed || !parsed.bottomLine) return {signal:'No Research', rank:2};
+  const bl = parsed.bottomLine.toLowerCase();
+  if(/more confident/.test(bl)) return {signal:'Supports', rank:3};
+  if(/less confident/.test(bl)) return {signal:'Contradicts', rank:1};
+  if(/equally confident/.test(bl)) return {signal:'Neutral', rank:2};
+  return {signal:'Neutral', rank:2}; // didn't follow the expected phrasing — don't guess further
+}
+
+const OPP_STATUS_RANK = {'Active Opportunity':3, 'Watch Closely':2, 'Low Priority':1, 'Pass / Archive':0};
+const ENTRY_QUALITY_RANK = {'Excellent':3, 'Acceptable':2, 'Poor':1, 'Unavailable':0};
+const CONVICTION_RANK_MAP = {'High':3, 'Moderate':2, 'Low':1, 'Insufficient Evidence':0};
+const MS_STRENGTH_RANK = {Strong:3, Moderate:2, Weak:1, Unknown:0};
+
+function computeOpportunityRankItem(s) {
+  const type = s.type;
+  const opp = computeOpportunityStatus(s, type);
+  const conviction = computeConviction(s);
+  const aiSignal = computeAIResearchSignal(s);
+  const ms = opp.ms;
+  // Stage 1 — elimination. These don't get ranked, they sink to the bottom.
+  const eliminated = opp.status==='Pass / Archive' || opp.eq.quality==='Poor' || conviction.level==='Insufficient Evidence';
+  return {
+    s, opp, conviction, aiSignal, ms, eliminated,
+    oppRank: OPP_STATUS_RANK[opp.status] ?? 0,
+    eqRank: ENTRY_QUALITY_RANK[opp.eq.quality] ?? 0,
+    convRank: CONVICTION_RANK_MAP[conviction.level] ?? 0,
+    aiRank: aiSignal.rank,
+    msStrength: mapStateToStrength(ms.state),
+  };
+}
+// Stage 2 — decision tree, not a weighted score. Ties break on Market State
+// strength, then liquidity, then ticker — never on reward:risk.
+function compareOpportunityRank(a, b) {
+  if(a.eliminated!==b.eliminated) return a.eliminated ? 1 : -1;
+  if(b.oppRank!==a.oppRank) return b.oppRank-a.oppRank;
+  if(b.eqRank!==a.eqRank) return b.eqRank-a.eqRank;
+  if(b.convRank!==a.convRank) return b.convRank-a.convRank;
+  if(b.aiRank!==a.aiRank) return b.aiRank-a.aiRank;
+  const msA = MS_STRENGTH_RANK[a.msStrength]||0, msB = MS_STRENGTH_RANK[b.msStrength]||0;
+  if(msB!==msA) return msB-msA;
+  const avA = a.s.avgvol||0, avB = b.s.avgvol||0;
+  if(avB!==avA) return avB-avA;
+  return (a.s.ticker||'').localeCompare(b.s.ticker||'');
+}
+function computeOpportunityRanking(stockList) {
+  const items = (stockList||[]).filter(s=>!s.archived).map(computeOpportunityRankItem);
+  items.sort(compareOpportunityRank);
+  return items;
+}
+
+function joinNatural(parts) {
+  const clean = parts.filter(Boolean);
+  if(!clean.length) return 'a workable setup';
+  if(clean.length===1) return clean[0];
+  return clean.slice(0,-1).join(', ') + ', and ' + clean[clean.length-1];
+}
+// One sentence per ranked stock — never mentions reward:risk, dollar risk,
+// profit target, or stop. Those live in the Game Plan, not the ranking.
+function computeRankingSentence(item) {
+  const {opp, conviction, aiSignal, ms} = item;
+  if(item.eliminated) {
+    if(opp.status==='Pass / Archive') { const {main} = computePassReasons(item.s, item.s.type); return `${main?main.label:'Weak entry'} — not worth prioritizing right now.`; }
+    if(opp.eq.quality==='Poor') return 'Entry quality is poor right now — worth waiting for a better price.';
+    return 'Not enough history yet to responsibly rank this one.';
+  }
+  const parts = [];
+  if(opp.eq.quality==='Excellent') parts.push('an excellent entry');
+  else if(opp.eq.quality==='Acceptable') parts.push('a workable entry');
+  const stateText = {
+    'Healthy Uptrend':'a healthy trend', 'Normal Pullback':'a healthy pullback into support',
+    'Consolidation':'a tightening range', 'Recovery Attempt':'an early recovery attempt',
+    'Trend Weakening':'a weakening trend', 'Confirmed Breakdown':'a broken trend',
+  }[ms.state];
+  if(stateText) parts.push(stateText);
+  if(conviction.level==='High') parts.push('high conviction across the evidence');
+  else if(conviction.level==='Moderate') parts.push('moderate conviction');
+  if(aiSignal.signal==='Supports') parts.push('fundamentals that support the setup');
+  else if(aiSignal.signal==='Contradicts') parts.push('fundamentals that argue against it');
+
+  let sentence = joinNatural(parts) + '.';
+  sentence = sentence.charAt(0).toUpperCase()+sentence.slice(1);
+  if(opp.status==='Watch Closely') sentence += ' Still needs confirmation before this becomes actionable.';
+  else if(opp.status==='Low Priority') sentence += ' Not compelling enough to prioritize right now.';
+  return sentence;
+}
+
+function renderTonightsOpportunities() {
+  const el = document.getElementById('tonights-opportunities');
+  if(!el) return;
+  const ranking = computeOpportunityRanking(stocks);
+  const survivors = ranking.filter(x=>!x.eliminated).slice(0,3);
+  if(!survivors.length) { el.innerHTML = ''; return; }
+  const medals = ['🥇','🥈','🥉'];
+  el.innerHTML = `
+    <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;margin:0 16px 14px;">
+      <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">Tonight's Best Opportunities</div>
+      ${survivors.map((item,i)=>`
+        <div onclick="openDetail('${item.s.id}')" style="display:flex;gap:12px;align-items:flex-start;padding:10px 0;${i<survivors.length-1?`border-bottom:1px solid ${C.border};`:''}cursor:pointer;">
+          <span style="font-size:20px;flex-shrink:0;">${medals[i]}</span>
+          <div style="min-width:0;">
+            <div style="color:${C.text};font-size:14px;font-weight:900;margin-bottom:3px;">${item.s.ticker}</div>
+            <div style="color:${C.textSub};font-size:12px;line-height:1.55;">${computeRankingSentence(item)}</div>
+          </div>
+        </div>`).join('')}
+    </div>`;
+}
+
 function renderPriceChart(s) {
   const snaps = (s.snapshots||[]).filter(sn=>sn.price!=null);
   if(snaps.length<2) {
@@ -3639,7 +3928,7 @@ function renderPriceChart(s) {
     </div>`;
   }
 
-  const W=320, H=150, padL=4, padR=4, padT=10, padB=6;
+  const W=320, H=220, padL=4, padR=4, padT=10, padB=6;
   const has50 = snaps.some(sn=>sn.ma50!=null);
   const has200 = snaps.some(sn=>sn.ma200!=null);
   const allVals = [
@@ -3669,7 +3958,7 @@ function renderPriceChart(s) {
         ${ma200Pts?`<span style="color:${C.purple};font-size:10px;font-weight:700;">● 200 SMA</span>`:''}
       </div>
     </div>
-    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:140px;display:block;">
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:210px;display:block;">
       <polyline points="${pricePts}" fill="none" stroke="${C.green}" stroke-width="2"/>
       ${ma50Pts?`<polyline points="${ma50Pts}" fill="none" stroke="${C.blue}" stroke-width="1.5" opacity="0.85"/>`:''}
       ${ma200Pts?`<polyline points="${ma200Pts}" fill="none" stroke="${C.purple}" stroke-width="1.5" opacity="0.85"/>`:''}
@@ -3783,26 +4072,14 @@ function renderOpportunityCard(s) {
 }
 
 function renderTabOverview(s) {
-  const setup = analyzeSetup(s);
-  const traj = computeTrajectory(s);
-  const narrative = brokerRead(s, setup, traj);
   const conviction = computeConviction(s);
   const glance = computeAtAGlance(s);
   const levels = computeKeyLevels(s);
   const gp = computeGamePlan(s);
 
-  const takeCard = `
-    <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
-      <div style="display:flex;gap:16px;align-items:center;">
-        ${renderConvictionBadge(conviction.level, 'lg')}
-        <div style="flex:1;">
-          <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:3px;">Today's Take</div>
-          <div style="color:${narrative.color};font-size:17px;font-weight:900;margin-bottom:3px;">${narrative.verdict}</div>
-          <div style="color:${C.textSub};font-size:12px;">${conviction.level} Conviction · ${narrative.verdictSub}</div>
-        </div>
-      </div>
-      <div style="color:${C.text};font-size:12.5px;line-height:1.5;margin-top:10px;padding-top:10px;border-top:1px solid ${C.border};">${conviction.reason}</div>
-    </div>`;
+  const verdictCard = renderTodaysVerdictCard(s);
+  const focusCard = renderTodaysFocusCard(s, s.type);
+  const investmentCard = renderInvestmentPotentialCard(s);
 
   const glanceCell = (label, cell) => `
     <div style="background:${C.cardHigh};border-radius:12px;padding:12px;">
@@ -3886,9 +4163,11 @@ function renderTabOverview(s) {
 
   return `
     <div style="display:flex;flex-direction:column;gap:14px;">
+      ${verdictCard}
+      ${focusCard}
+      ${investmentCard}
       ${renderMarketStateCard(s)}
       ${renderOpportunityCard(s)}
-      ${takeCard}
       ${glanceGrid}
       ${renderPriceChart(s)}
       ${keyLevelsCard}
@@ -3928,7 +4207,6 @@ function renderTabAnalysis(s) {
   const trendEv = conviction.trendEv, momentumEv = conviction.momentumEv, volumeEv = conviction.volumeEv, volatilityEv = computeVolatilityEvidence(s);
   const action = computeAction(s);
   const invalidation = computeInvalidation(s, type);
-  const missing = computeMissingEvidence(ms);
 
   const execSummaryCard = `
     <div style="background:${C.card};border-radius:16px;border:2px solid ${convictionColor}44;padding:18px;">
@@ -3959,12 +4237,6 @@ function renderTabAnalysis(s) {
     </div>`;
 
   const concernTriggerCards = renderConcernTriggerCards(s, type);
-
-  const missingCard = `
-    <div style="background:${C.card};border-radius:16px;border:1px solid ${C.blue}44;padding:18px;">
-      <div style="color:${C.blue};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">🔎 Missing Evidence</div>
-      ${missing.map(m=>`<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:8px;"><span style="color:${C.blue};font-size:12px;">•</span><span style="color:${C.textSub};font-size:12.5px;line-height:1.6;">${m}</span></div>`).join('')}
-    </div>`;
 
   const invalidationCard = `
     <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
@@ -4003,12 +4275,6 @@ function renderTabAnalysis(s) {
       <div style="color:${C.text};font-size:13px;line-height:1.7;">${compute60Second(conviction)}</div>
     </div>`;
 
-  const watchingNextCard = `
-    <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
-      <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">👀 What I'm Watching Next</div>
-      <div style="color:${C.text};font-size:12.5px;line-height:1.7;">${missing[0]}</div>
-    </div>`;
-
   const researchCard = parsedResearch ? `
     <div style="background:${C.card};border-radius:16px;border:1px solid ${C.purple}33;padding:18px;">
       <div style="color:${C.purple};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">🔮 From Your Research</div>
@@ -4021,15 +4287,20 @@ function renderTabAnalysis(s) {
   return `
     <div style="display:flex;flex-direction:column;gap:14px;">
       ${execSummaryCard}
-      ${buildCaseCard}
       ${concernTriggerCards}
-      ${missingCard}
-      ${invalidationCard}
-      ${actionCard}
-      ${evidenceTableCard}
       ${sixtySecondCard}
-      ${watchingNextCard}
-      ${researchCard}
+      ${actionCard}
+      <details style="background:${C.card};border-radius:16px;border:1px solid ${C.border};overflow:hidden;">
+        <summary style="padding:16px 18px;color:${C.teal};font-size:12.5px;font-weight:800;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;">
+          <span>📊 See Full Analysis</span><span style="color:${C.textMuted};font-size:11px;font-weight:600;">Build the Case · Invalidation · Evidence Table · Research</span>
+        </summary>
+        <div style="padding:0 18px 18px;display:flex;flex-direction:column;gap:14px;">
+          ${buildCaseCard}
+          ${invalidationCard}
+          ${evidenceTableCard}
+          ${researchCard}
+        </div>
+      </details>
     </div>`;
 }
 
