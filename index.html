@@ -830,6 +830,65 @@ function showRowMenu(id) {
     </div>`);
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// SIMPLE ACTION — two words, no more
+// ═══════════════════════════════════════════════════════════════════════════════
+// Not holding: BUY or WAIT. Holding: HOLD or EXIT. That's the entire
+// vocabulary for Swing Trade and Position Trade. Long-Term Hold keeps its
+// existing "Continue Holding / Review Thesis" language — collapsing "review
+// the thesis" into "EXIT" would imply urgency that isn't there for a
+// years-long holding philosophy, so it's deliberately left out of this
+// simplification.
+//
+// Two real decisions live here, not just relabeling:
+//  1. Price doesn't have to hit the entry zone exactly. Within 1 ATR counts
+//     as close enough — ATR is already "how much this stock normally moves
+//     in a day," so this isn't a guess, it's saying "you're within one
+//     normal day's noise of the target."
+//  2. Only the four REQUIRED checks (entry zone, invalidation, reward:risk,
+//     strategy fit) gate BUY. The two SUPPORTING checks (position sizing,
+//     earnings clear) no longer block it — they just get named as a
+//     caveat. Before this, "earnings clear" alone silently vetoed BUY
+//     forever, since this app has never tracked earnings dates. That's the
+//     honest fix: missing data becomes a caveat you can weigh, not a
+//     permanent, invisible veto.
+function computePriceCloseEnough(s) {
+  const gp = computeGamePlan(s);
+  if(gp.entryRef==null || !s.atr || s.price==null) return false;
+  return Math.abs(s.price - gp.entryRef) <= s.atr;
+}
+function computeSimpleAction(s) {
+  const type = s.type;
+  if(type==='Long-Term Hold') {
+    const action = computeAction(s);
+    return {word:null, longTermWord:action.action, holding:action.holding, reason:null};
+  }
+  const action = computeAction(s);
+  const gp = computeGamePlan(s);
+
+  if(action.holding) {
+    const exitish = /EXIT|REDUCE|REVIEW/.test(action.action);
+    const reason = exitish ? computeBiggestConcern(s, type) : 'Nothing has changed the plan — hold and follow it.';
+    return {word: exitish?'EXIT':'HOLD', holding:true, reason};
+  }
+
+  const readiness = action.readiness;
+  const requiredChecks = readiness.checks.filter(c=>c.required);
+  const supportingChecks = readiness.checks.filter(c=>!c.required);
+  const requiredPass = requiredChecks.every(c=>c.pass);
+  const closeEnough = computePriceCloseEnough(s);
+  const priceOk = !gp.entryPending || closeEnough;
+  const buyReady = requiredPass && priceOk;
+  const warning = supportingChecks.find(c=>!c.pass);
+
+  let reason;
+  if(buyReady) reason = closeEnough && gp.entryPending ? `Within ${fmtP(s.atr)} (1 ATR) of the ideal entry — close enough to act.` : 'Entry, invalidation, reward-to-risk, and strategy fit all check out.';
+  else reason = computeBiggestConcern(s, type);
+
+  return {word: buyReady?'BUY':'WAIT', holding:false, reason, warning: warning?warning.label:null};
+}
+const SIMPLE_ACTION_META = {BUY:{color:C.green}, WAIT:{color:C.yellow}, HOLD:{color:C.teal}, EXIT:{color:C.red}};
+
 function renderStockCard(s, rank) {
   const cfg = vCfg(s.verdict);
   const gp = computeGamePlan(s);
@@ -870,9 +929,12 @@ function renderStockCard(s, rank) {
             </div>
           </div>
         </div>
-        <button onclick="event.stopPropagation();showRowMenu('${s.id}')" style="background:none;border:none;color:${C.textMuted};cursor:pointer;padding:4px;flex-shrink:0;">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
-        </button>
+        <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+          ${s.type!=='Long-Term Hold'?(()=>{ const simple=computeSimpleAction(s); const c=SIMPLE_ACTION_META[simple.word]?.color||C.textMuted; return `<span style="background:${c}22;color:${c};border:1px solid ${c};border-radius:8px;padding:4px 10px;font-size:12px;font-weight:900;letter-spacing:0.03em;">${simple.word}</span>`; })():''}
+          <button onclick="event.stopPropagation();showRowMenu('${s.id}')" style="background:none;border:none;color:${C.textMuted};cursor:pointer;padding:4px;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+          </button>
+        </div>
       </div>
       ${needsReclass?`
       <div onclick="event.stopPropagation();showReclassifyFlow('${s.id}')" style="background:${C.orangeDim};border:1px solid ${C.orange}44;border-radius:10px;padding:8px 12px;margin-bottom:14px;display:flex;align-items:center;gap:8px;cursor:pointer;">
@@ -1036,7 +1098,7 @@ function renderDetail(s) {
         <div style="flex:1;">
           <div style="color:${C.text};font-size:26px;font-weight:900;letter-spacing:-0.02em;">${s.ticker}</div>
           <div style="color:${C.textSub};font-size:13px;">${s.name}</div>
-          ${s.scannerSource?`<div style="color:${C.textMuted};font-size:10.5px;margin-top:2px;">🔍 ${s.scannerSource}</div>`:''}
+          ${getScannerSources(s).length?`<div style="color:${C.textMuted};font-size:10.5px;margin-top:2px;">🔍 ${getScannerSources(s).join(' · ')}${getScannerSources(s).length>1?' <span style="color:'+C.teal+';">(multiple scans)</span>':''}</div>`:''}
         </div>
         ${renderConvictionBadge(conviction.level, 'md')}
       </div>
@@ -1052,7 +1114,8 @@ function renderDetail(s) {
         ${pill(null, needsReclass?'Needs Strategy':(s.type||'—'), tc.fg, 'positionType')}
         ${pill(null, `Entry: ${opp.eq.quality}`, opp.eq.quality==='Excellent'?C.green:opp.eq.quality==='Acceptable'?C.yellow:opp.eq.quality==='Poor'?C.red:C.textMuted, 'entryQuality')}
       </div>
-      ${typeDrift ? `<div style="margin-bottom:12px;color:${C.yellow};font-size:11px;">📊 Data currently suggests <b>${typeSuggestion.label}</b> — see Game Plan for why.</div>` : ''}
+      ${typeDrift ? `<div style="margin-bottom:8px;color:${C.yellow};font-size:11px;">📊 Data currently suggests <b>${typeSuggestion.label}</b> — see Game Plan for why.</div>` : ''}
+      ${typeSuggestion && typeSuggestion.longTermCandidate && s.type!=='Long-Term Hold' ? `<div style="margin-bottom:12px;color:${C.purple};font-size:11px;">🔍 Technicals also support a long-term case here — worth pulling 6 months of history and running AI research to check the business itself.</div>` : ''}
       <div style="display:flex;gap:8px;">
         <button onclick="openMentor('${s.id}')" style="background:${C.cardHigh};color:${C.purple};border:1px solid ${C.purple}44;border-radius:20px;padding:7px 14px;font-size:12px;font-weight:800;cursor:pointer;flex:1;">🎓 Mentor</button>
         <button onclick="showImportFlow('${s.id}')" style="background:${C.cardHigh};color:${C.teal};border:1px solid ${C.teal}44;border-radius:20px;padding:7px 14px;font-size:12px;font-weight:800;cursor:pointer;flex:1;">📂 Import</button>
@@ -1142,22 +1205,27 @@ function suggestHoldTypeLive(s) {
 
   const positionCandidate = trendUp && notSeverelyExtended && ma50Rising!==false;
   const swingCandidate = hasDefinedSetup && atrPct>=2 && !trendBroken && liquidityOk;
-  const looksLongTermTechnically = trendUp && atrPct<2 && notSeverelyExtended;
+  // Worth researching for the long term — trend health only, no ATR gate.
+  // ATR measures how fast a stock moves, not whether the business is worth
+  // owning; excluding volatile leaders here punished exactly the momentum
+  // names (NVDA-caliber) that are often the best long-term candidates.
+  // Independent of the trade suggestion below — a stock can be both a live
+  // Position Trade candidate today AND worth long-term research, same as
+  // the Trade/Investment lens split already established elsewhere.
+  const longTermCandidate = trendUp && notSeverelyExtended;
+  const longTermReason = longTermCandidate
+    ? `Technicals support a long-term uptrend — worth pulling 6 months of history and running AI research to see if the business itself deserves a long-term position.`
+    : null;
 
-  if(looksLongTermTechnically) {
-    return {label:null, confident:false, longTermCandidate:true,
-      reason:`Technicals support a long-term uptrend, but business quality and valuation research are still required before classifying this as a Long-Term Hold.`};
-  }
+  let label=null, confident=false, reason=`Nothing here clearly supports one strategy over another right now — no defined setup, and the trend isn't confirmed either way.`;
   if(positionCandidate) {
-    return {label:'Position Trade', confident:true,
-      reason:`Price is above its 200-day average${ma50Rising?' and the 50-day is rising':''}, and the intermediate trend looks healthy without being severely extended.`};
+    label='Position Trade'; confident=true;
+    reason=`Price is above its 200-day average${ma50Rising?' and the 50-day is rising':''}, and the intermediate trend looks healthy without being severely extended.`;
+  } else if(swingCandidate) {
+    label='Swing Trade'; confident=true;
+    reason=`There's a defined technical setup here — a real stop and target — with enough daily movement (ATR ${atrPct.toFixed(1)}%) for a shorter-term trade.`;
   }
-  if(swingCandidate) {
-    return {label:'Swing Trade', confident:true,
-      reason:`There's a defined technical setup here — a real stop and target — with enough daily movement (ATR ${atrPct.toFixed(1)}%) for a shorter-term trade.`};
-  }
-  return {label:null, confident:false,
-    reason:`Nothing here clearly supports one strategy over another right now — no defined setup, and the trend isn't confirmed either way.`};
+  return {label, confident, reason, longTermCandidate, longTermReason};
 }
 
 const PLAN_OF_ATTACK = {
@@ -1653,7 +1721,7 @@ function buildAIPrompt(s) {
   lines.push(`STOCKIQ SUMMARY:`);
   lines.push(`- Price: ${fmtP(s.price)} (${(s.pct||0)>=0?'+':''}${(s.pct||0).toFixed(2)}% since last update)`);
   if(s.notes) lines.push(`- My Notes (why I added this stock): ${s.notes}`);
-  if(s.scannerSource) lines.push(`- Scanner Source: ${s.scannerSource}`);
+  if(getScannerSources(s).length) lines.push(`- Scanner Source: ${getScannerSources(s).join(', ')}${getScannerSources(s).length>1?' (found in multiple scans — often a stronger signal)':''}`);
   lines.push(`- Market State: ${ms.state}${ms.evidence?` (${ms.evidence} evidence)`:''}`);
   lines.push(`- Conviction: ${conviction.level} — ${conviction.reason}${conviction.level==='Insufficient Evidence'?' (this reflects thin logged history in the app, not necessarily a weak stock — the technical readings below are still real, current-day numbers.)':''}`);
   lines.push(`- Current Stage / Action: ${stage} — ${action.action}`);
@@ -1718,6 +1786,70 @@ async function copyAIPrompt(id) {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// INVESTMENT RESEARCH PROMPT — a separate question from the Trade prompt
+// ═══════════════════════════════════════════════════════════════════════════════
+// Deliberately ignores today's chart. The Trade prompt asks "is this a good
+// trade right now" — this asks "would I hold this for 5-10 years even if
+// the market closed tomorrow." Same shared s.research field and textarea as
+// the Trade prompt (one paste box, one parser recognizing both header sets)
+// — no separate data model, no separate workflow to learn.
+function buildInvestmentPrompt(s) {
+  const lines = [];
+  lines.push(`Evaluate ${s.ticker} (${s.name}) as a potential CORE LONG-TERM HOLDING — a company I'd feel comfortable buying today and holding for 5-10 years, even if the stock market closed tomorrow.`);
+  lines.push('');
+  lines.push(`Ignore today's chart, entry price, and technical setup entirely — that's a separate question I evaluate elsewhere. This is purely about the business.`);
+  lines.push('');
+  lines.push(`Be skeptical. My existing long-term holdings include companies like Google, Amazon, Apple, and broad index funds — that's the bar. Most companies, even good ones, don't clear it. Don't automatically declare this a "Core Long-Term Candidate" — present the evidence and let me decide.`);
+  lines.push('');
+  lines.push(`Respond using EXACTLY these headers, in this order. Keep each section to 2-3 sentences:`);
+  lines.push('');
+  lines.push(`DURABLE COMPETITIVE ADVANTAGE:`);
+  lines.push(`(Brand, network effects, switching costs, scale, technology leadership, patents — does it have a real moat?)`);
+  lines.push('');
+  lines.push(`FINANCIAL STRENGTH:`);
+  lines.push(`(Consistent revenue growth, consistent earnings growth, strong cash flow, healthy balance sheet)`);
+  lines.push('');
+  lines.push(`INDUSTRY LEADERSHIP:`);
+  lines.push(`(Is it one of the best companies in its industry — not just "good"?)`);
+  lines.push('');
+  lines.push(`LONG-TERM TAILWINDS:`);
+  lines.push(`(Will this industry likely be larger in 5-10 years? What secular trend is behind it?)`);
+  lines.push('');
+  lines.push(`MANAGEMENT QUALITY:`);
+  lines.push(`(Is management generally viewed as a strong capital allocator?)`);
+  lines.push('');
+  lines.push(`VALUATION:`);
+  lines.push(`(Even a great company can be a poor investment if wildly overpriced — is it reasonably priced today?)`);
+  lines.push('');
+  lines.push(`MAJOR RISKS:`);
+  lines.push(`(What could permanently damage this business — not "the stock drops 10%," but competition, regulation, technology disruption, debt, customer concentration)`);
+  lines.push('');
+  lines.push(`FINAL VERDICT:`);
+  lines.push(`(Respond with EXACTLY one of these four phrases, then one sentence explaining why: "Core Long-Term Candidate" / "Worth Further Research" / "Swing Trade Only" / "Avoid")`);
+  lines.push('');
+  lines.push(`Keep the headers exactly as written above (all caps, with the colon) so I can paste your answer straight into my app.`);
+  return lines.join('\n');
+}
+async function copyInvestmentPrompt(id) {
+  const s = stocks.find(x=>String(x.id)===String(id));
+  if(!s) return;
+  const text = buildInvestmentPrompt(s);
+  try {
+    await navigator.clipboard.writeText(text);
+    const btn = document.getElementById('copy-investment-prompt-btn');
+    if(btn) { const orig = btn.textContent; btn.textContent = '✓ Copied — paste into Claude'; setTimeout(()=>{ if(btn) btn.textContent = orig; }, 2500); }
+  } catch(e) {
+    showModal(`
+      <div style="background:${C.card};border-radius:20px;padding:22px;border:1px solid ${C.border};">
+        <div style="color:${C.text};font-size:15px;font-weight:800;margin-bottom:10px;">Couldn't copy automatically</div>
+        <div style="color:${C.textSub};font-size:12px;margin-bottom:12px;">Select and copy the text below manually:</div>
+        <textarea readonly style="width:100%;background:${C.cardHigh};border:1px solid ${C.borderLight};border-radius:10px;color:${C.text};font-size:12px;padding:12px;min-height:200px;box-sizing:border-box;">${text}</textarea>
+        <button onclick="closeAllOverlays()" style="width:100%;margin-top:12px;padding:12px;border-radius:12px;border:none;background:${C.text};color:${C.bg};font-size:14px;font-weight:800;cursor:pointer;">Close</button>
+      </div>`);
+  }
+}
+
 // Splits pasted research into labeled sections IF it follows the headers we
 // asked for in buildAIPrompt. This is plain string matching on fixed literal
 // headers we control — not language understanding, not guessing. If the
@@ -1734,6 +1866,13 @@ function parseResearch(text) {
     {key:'blindSpots',   re:/BLIND SPOTS?:?/i},
     {key:'stressTest',   re:/STRESS TEST:?/i},
     {key:'bottomLine',   re:/BOTTOM LINE:?/i},
+    {key:'moat',              re:/DURABLE COMPETITIVE ADVANTAGE:?/i},
+    {key:'financialStrength', re:/FINANCIAL STRENGTH:?/i},
+    {key:'industryLeadership',re:/INDUSTRY LEADERSHIP:?/i},
+    {key:'tailwinds',         re:/LONG.TERM TAILWINDS:?/i},
+    {key:'management',        re:/MANAGEMENT QUALITY:?/i},
+    {key:'majorRisks',        re:/MAJOR RISKS:?/i},
+    {key:'longTermVerdict',   re:/FINAL VERDICT:?/i},
   ];
   const found = [];
   headerDefs.forEach(h => {
@@ -3663,34 +3802,44 @@ function renderConcernTriggerCards(s, type) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// INVESTMENT POTENTIAL — rare, binary, no manufactured 1-5 scale
+// INVESTMENT POTENTIAL — earned by the business, not the chart
 // ═══════════════════════════════════════════════════════════════════════════════
-// Only appears when technicals AND the AI research signal both genuinely
-// support a long-term case. No middling rating — this app has no real
-// valuation data, only whatever's pasted from research, so a star scale
-// would fake precision the app doesn't have. It's binary: exceptional, or
-// nothing shown at all. Independent of the stock's selected Position Type —
-// a Swing Trade candidate can still be a business worth owning long-term.
+// Fully independent of Market State, Conviction, and Entry Quality on
+// purpose — a stock can be a Pass as a trade and still be a Core Long-Term
+// Candidate, and vice versa. Keyed entirely off a deterministic phrase match
+// on the Final Verdict from the Investment Research prompt — the same
+// "parse for the exact phrase the prompt asked for, never guess further"
+// discipline the ranking engine's AI signal already uses. No middling
+// rating: either your own research says "Core Long-Term Candidate" in so
+// many words, or nothing shows here at all.
+const LONG_TERM_VERDICTS = ['Core Long-Term Candidate','Worth Further Research','Swing Trade Only','Avoid'];
+function computeLongTermVerdict(s) {
+  const parsed = parseResearch(s.research);
+  if(!parsed || !parsed.longTermVerdict) return null;
+  const text = parsed.longTermVerdict;
+  for(const v of LONG_TERM_VERDICTS) {
+    if(text.toLowerCase().includes(v.toLowerCase())) return {verdict:v, detail:text};
+  }
+  return {verdict:'Unclear', detail:text}; // didn't match the expected phrasing — don't guess further
+}
 function computeInvestmentPotential(s) {
-  const ms = computeMarketState(s);
-  const conviction = computeConviction(s);
-  const aiSignal = computeAIResearchSignal(s);
-  const strongTechnical = ['Healthy Uptrend','Normal Pullback'].includes(ms.state) && conviction.level==='High';
-  const strongFundamental = aiSignal.signal==='Supports';
-  if(!strongTechnical || !strongFundamental) return null;
-
-  const reasons = [ms.state==='Healthy Uptrend' ? 'Healthy long-term trend' : 'Long-term trend intact through a normal pullback',
-    'High conviction across trend, momentum, and volume', 'Your AI research supports the long-term case'];
-  return {reasons, action:'Use pullbacks to build a long-term position rather than chasing strength.'};
+  const lt = computeLongTermVerdict(s);
+  if(!lt || lt.verdict!=='Core Long-Term Candidate') return null;
+  const parsed = parseResearch(s.research);
+  const firstSentence = t => t ? t.split('.')[0].trim()+'.' : null;
+  const reasons = [firstSentence(parsed.moat), firstSentence(parsed.financialStrength), firstSentence(parsed.industryLeadership), firstSentence(parsed.tailwinds)].filter(Boolean);
+  if(!reasons.length) reasons.push(lt.detail);
+  return {reasons: reasons.slice(0,4), action:'Your research indicates this meets the characteristics of a core long-term holding — worth a closer look before deciding. StockIQ doesn\'t buy it for you.'};
 }
 function renderInvestmentPotentialCard(s) {
   const ip = computeInvestmentPotential(s);
-  if(!ip) return ''; // not exceptional — no placeholder, no wasted space
+  if(!ip) return ''; // not a Core candidate — no placeholder, no wasted space
   return `
     <div style="background:${C.purpleDim};border:1px solid ${C.purple}44;border-radius:16px;padding:18px;">
-      <div style="color:${C.purple};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:10px;">⭐ Exceptional Long-Term Opportunity</div>
+      <div style="color:${C.purple};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:10px;">⭐ Core Long-Term Candidate</div>
+      <div style="color:${C.textMuted};font-size:11px;line-height:1.5;margin-bottom:10px;">Your research indicates this meets the characteristics of a core long-term holding:</div>
       ${ip.reasons.map(r=>`<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:6px;"><span style="color:${C.purple};font-size:12px;">✓</span><span style="color:${C.text};font-size:12.5px;line-height:1.5;">${r}</span></div>`).join('')}
-      <div style="color:${C.textSub};font-size:12.5px;line-height:1.6;margin-top:10px;padding-top:10px;border-top:1px solid ${C.purple}33;"><b style="color:${C.purple};">Action:</b> ${ip.action}</div>
+      <div style="color:${C.textSub};font-size:12.5px;line-height:1.6;margin-top:10px;padding-top:10px;border-top:1px solid ${C.purple}33;">${ip.action}</div>
     </div>`;
 }
 
@@ -3700,19 +3849,20 @@ function renderInvestmentPotentialCard(s) {
 function renderTodaysVerdictCard(s) {
   const opp = computeOpportunityStatus(s, s.type);
   const meta = OPPORTUNITY_STATUS_META[opp.status];
-  const action = computeAction(s);
   const conviction = computeConviction(s);
+  const simple = computeSimpleAction(s);
+  const isLongTerm = s.type==='Long-Term Hold';
+  const headline = isLongTerm ? simple.longTermWord : simple.word;
+  const headlineColor = isLongTerm ? meta.color : (SIMPLE_ACTION_META[simple.word]?.color || meta.color);
   return `
-    <div style="background:${C.card};border-radius:16px;border:2px solid ${meta.color}44;padding:18px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-        <div style="display:flex;align-items:center;gap:8px;"><span style="font-size:20px;">${meta.icon}</span><span style="color:${meta.color};font-size:17px;font-weight:900;">${opp.status}</span></div>
+    <div style="background:${C.card};border-radius:16px;border:2px solid ${headlineColor}44;padding:18px;">
+      <div style="color:${headlineColor};font-size:32px;font-weight:900;letter-spacing:0.02em;line-height:1;margin-bottom:6px;">${headline}</div>
+      ${simple.reason?`<div style="color:${C.textSub};font-size:13px;line-height:1.6;margin-bottom:14px;">${simple.reason}${simple.warning?` <span style="color:${C.yellow};">(${simple.warning} — not tracked, worth a quick check)</span>`:''}</div>`:''}
+      <div style="display:flex;justify-content:space-between;align-items:center;padding-top:12px;border-top:1px solid ${C.border};">
+        <div style="display:flex;align-items:center;gap:8px;"><span style="font-size:15px;">${meta.icon}</span><span style="color:${meta.color};font-size:12.5px;font-weight:800;">${opp.status}</span></div>
         ${renderConvictionBadge(conviction.level,'sm')}
       </div>
-      <div style="color:${C.text};font-size:13px;line-height:1.6;margin-bottom:12px;">${computeWhyThisStock(s)}</div>
-      <div style="display:flex;align-items:center;gap:8px;padding-top:10px;border-top:1px solid ${C.border};">
-        <span style="color:${C.textMuted};font-size:11px;">Action:</span>
-        <span style="color:${meta.color};font-size:14px;font-weight:900;">${action.action}</span>
-      </div>
+      <div style="color:${C.textMuted};font-size:11.5px;line-height:1.6;margin-top:10px;">${computeWhyThisStock(s)}</div>
     </div>`;
 }
 
@@ -4188,8 +4338,8 @@ function renderTabAnalysis(s) {
     const earlyResearchCard = parsedResearch ? `
     <div style="background:${C.card};border-radius:16px;border:1px solid ${C.purple}33;padding:18px;">
       <div style="color:${C.purple};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">🔮 From Your Research</div>
-      ${['sentiment','valuation','fundamentals','risk','blindSpots','stressTest','bottomLine'].filter(k=>parsedResearch[k]).map((k,i,arr)=>{
-        const labels = {sentiment:'Analyst Sentiment', valuation:'Valuation', fundamentals:'Fundamentals vs Technicals', risk:'Key Risk', blindSpots:'Blind Spots', stressTest:'Stress Test — Where the AI Disagreed', bottomLine:'Bottom Line'};
+      ${['sentiment','valuation','fundamentals','risk','blindSpots','stressTest','moat','financialStrength','industryLeadership','tailwinds','management','majorRisks','longTermVerdict','bottomLine'].filter(k=>parsedResearch[k]).map((k,i,arr)=>{
+        const labels = {sentiment:'Analyst Sentiment', valuation:'Valuation', fundamentals:'Fundamentals vs Technicals', risk:'Key Risk', blindSpots:'Blind Spots', stressTest:'Stress Test — Where the AI Disagreed', moat:'Competitive Advantage', financialStrength:'Financial Strength', industryLeadership:'Industry Leadership', tailwinds:'Long-Term Tailwinds', management:'Management Quality', majorRisks:'Major Long-Term Risks', longTermVerdict:'Long-Term Verdict', bottomLine:'Bottom Line'};
         return `<div style="margin-bottom:${i<arr.length-1?'12px':'0'};"><div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:3px;">${labels[k]}</div><p style="color:${C.textSub};font-size:12px;line-height:1.6;margin:0;">${parsedResearch[k]}</p></div>`;
       }).join('')}
     </div>` : '';
@@ -4278,8 +4428,8 @@ function renderTabAnalysis(s) {
   const researchCard = parsedResearch ? `
     <div style="background:${C.card};border-radius:16px;border:1px solid ${C.purple}33;padding:18px;">
       <div style="color:${C.purple};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">🔮 From Your Research</div>
-      ${['sentiment','valuation','fundamentals','risk','blindSpots','stressTest','bottomLine'].filter(k=>parsedResearch[k]).map((k,i,arr)=>{
-        const labels = {sentiment:'Analyst Sentiment', valuation:'Valuation', fundamentals:'Fundamentals vs Technicals', risk:'Key Risk', blindSpots:'Blind Spots', stressTest:'Stress Test — Where the AI Disagreed', bottomLine:'Bottom Line'};
+      ${['sentiment','valuation','fundamentals','risk','blindSpots','stressTest','moat','financialStrength','industryLeadership','tailwinds','management','majorRisks','longTermVerdict','bottomLine'].filter(k=>parsedResearch[k]).map((k,i,arr)=>{
+        const labels = {sentiment:'Analyst Sentiment', valuation:'Valuation', fundamentals:'Fundamentals vs Technicals', risk:'Key Risk', blindSpots:'Blind Spots', stressTest:'Stress Test — Where the AI Disagreed', moat:'Competitive Advantage', financialStrength:'Financial Strength', industryLeadership:'Industry Leadership', tailwinds:'Long-Term Tailwinds', management:'Management Quality', majorRisks:'Major Long-Term Risks', longTermVerdict:'Long-Term Verdict', bottomLine:'Bottom Line'};
         return `<div style="margin-bottom:${i<arr.length-1?'12px':'0'};"><div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:3px;">${labels[k]}</div><p style="color:${C.textSub};font-size:12px;line-height:1.6;margin:0;">${parsedResearch[k]}</p></div>`;
       }).join('')}
     </div>` : '';
@@ -4356,7 +4506,9 @@ function renderTabNotes(s) {
           <span style="color:${C.purple};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;">AI Research</span>
         </div>
         <div style="color:${C.text};font-size:12.5px;line-height:1.6;margin-bottom:12px;">Step 1: copy a prompt pre-filled with this stock's real numbers. Step 2: paste it into Claude (or ChatGPT) and let it research news, earnings, and analyst sentiment. Step 3: paste the answer back below — it saves automatically as you paste, no submit needed. StockIQ shows it alongside your score, but never factors it into the math — that stays pure and auditable.</div>
-        <button id="copy-prompt-btn" onclick="copyAIPrompt('${s.id}')" style="width:100%;padding:12px;background:${C.purple}22;color:${C.purple};border:1px solid ${C.purple}66;border-radius:10px;font-size:13px;font-weight:800;cursor:pointer;margin-bottom:12px;">📋 Copy Analysis Prompt (with live data)</button>
+        <button id="copy-prompt-btn" onclick="copyAIPrompt('${s.id}')" style="width:100%;padding:12px;background:${C.purple}22;color:${C.purple};border:1px solid ${C.purple}66;border-radius:10px;font-size:13px;font-weight:800;cursor:pointer;margin-bottom:10px;">📋 Copy Trade Research Prompt</button>
+        <div style="color:${C.textMuted};font-size:11px;line-height:1.5;margin-bottom:8px;">Different question, same paste box below: is this a business worth 5-10 years, regardless of today's chart?</div>
+        <button id="copy-investment-prompt-btn" onclick="copyInvestmentPrompt('${s.id}')" style="width:100%;padding:12px;background:${C.tealDim};color:${C.teal};border:1px solid ${C.teal}66;border-radius:10px;font-size:13px;font-weight:800;cursor:pointer;margin-bottom:12px;">🏛️ Copy Investment Research Prompt</button>
         <div style="display:flex;justify-content:flex-end;margin-bottom:6px;">
           <span id="research-save-flag" style="color:${C.green};font-size:10px;font-weight:800;opacity:0;transition:opacity 0.3s;">✓ Saved</span>
         </div>
@@ -4790,27 +4942,28 @@ function suggestHoldType(vals) {
   const distFrom50 = ((price-ma50)/ma50)*100;
   const notSeverelyExtended = distFrom50 < 20;
   const hasWorkableSetup = !isNaN(hi52) && hi52>price;
-  const looksLongTermTechnically = trendUp && atrPct<2 && notSeverelyExtended;
+  // Same fix as suggestHoldTypeLive: no ATR gate on the long-term signal,
+  // and it's independent of the trade suggestion, not exclusive with it.
+  const longTermCandidate = trendUp && notSeverelyExtended;
+  const longTermReason = longTermCandidate
+    ? `Technicals support a long-term uptrend — worth pulling 6 months of history and running AI research to see if the business itself deserves a long-term position.`
+    : null;
 
-  if(looksLongTermTechnically) {
-    return {label:null, confident:false,
-      reason:`Technicals support a long-term uptrend, but business quality and valuation research are still required before classifying this as a Long-Term Hold.`};
-  }
+  let label=null, confident=false, reason=`Nothing here clearly supports one strategy over another right now — no defined setup, and the trend isn't confirmed either way.`;
   if(trendUp && notSeverelyExtended) {
-    return {label:'Position Trade', confident:true,
-      reason:`Price is above its 200-day average, and the intermediate trend looks healthy without being severely extended.`};
+    label='Position Trade'; confident=true;
+    reason=`Price is above its 200-day average, and the intermediate trend looks healthy without being severely extended.`;
+  } else if(hasWorkableSetup && atrPct>=2) {
+    label='Swing Trade'; confident=true;
+    reason=`There's a workable setup here — real room to a target with enough daily movement (ATR ${atrPct.toFixed(1)}%) — for a shorter-term trade.`;
   }
-  if(hasWorkableSetup && atrPct>=2) {
-    return {label:'Swing Trade', confident:true,
-      reason:`There's a workable setup here — real room to a target with enough daily movement (ATR ${atrPct.toFixed(1)}%) — for a shorter-term trade.`};
-  }
-  return {label:null, confident:false,
-    reason:`Nothing here clearly supports one strategy over another right now — no defined setup, and the trend isn't confirmed either way.`};
+  return {label, confident, reason, longTermCandidate, longTermReason};
 }
 
 const ADD_STEPS = [
   {key:'ticker',  label:'Ticker symbol',          hint:'e.g. NVDA',          inputmode:'text', upper:true},
-  {key:'scannerSource', label:'Which scan found this stock?', hint:'e.g. Pullback Opportunity', inputmode:'text', note:'The name of your ThinkorSwim scan, if this came from one. Optional — skip if you added this manually.', optional:true},
+  {key:'scannerSources', label:'Which scan(s) found this stock?', type:'multiselect', optional:true,
+    note:'Tap all that apply — a stock showing up in multiple scans is often more interesting. Optional — skip if you added this manually.'},
   {key:'price',   label:'Current price',          hint:'e.g. 194.32',        inputmode:'decimal', prefix:'$'},
   {key:'ma20',    label:'20-day moving average',  hint:'From ThinkorSwim',   inputmode:'decimal', prefix:'$'},
   {key:'ma50',    label:'50-day moving average',  hint:'From ThinkorSwim',   inputmode:'decimal', prefix:'$'},
@@ -4846,11 +4999,15 @@ function renderAddStep() {
       </div>
       <div style="color:${C.text};font-size:22px;font-weight:900;letter-spacing:-0.01em;margin-bottom:${suggestion?'12px':'8px'};">${cur.label}</div>
       ${cur.hint&&cur.key==='holdtype'?`<div style="color:${C.text};font-size:12px;margin-bottom:16px;line-height:1.5;">${cur.hint}</div>`:''}
-      ${suggestion&&suggestion.label?`<div style="background:${C.tealDim};border:1px solid ${C.teal}44;border-radius:10px;padding:12px 14px;margin-bottom:20px;">
+      ${suggestion&&suggestion.label?`<div style="background:${C.tealDim};border:1px solid ${C.teal}44;border-radius:10px;padding:12px 14px;margin-bottom:12px;">
         <div style="color:${C.teal};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">📊 Based on your numbers: ${suggestion.label}</div>
         <div style="color:${C.textSub};font-size:12px;line-height:1.5;">${suggestion.reason}</div>
-      </div>`:suggestion?`<div style="background:${C.cardHigh};border:1px solid ${C.borderLight};border-radius:10px;padding:12px 14px;margin-bottom:20px;">
+      </div>`:suggestion?`<div style="background:${C.cardHigh};border:1px solid ${C.borderLight};border-radius:10px;padding:12px 14px;margin-bottom:12px;">
         <div style="color:${C.textSub};font-size:12px;line-height:1.5;">${suggestion.reason}</div>
+      </div>`:''}
+      ${suggestion&&suggestion.longTermCandidate?`<div style="background:${C.purpleDim};border:1px solid ${C.purple}44;border-radius:10px;padding:12px 14px;margin-bottom:20px;">
+        <div style="color:${C.purple};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">🔍 Also worth researching long-term</div>
+        <div style="color:${C.textSub};font-size:12px;line-height:1.5;">${suggestion.longTermReason}</div>
       </div>`:''}
       <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:28px;">
         ${cur.choices.map(ch=>`<button onclick="addChoiceSelect('${ch}')" style="padding:16px 18px;border-radius:14px;font-size:15px;font-weight:600;border:1px solid ${addVals[cur.key]===ch?C.text:C.border};background:${addVals[cur.key]===ch?C.cardHigh:'none'};color:${addVals[cur.key]===ch?C.text:C.textSub};cursor:pointer;text-align:left;">${ch}</button>`).join('')}
@@ -4858,6 +5015,33 @@ function renderAddStep() {
       <div style="display:flex;gap:10px;">
         ${addStep>0?`<button onclick="addBack()" style="flex:1;padding:16px;border-radius:14px;border:1px solid ${C.border};background:none;color:${C.textSub};font-size:14px;font-weight:700;cursor:pointer;">Back</button>`:''}
         <button onclick="addNext()" style="flex:2;padding:16px;border-radius:14px;border:none;background:${addVals[cur.key]?C.text:'#1A1D25'};color:${addVals[cur.key]?C.bg:C.textMuted};font-size:15px;font-weight:800;cursor:pointer;">${isLast?'Add to Playbook →':'Next →'}</button>
+      </div>`);
+    return;
+  }
+
+  if(cur.type==='multiselect') {
+    const selected = addVals[cur.key] || [];
+    const extra = recentScannerSources().filter(s=>!FIXED_SCANNERS.includes(s));
+    const allChips = [...FIXED_SCANNERS, ...extra];
+    showSheet(`
+      <div style="width:36px;height:4px;border-radius:2px;background:${C.border};margin:0 auto 20px;"></div>
+      <div style="display:flex;gap:3px;margin-bottom:24px;">${progress}</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <span style="color:${C.textMuted};font-size:11px;">${addStep+1} of ${ADD_STEPS.length}</span>
+        <button onclick="closeAllOverlays()" style="background:none;border:none;color:${C.textMuted};font-size:22px;cursor:pointer;">✕</button>
+      </div>
+      <div style="color:${C.text};font-size:22px;font-weight:900;letter-spacing:-0.01em;margin-bottom:8px;">${cur.label}${cur.optional?` <span style="color:${C.textMuted};font-size:13px;font-weight:600;">(optional)</span>`:''}</div>
+      ${cur.note?`<div style="color:${C.textMuted};font-size:12px;background:${C.cardHigh};border-radius:8px;padding:8px 12px;margin-bottom:16px;">${cur.note}</div>`:''}
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;">
+        ${allChips.map(src=>`<button onclick="toggleScannerSource('${src.replace(/'/g,"\\'")}')" style="background:${selected.includes(src)?C.teal:C.cardHigh};color:${selected.includes(src)?'#000':C.textSub};border:1px solid ${selected.includes(src)?C.teal:C.border};border-radius:20px;padding:8px 14px;font-size:12px;font-weight:700;cursor:pointer;">${selected.includes(src)?'✓ ':''}${src}</button>`).join('')}
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:28px;">
+        <input id="custom-scanner-input" type="text" placeholder="Type a custom scan name" style="flex:1;background:${C.card};border:1px solid ${C.borderLight};border-radius:12px;color:${C.text};font-size:13px;padding:10px 12px;outline:none;">
+        <button onclick="addCustomScannerSource()" style="background:${C.cardHigh};color:${C.text};border:1px solid ${C.borderLight};border-radius:12px;padding:10px 16px;font-size:13px;font-weight:700;cursor:pointer;">Add</button>
+      </div>
+      <div style="display:flex;gap:10px;">
+        ${addStep>0?`<button onclick="addBack()" style="flex:1;padding:16px;border-radius:14px;border:1px solid ${C.border};background:none;color:${C.textSub};font-size:14px;font-weight:700;cursor:pointer;">Back</button>`:''}
+        <button onclick="addNext()" style="flex:2;padding:16px;border-radius:14px;border:none;background:${C.text};color:${C.bg};font-size:15px;font-weight:800;cursor:pointer;">${selected.length===0&&cur.optional?'Skip →':isLast?'Add to Playbook →':'Next →'}</button>
       </div>`);
     return;
   }
@@ -4871,10 +5055,6 @@ function renderAddStep() {
     </div>
     <div style="color:${C.text};font-size:22px;font-weight:900;letter-spacing:-0.01em;margin-bottom:${cur.note?'8px':'20px'};">${cur.label}${cur.optional?` <span style="color:${C.textMuted};font-size:13px;font-weight:600;">(optional)</span>`:''}</div>
     ${cur.note?`<div style="color:${C.textMuted};font-size:12px;background:${C.cardHigh};border-radius:8px;padding:8px 12px;margin-bottom:16px;">${cur.note}</div>`:''}
-    ${cur.key==='scannerSource'&&recentScannerSources().length?`
-    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;">
-      ${recentScannerSources().map(src=>`<button onclick="pickScannerSource('${src.replace(/'/g,"\\'")}')" style="background:${C.cardHigh};color:${C.textSub};border:1px solid ${C.border};border-radius:20px;padding:8px 14px;font-size:12px;font-weight:700;cursor:pointer;">${src}</button>`).join('')}
-    </div>`:''}
     <div style="position:relative;margin-bottom:28px;">
       ${cur.prefix?`<span style="position:absolute;left:16px;top:50%;transform:translateY(-50%);color:${C.textSub};font-size:20px;font-weight:600;">${cur.prefix}</span>`:''}
       <input id="add-input" type="text" inputmode="${cur.inputmode||'text'}" placeholder="${cur.hint}" value="${addVals[cur.key]||''}" style="width:100%;background:${C.card};border:1px solid ${C.borderLight};border-radius:14px;color:${C.text};font-size:${cur.upper?'26':'20'}px;font-weight:${cur.upper?'900':'600'};padding:${cur.prefix?'16px 16px 16px 34px':'16px'};outline:none;box-sizing:border-box;" autofocus>
@@ -4889,16 +5069,36 @@ function renderAddStep() {
   },100);
 }
 
+// Fixed list of your named ThinkorSwim scans, offered as tap-to-toggle chips
+// alongside any previously-typed custom names.
+const FIXED_SCANNERS = ['Institutional Leaders','Momentum Breakouts','Pullback Opportunities','Early Trend Reversals','High Conviction Pullbacks'];
+
+// Reads scanner source(s) off a stock, backward-compatible with the old
+// single-string field from before multi-select existed.
+function getScannerSources(s) {
+  return s.scannerSources || (s.scannerSource ? [s.scannerSource] : []);
+}
 // Distinct, previously-typed scanner source names across all stocks —
-// tap-to-fill instead of retyping the same TOS scan name every time.
+// tap-to-toggle instead of retyping the same TOS scan name every time.
 function recentScannerSources() {
   const seen = new Set();
-  (stocks||[]).forEach(s=>{ if(s.scannerSource) seen.add(s.scannerSource); });
-  return [...seen].slice(0,6);
+  (stocks||[]).forEach(s=> getScannerSources(s).forEach(src=>seen.add(src)));
+  return [...seen].slice(0,10);
 }
-function pickScannerSource(src) {
-  addVals.scannerSource = src;
-  addNext();
+function toggleScannerSource(src) {
+  if(!addVals.scannerSources) addVals.scannerSources = [];
+  const idx = addVals.scannerSources.indexOf(src);
+  if(idx>=0) addVals.scannerSources.splice(idx,1);
+  else addVals.scannerSources.push(src);
+  renderAddStep();
+}
+function addCustomScannerSource() {
+  const inp = document.getElementById('custom-scanner-input');
+  const val = inp?.value?.trim();
+  if(!val) return;
+  if(!addVals.scannerSources) addVals.scannerSources = [];
+  if(!addVals.scannerSources.includes(val)) addVals.scannerSources.push(val);
+  renderAddStep();
 }
 
 function addChoiceSelect(ch) {
@@ -4911,6 +5111,8 @@ function addNext() {
   const cur = ADD_STEPS[addStep];
   if(cur.type==='choice') {
     if(!addVals[cur.key]) return;
+  } else if(cur.type==='multiselect') {
+    if((!addVals[cur.key] || addVals[cur.key].length===0) && !cur.optional) return;
   } else {
     const inp=document.getElementById('add-input');
     const val=inp?.value?.trim();
@@ -4936,7 +5138,7 @@ async function doAddStock() {
     id: Date.now(),
     ticker:  addVals.ticker||'???',
     name:    addVals.ticker||'New Stock',
-    scannerSource: addVals.scannerSource||null,
+    scannerSources: addVals.scannerSources||[],
     price:   parseFloat(addVals.price)||0,
     change:  0, pct: 0,
     verdict: 'Watch', score: 70,
