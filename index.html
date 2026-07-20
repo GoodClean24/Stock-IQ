@@ -903,10 +903,8 @@ function renderStockCard(s, rank) {
   const initials = (s.ticker||'??').slice(0,2);
   const avatarHue = Array.from(s.ticker||'XX').reduce((a,c)=>a+c.charCodeAt(0),0)%360;
 
-  const conviction = computeConviction(s);
   const tc = typeBadgeColors(s.type);
   const needsReclass = needsReclassify(s);
-  const scoreRing = renderConvictionBadge(conviction.level, 'sm');
   const opp = computeOpportunityStatus(s, s.type);
   const oppMeta = OPPORTUNITY_STATUS_META[opp.status];
 
@@ -948,7 +946,6 @@ function renderStockCard(s, rank) {
           ${miniSparkline(s, trend.color)}
           <div style="color:${trend.color};font-size:10px;font-weight:800;margin-top:2px;">${trend.line1}<br>${trend.line2}</div>
         </div>
-        ${scoreRing}
         <div style="text-align:right;flex-shrink:0;">
           <div style="color:${C.text};font-size:19px;font-weight:900;letter-spacing:-0.01em;">${fmtP(s.price)}</div>
           <div style="color:${(s.pct||0)>=0?C.green:C.red};font-size:12px;font-weight:700;">${(s.pct||0)>=0?'▲':'▼'} ${Math.abs(s.pct||0).toFixed(2)}%</div>
@@ -1143,7 +1140,7 @@ function renderDetail(s) {
       <button id="tab-btn-overview" onclick="showTab('overview','${s.id}')" style="flex:1;padding:14px 0;background:none;border:none;cursor:pointer;font-size:13px;font-weight:700;color:${C.text};border-bottom:2px solid ${C.text};white-space:nowrap;">Overview</button>
       <button id="tab-btn-analysis" onclick="showTab('analysis','${s.id}')" style="flex:1;padding:14px 0;background:none;border:none;cursor:pointer;font-size:13px;font-weight:700;color:${C.textSub};border-bottom:2px solid transparent;white-space:nowrap;">Analysis</button>
       <button id="tab-btn-plan" onclick="showTab('plan','${s.id}')" style="flex:1;padding:14px 0;background:none;border:none;cursor:pointer;font-size:13px;font-weight:700;color:${C.textSub};border-bottom:2px solid transparent;white-space:nowrap;">Game Plan</button>
-      <button id="tab-btn-notes" onclick="showTab('notes','${s.id}')" style="flex:1;padding:14px 0;background:none;border:none;cursor:pointer;font-size:13px;font-weight:700;color:${C.textSub};border-bottom:2px solid transparent;white-space:nowrap;">Notes</button>
+      <button id="tab-btn-notes" onclick="showTab('notes','${s.id}')" style="flex:1;padding:14px 0;background:none;border:none;cursor:pointer;font-size:13px;font-weight:700;color:${C.textSub};border-bottom:2px solid transparent;white-space:nowrap;">Deep Dive</button>
     </div>
     <div id="tab-content" style="padding:20px;">
       ${renderTabOverview(s)}
@@ -1487,9 +1484,8 @@ function renderTabPlan(s) {
   return `
     <div style="display:flex;flex-direction:column;gap:14px;">
       ${missionCard}
-      ${renderOpportunityCard(s)}
       ${whyTypeCard}
-      ${checklistCard}
+      <div style="color:${C.teal};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;margin-top:2px;">Step 1 — Get In</div>
       <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
           <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;">Preferred Entry Zone · ${s.tranche.length} ${s.tranche.length===1?'entry':'entries'} ${!s.tranche.some(t=>t.status==='filled')?`<button onclick="showBuildPlanFlow('${s.id}')" style="background:none;border:none;color:${C.teal};font-size:10px;font-weight:700;cursor:pointer;padding:0;text-transform:none;letter-spacing:normal;">(change)</button>`:''}</div>
@@ -1503,9 +1499,14 @@ function renderTabPlan(s) {
         </div>
         ${tranches}
       </div>
+      <div style="color:${C.textMuted};font-size:11.5px;line-height:1.5;">${gp.buyZone} — this is where the setup says buyers have the edge, not a guess.</div>
+      <div style="color:${C.teal};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;">Step 2 — Size It</div>
       ${tradeEconomicsCard}
+      <div style="color:${C.teal};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;">Step 3 — Manage It While You Wait or Hold</div>
+      ${checklistCard}
       ${exitCheckCard}
-      ${invalidationCard}
+      ${concernTriggerCards}
+      <div style="color:${C.teal};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;">Step 4 — Get Out</div>
       ${gp.profit&&gp.profit!=='—'?`
       <div style="background:${C.greenDim};border-radius:16px;border:1px solid ${C.green}33;padding:16px;display:flex;align-items:center;gap:14px;">
         <span style="font-size:26px;">🎯</span>
@@ -1522,7 +1523,7 @@ function renderTabPlan(s) {
           <div style="color:${C.textSub};font-size:13px;line-height:1.6;">${gp.stopRule||'Define your exit rule.'}</div>
         </div>
       </div>
-      ${concernTriggerCards}
+      ${invalidationCard}
       <div style="background:${C.card};border-radius:12px;border:1px solid ${reviewTrigger.overdue?C.red+'44':C.border};padding:12px 16px;display:flex;align-items:center;gap:10px;">
         <span style="font-size:16px;">${reviewTrigger.overdue?'⏰':'⏱'}</span>
         <span style="color:${C.textSub};font-size:13px;">${reviewTrigger.text}</span>
@@ -3850,11 +3851,12 @@ function renderTodaysVerdictCard(s) {
     <div style="background:${C.card};border-radius:16px;border:2px solid ${headlineColor}44;padding:18px;">
       <div style="color:${headlineColor};font-size:32px;font-weight:900;letter-spacing:0.02em;line-height:1;margin-bottom:6px;">${headline}</div>
       ${simple.reason?`<div style="color:${C.textSub};font-size:13px;line-height:1.6;margin-bottom:14px;">${simple.reason}${simple.warning?` <span style="color:${C.yellow};">(${simple.warning} — not tracked, worth a quick check)</span>`:''}</div>`:''}
-      <div style="display:flex;justify-content:space-between;align-items:center;padding-top:12px;border-top:1px solid ${C.border};">
-        <div style="display:flex;align-items:center;gap:8px;"><span style="font-size:15px;">${meta.icon}</span><span style="color:${meta.color};font-size:12.5px;font-weight:800;">${opp.status}</span></div>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;padding-top:12px;border-top:1px solid ${C.border};gap:10px;">
+        <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;"><span style="font-size:15px;">${meta.icon}</span><span style="color:${meta.color};font-size:12.5px;font-weight:800;">${opp.status}</span></div>
         ${renderConvictionBadge(conviction.level,'sm')}
       </div>
-      <div style="color:${C.textMuted};font-size:11.5px;line-height:1.6;margin-top:10px;">${computeWhyThisStock(s)}</div>
+      <div style="color:${C.textMuted};font-size:11px;line-height:1.6;margin-top:8px;">${conviction.level} Conviction: ${conviction.reason}</div>
+      <div style="color:${C.textMuted};font-size:11.5px;line-height:1.6;margin-top:8px;">${computeWhyThisStock(s)}</div>
     </div>`;
 }
 
@@ -4060,6 +4062,48 @@ function renderTonightsOpportunities() {
     </div>`;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// OVERVIEW-TAB SUPPORTING FUNCTIONS
+// ═══════════════════════════════════════════════════════════════════════════════
+// Translates ATR into the thing Kim actually cares about — does this stock
+// move fast enough to realistically hit a target inside a swing timeframe —
+// instead of showing the raw, unexplained number. Same underlying math as
+// everywhere else ATR is used; just stated as pace, not jargon.
+function computePaceOfMove(s) {
+  if(!s.atr || !s.price) return {label:'Unknown', text:'Not enough data yet to know how fast this stock typically moves.'};
+  const atrPct = (s.atr/s.price)*100;
+  if(atrPct < 1.2) return {label:'Slow', text:`Moves slowly — typically under ${atrPct.toFixed(1)}% a day. May take longer than a normal swing window to reach a real target.`};
+  if(atrPct < 2.5) return {label:'Moderate', text:`Moves at a reasonable pace — about ${atrPct.toFixed(1)}% a day. Workable for a multi-week swing.`};
+  return {label:'Fast', text:`Moves fast — about ${atrPct.toFixed(1)}% a day. Can reach a target quickly, but expect bigger daily swings along the way.`};
+}
+// For thin-history stocks: judged from today's snapshot alone, is it worth
+// the effort of pulling 6 months of history? Returns null once a stock
+// already has enough — nothing to say at that point.
+function computeWorthTheEffort(s) {
+  const tier = computeMentorHistoryTier(s);
+  if(tier==='full') return null;
+  const trendUp = s.price!=null && s.ma50!=null && s.ma200!=null && s.price>s.ma50 && s.price>s.ma200;
+  const rz = rsiZone(s.rsi);
+  const notHot = !rz || rz.zone!=='hot';
+  const promising = trendUp && notHot;
+  return {promising, text: promising
+    ? "Worth pulling 6 months of history — today's numbers already look like a real setup."
+    : "Not worth the extra effort yet — nothing here stands out based on today's numbers alone."};
+}
+// Merges the profit target and the invalidation level into one instruction
+// instead of two separate facts you have to reconcile yourself.
+function computeExitRule(s, type) {
+  const gp = computeGamePlan(s);
+  const invalidation = computeInvalidation(s, type);
+  const target = gp.profit && gp.profit!=='—' ? gp.profit : null;
+  if(!target && invalidation.price==null) return 'Not enough data yet to define a target or exit level.';
+  const targetPart = target ? `Ride it to about ${target}` : 'No clear target yet';
+  const exitPart = invalidation.price!=null
+    ? (invalidation.isThesisReview ? `reassess the thesis if it closes below ${fmtP(invalidation.price)} on heavy volume` : `get out if it closes below ${fmtP(invalidation.price)} on above-average volume`)
+    : 'watch for a clear technical break before deciding';
+  return `${targetPart}, ${exitPart}.`;
+}
+
 function renderPriceChart(s) {
   const snaps = (s.snapshots||[]).filter(sn=>sn.price!=null);
   if(snaps.length<2) {
@@ -4214,33 +4258,60 @@ function renderOpportunityCard(s) {
 }
 
 function renderTabOverview(s) {
-  const conviction = computeConviction(s);
-  const glance = computeAtAGlance(s);
-  const levels = computeKeyLevels(s);
   const gp = computeGamePlan(s);
+  const levels = computeKeyLevels(s);
 
   const verdictCard = renderTodaysVerdictCard(s);
-  const focusCard = renderTodaysFocusCard(s, s.type);
   const investmentCard = renderInvestmentPotentialCard(s);
 
-  const glanceCell = (label, cell) => `
-    <div style="background:${C.cardHigh};border-radius:12px;padding:12px;">
-      <div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px;">${label}</div>
-      <div style="color:${cell.color};font-size:13px;font-weight:800;margin-bottom:3px;">${cell.label}</div>
-      <div style="color:${C.text};font-size:12px;line-height:1.4;">${cell.sub}</div>
+  const entryCard = `
+    <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
+      <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;">Entry</div>
+      <div style="color:${C.text};font-size:18px;font-weight:900;">${gp.buyZone}</div>
     </div>`;
 
-  const glanceGrid = `
+  const te = computeTradeEconomics(s, s.type);
+  const riskRewardCard = te.available ? `
     <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
-      <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">At A Glance</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
-        ${glanceCell('Trend', glance.trend)}
-        ${glanceCell('Momentum', glance.momentum)}
-        ${glanceCell('Volume', glance.volume)}
-        ${glanceCell('Risk Level', glance.riskLevel)}
-        ${glanceCell('Position Size', glance.posSize)}
-        ${glanceCell('Overall View', glance.overall)}
+      <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">Risk / Reward</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div style="background:${C.redDim};border-radius:12px;padding:14px;text-align:center;">
+          <div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;margin-bottom:4px;">Risk</div>
+          <div style="color:${C.red};font-size:22px;font-weight:900;">${te.riskDollar!=null?'-$'+te.riskDollar.toFixed(0):'—'}</div>
+        </div>
+        <div style="background:${C.greenDim};border-radius:12px;padding:14px;text-align:center;">
+          <div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;margin-bottom:4px;">Reward</div>
+          <div style="color:${C.green};font-size:22px;font-weight:900;">${te.rewardDollar!=null?'+$'+te.rewardDollar.toFixed(0):'—'}</div>
+        </div>
       </div>
+      <div style="color:${C.textMuted};font-size:10.5px;margin-top:10px;text-align:center;">Based on a ${fmtP(te.investment)} position${te.ratio!=null?` · ${te.ratio.toFixed(1)}:1`:''}</div>
+    </div>` : `
+    <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
+      <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;">Risk / Reward</div>
+      <div style="color:${C.textSub};font-size:12.5px;line-height:1.6;">Not enough data yet to define entry, stop, and target.</div>
+    </div>`;
+
+  const pace = computePaceOfMove(s);
+  const paceCard = `
+    <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <span style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;">Pace</span>
+        <span style="color:${pace.label==='Fast'?C.orange:pace.label==='Slow'?C.yellow:C.teal};font-size:11px;font-weight:800;">${pace.label}</span>
+      </div>
+      <div style="color:${C.textSub};font-size:12.5px;line-height:1.6;">${pace.text}</div>
+    </div>`;
+
+  const worthIt = computeWorthTheEffort(s);
+  const worthItCard = worthIt ? `
+    <div style="background:${worthIt.promising?C.tealDim:C.card};border:1px solid ${worthIt.promising?C.teal+'44':C.border};border-radius:16px;padding:18px;">
+      <div style="color:${worthIt.promising?C.teal:C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;">📥 6-Month History?</div>
+      <div style="color:${C.text};font-size:12.5px;line-height:1.6;">${worthIt.text}</div>
+    </div>` : '';
+
+  const exitRuleCard = `
+    <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
+      <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;">Exit Rule</div>
+      <div style="color:${C.text};font-size:13px;line-height:1.65;">${computeExitRule(s, s.type)}</div>
     </div>`;
 
   const levelCell = (label, lvl, color) => `
@@ -4249,7 +4320,6 @@ function renderTabOverview(s) {
       <div style="color:${C.text};font-size:14px;font-weight:800;margin-bottom:2px;">${lvl?fmtP(lvl.price):'—'}</div>
       <div style="color:${C.textMuted};font-size:10px;">${lvl?lvl.label:'Not enough data'}</div>
     </div>`;
-
   const keyLevelsCard = `
     <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
       <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">Key Levels</div>
@@ -4262,34 +4332,6 @@ function renderTabOverview(s) {
       <div style="color:${C.text};font-size:11.5px;margin-top:10px;line-height:1.5;">Approximated from moving averages and the 52-week range — not exact swing highs/lows.</div>
     </div>`;
 
-  const hasPlan = s.tranche && s.tranche.length>0;
-  const gamePlanPreview = `
-    <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-        <span style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;">Game Plan</span>
-        <button onclick="showTab('plan','${s.id}')" style="background:none;border:none;color:${C.teal};font-size:12px;font-weight:700;cursor:pointer;">View Full Plan →</button>
-      </div>
-      ${hasPlan ? `
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-        <div style="background:${C.cardHigh};border-radius:10px;padding:10px 12px;">
-          <div style="color:${C.teal};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">Best Entry Zone</div>
-          <div style="color:${C.text};font-size:13px;font-weight:800;">${gp.buyZone}</div>
-        </div>
-        <div style="background:${C.cardHigh};border-radius:10px;padding:10px 12px;">
-          <div style="color:${C.green};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">Take Profit</div>
-          <div style="color:${C.text};font-size:13px;font-weight:800;">${gp.profit}</div>
-        </div>
-        <div style="background:${C.cardHigh};border-radius:10px;padding:10px 12px;">
-          <div style="color:${C.red};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">Stop Loss</div>
-          <div style="color:${C.text};font-size:13px;font-weight:800;">${gp.stopPrice!=null?fmtP(gp.stopPrice):'—'}</div>
-        </div>
-        <div style="background:${C.cardHigh};border-radius:10px;padding:10px 12px;">
-          <div style="color:${C.yellow};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">Time Limit</div>
-          <div style="color:${C.text};font-size:13px;font-weight:800;">${s.expiry||'90 days'}</div>
-        </div>
-      </div>` : `<div style="color:${C.textSub};font-size:12px;line-height:1.6;">No buy plan set up yet. <span onclick="showTab('plan','${s.id}')" style="color:${C.teal};cursor:pointer;font-weight:700;">Build one →</span></div>`}
-    </div>`;
-
   const parsedResearch = parseResearch(s.research);
   const aiPreview = `
     <div style="background:${C.card};border-radius:16px;border:1px solid ${C.purple}33;padding:18px;">
@@ -4299,22 +4341,23 @@ function renderTabOverview(s) {
       </div>
       ${!s.research ? `<div style="color:${C.text};font-size:12px;line-height:1.6;">No qualitative research added yet. This stays separate from your score — it's here for context, not the math.</div>` :
         parsedResearch ? `
-        ${parsedResearch.catalysts?`<p style="color:${C.textSub};font-size:12px;line-height:1.6;margin:0;">${parsedResearch.catalysts}</p>`:`<p style="color:${C.text};font-size:12px;line-height:1.6;margin:0;">See the full breakdown in Analysis or Notes.</p>`}
+        ${parsedResearch.catalysts?`<p style="color:${C.textSub};font-size:12px;line-height:1.6;margin:0;">${parsedResearch.catalysts}</p>`:`<p style="color:${C.text};font-size:12px;line-height:1.6;margin:0;">See the full breakdown in Analysis or Deep Dive.</p>`}
         ` : `<p style="color:${C.textSub};font-size:12px;line-height:1.6;margin:0;">${s.research.length>220?s.research.slice(0,220)+'…':s.research}</p>`}
     </div>`;
 
   return `
     <div style="display:flex;flex-direction:column;gap:14px;">
       ${verdictCard}
-      ${focusCard}
+      ${entryCard}
+      ${riskRewardCard}
+      ${paceCard}
+      ${worthItCard}
+      ${exitRuleCard}
       ${investmentCard}
       ${renderMarketStateCard(s)}
-      ${renderOpportunityCard(s)}
-      ${glanceGrid}
-      ${renderPriceChart(s)}
       ${keyLevelsCard}
       ${aiPreview}
-      ${gamePlanPreview}
+      ${renderPriceChart(s)}
     </div>`;
 }
 
