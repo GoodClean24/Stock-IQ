@@ -5487,7 +5487,7 @@ function parseCSVDate(str) {
 }
 
 function parseCSV(text) {
-  const lines = text.trim().split('\n');
+  const lines = text.trim().split(/\r?\n/);
   if(lines.length < 2) return [];
 
   // Detect delimiter - tab or comma
@@ -5498,15 +5498,15 @@ function parseCSV(text) {
   const idx = {};
   const colMap = {
     date:      ['date','Date','DATE'],
-    close:     ['close','Close','CLOSE'],
+    close:     ['close','Close','CLOSE','Last','last','LAST'],
     open:      ['open','Open','OPEN'],
     high:      ['high','High','HIGH'],
     low:       ['low','Low','LOW'],
     vol:       ['volume','Volume','VOLUME','vol','VOL'],
-    rsi:       ['RSI_14','rsi_14','RSI','rsi'],
+    rsi:       ['RSI_14','rsi_14','RSI','rsi','RSI14','rsi14'],
     macdLine:  ['MACD_12_26_9','macd_12_26_9','MACD','macd'],
-    signalLine:['MACDs_12_26_9','macds_12_26_9','MACDs','macds','SIGNAL'],
-    atr:       ['ATRr_14','atr_14','ATR','atr','ATRr'],
+    signalLine:['MACDs_12_26_9','macds_12_26_9','MACDs','macds','SIGNAL','MACDSignal','macdsignal'],
+    atr:       ['ATRr_14','atr_14','ATR','atr','ATRr','ATR14','atr14'],
     ma50:      ['SMA_50','sma_50','SMA50','MA50'],
     ma200:     ['SMA_200','sma_200','SMA200','MA200'],
     ma20:      ['EMA_20','ema_20','EMA20','MA20'],
