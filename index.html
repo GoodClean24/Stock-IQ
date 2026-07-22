@@ -5108,7 +5108,7 @@ function renderAddStep() {
 
 // Fixed list of your named ThinkorSwim scans, offered as tap-to-toggle chips
 // alongside any previously-typed custom names.
-const FIXED_SCANNERS = ['Institutional Leaders','Momentum Breakouts','Pullback Opportunities','Early Trend Reversals','High Conviction Pullbacks'];
+const FIXED_SCANNERS = ['Swing Ready Now','Swing Watch','Long-Term Candidates'];
 
 // Reads scanner source(s) off a stock, backward-compatible with the old
 // single-string field from before multi-select existed.
@@ -5246,11 +5246,46 @@ let pendingScanRows = [];
 let pendingScanSources = [];
 let pendingScanNewCount = 0;
 
+// Proper CSV row splitter — handles quoted fields with commas inside them
+// (e.g. ThinkorSwim exports Volume as "16,251,291", not 16251291) and
+// escaped double-quotes. A naive line.split(',') shreds quoted numbers into
+// extra columns and silently misaligns every field after them.
+function splitCSVLine(line, delim) {
+  const out = [];
+  let cur = '', inQuotes = false;
+  for(let i=0;i<line.length;i++) {
+    const ch = line[i];
+    if(inQuotes) {
+      if(ch==='"') { if(line[i+1]==='"') { cur+='"'; i++; } else inQuotes=false; }
+      else cur += ch;
+    } else {
+      if(ch==='"') inQuotes = true;
+      else if(ch===delim) { out.push(cur); cur=''; }
+      else cur += ch;
+    }
+  }
+  out.push(cur);
+  return out.map(c=>c.trim());
+}
 function parseScanCSV(text) {
-  const lines = text.trim().split('\n');
-  if(lines.length < 2) return [];
-  const delim = lines[0].includes('\t') ? '\t' : ',';
-  const headers = lines[0].split(delim).map(h=>h.trim());
+  text = text.replace(/^\uFEFF/, ''); // strip UTF-8 BOM some exports include
+  const rawLines = text.split(/\r?\n/);
+
+  // Real ThinkorSwim exports often lead with a report title, a blank line,
+  // and a "Results" label before the actual header row — scan forward to
+  // find the line that actually contains a Symbol/Ticker column, instead
+  // of assuming line 1 is always the header.
+  let headerLineIdx = -1, delim = ',';
+  for(let i=0;i<rawLines.length;i++) {
+    const line = rawLines[i].trim();
+    if(!line) continue;
+    const testDelim = line.includes('\t') ? '\t' : ',';
+    const cols = splitCSVLine(line, testDelim);
+    if(cols.some(c=>/^symbol$/i.test(c) || /^ticker$/i.test(c))) { headerLineIdx = i; delim = testDelim; break; }
+  }
+  if(headerLineIdx===-1) return [];
+
+  const headers = splitCSVLine(rawLines[headerLineIdx], delim);
   const colMap = {
     ticker:     ['Symbol','symbol','Ticker','ticker'],
     sector:     ['Sector','sector'],
@@ -5276,13 +5311,16 @@ function parseScanCSV(text) {
   if(idx.ticker===undefined) return [];
 
   const rows = [];
-  for(let i=1;i<lines.length;i++) {
-    const line = lines[i].trim();
+  for(let i=headerLineIdx+1;i<rawLines.length;i++) {
+    const line = rawLines[i].trim();
     if(!line) continue;
-    const cols = line.split(delim).map(c=>c.trim());
+    const cols = splitCSVLine(line, delim);
     const ticker = cols[idx.ticker];
     if(!ticker) continue;
-    const num = k => idx[k]!==undefined && cols[idx[k]]!=='' ? parseFloat(cols[idx[k]]) : null;
+    // Strip thousands-separator commas from quoted numeric fields (e.g.
+    // "16,251,291") before parsing — splitCSVLine already unquoted them,
+    // but the comma separators inside the number are still there.
+    const num = k => idx[k]!==undefined && cols[idx[k]]!=='' ? parseFloat(String(cols[idx[k]]).replace(/,/g,'')) : null;
     const str = k => idx[k]!==undefined && cols[idx[k]]!=='' ? cols[idx[k]] : null;
     rows.push({
       ticker: ticker.toUpperCase(),
