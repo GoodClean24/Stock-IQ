@@ -1138,8 +1138,7 @@ function renderDetail(s) {
     <!-- Tabs -->
     <div style="display:flex;background:${C.card};border-bottom:1px solid ${C.border};overflow-x:auto;">
       <button id="tab-btn-overview" onclick="showTab('overview','${s.id}')" style="flex:1;padding:14px 0;background:none;border:none;cursor:pointer;font-size:13px;font-weight:700;color:${C.text};border-bottom:2px solid ${C.text};white-space:nowrap;">Overview</button>
-      <button id="tab-btn-analysis" onclick="showTab('analysis','${s.id}')" style="flex:1;padding:14px 0;background:none;border:none;cursor:pointer;font-size:13px;font-weight:700;color:${C.textSub};border-bottom:2px solid transparent;white-space:nowrap;">Analysis</button>
-      <button id="tab-btn-plan" onclick="showTab('plan','${s.id}')" style="flex:1;padding:14px 0;background:none;border:none;cursor:pointer;font-size:13px;font-weight:700;color:${C.textSub};border-bottom:2px solid transparent;white-space:nowrap;">Game Plan</button>
+      <button id="tab-btn-plan" onclick="showTab('plan','${s.id}')" style="flex:1;padding:14px 0;background:none;border:none;cursor:pointer;font-size:13px;font-weight:700;color:${C.textSub};border-bottom:2px solid transparent;white-space:nowrap;">Plan</button>
       <button id="tab-btn-notes" onclick="showTab('notes','${s.id}')" style="flex:1;padding:14px 0;background:none;border:none;cursor:pointer;font-size:13px;font-weight:700;color:${C.textSub};border-bottom:2px solid transparent;white-space:nowrap;">Deep Dive</button>
     </div>
     <div id="tab-content" style="padding:20px;">
@@ -1150,11 +1149,11 @@ function renderDetail(s) {
 function showTab(tab, id) {
   const s = stocks.find(x=>String(x.id)===String(id));
   if(!s) return;
-  ['overview','plan','analysis','notes'].forEach(t => {
+  ['overview','plan','notes'].forEach(t => {
     const btn = document.getElementById(`tab-btn-${t}`);
     if(btn) { btn.style.color = t===tab?C.text:C.textSub; btn.style.borderBottom = t===tab?`2px solid ${C.text}`:'2px solid transparent'; }
   });
-  const map = {overview:renderTabOverview,plan:renderTabPlan,analysis:renderTabAnalysis,notes:renderTabNotes};
+  const map = {overview:renderTabOverview,plan:renderTabPlan,notes:renderTabNotes};
   const el = document.getElementById('tab-content');
   if(el&&map[tab]) el.innerHTML = map[tab](s);
 }
@@ -1363,6 +1362,49 @@ function renderTabPlan(s) {
   const readinessObj = isHolding ? null : computeBuyReadiness(s, s.type);
   const managingChecklist = isHolding ? computeManagingChecklist(s, s.type) : null;
 
+  // Folded in from the old Analysis tab — the only genuinely unique content
+  // there (everything else duplicated what Overview or this tab already
+  // said). Gated the same honest way Analysis used to gate it: no fake
+  // evidence when there isn't enough history to back it.
+  const ms = conviction.ms;
+  const hasFullEvidence = ms.state!=='Insufficient Data' && conviction.level!=='Insufficient Evidence';
+  let fullEvidenceCard = '';
+  if(hasFullEvidence) {
+    const trendEv = conviction.trendEv, momentumEv = conviction.momentumEv, volumeEv = conviction.volumeEv, volatilityEv = computeVolatilityEvidence(s);
+    const evidenceRow = (label, ev) => `
+      <div style="border-bottom:1px solid ${C.border};padding:12px 0;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">
+          <span style="color:${C.text};font-size:13px;font-weight:800;">${label}</span>
+          <span style="color:${EVIDENCE_VERDICT_COLOR[ev.verdict]||C.textMuted};font-size:11.5px;font-weight:800;">${ev.verdict}</span>
+        </div>
+        <div style="color:${C.textSub};font-size:12.5px;line-height:1.65;">${ev.teach}</div>
+      </div>`;
+    fullEvidenceCard = `
+      <details style="background:${C.card};border-radius:16px;border:1px solid ${C.border};overflow:hidden;">
+        <summary style="padding:16px 18px;color:${C.teal};font-size:12.5px;font-weight:800;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;">
+          <span>📊 See Full Evidence</span><span style="color:${C.textMuted};font-size:11px;font-weight:600;">Why the trend, momentum, volume, and volatility reads say what they say</span>
+        </summary>
+        <div style="padding:0 18px 18px;display:flex;flex-direction:column;gap:14px;">
+          <div style="background:${C.cardHigh};border-radius:16px;padding:18px;">
+            <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:4px;">Build the Case</div>
+            <div style="color:${C.text};font-size:12.5px;line-height:1.5;margin-bottom:10px;">Why the evidence points where it does — not just what the numbers say.</div>
+            ${evidenceRow('Trend', trendEv)}
+            ${evidenceRow('Momentum', momentumEv)}
+            ${evidenceRow('Volume', volumeEv)}
+            ${evidenceRow('Volatility', volatilityEv)}
+          </div>
+          <div style="background:${C.cardHigh};border-radius:16px;padding:18px;">
+            <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">Evidence Table</div>
+            ${renderEvidenceTableRow('Trend', trendEv.verdict, trendEv.teach.split('.')[0]+'.')}
+            ${renderEvidenceTableRow('Momentum', momentumEv.verdict, momentumEv.teach.split('.')[0]+'.')}
+            ${renderEvidenceTableRow('Volume', volumeEv.verdict, volumeEv.teach.split('.')[0]+'.')}
+            ${renderEvidenceTableRow('Volatility', volatilityEv.verdict, volatilityEv.teach.split('.')[0]+'.')}
+            ${renderEvidenceTableRow('Structure', mapStateToStrength(ms.state), ms.state)}
+          </div>
+        </div>
+      </details>`;
+  }
+
   const missionCard = `
     <div style="background:${C.card};border-radius:16px;border:2px solid ${stageMeta.color}44;padding:18px;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
@@ -1382,7 +1424,6 @@ function renderTabPlan(s) {
       ${renderRequiredSupportingChecklist(readinessObj.checks)}
     </div>`;
 
-  const tradeEconomicsCard = renderTradeEconomicsCard(s, s.type);
 
   const invalidationCard = `
     <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
@@ -1466,14 +1507,14 @@ function renderTabPlan(s) {
     <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;">
       <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">Why "${s.type}"?</div>
       ${suggestion.confident && suggestion.label===s.type ? `
-        <p style="color:${C.textSub};font-size:12px;line-height:1.6;margin:0 0 12px;">Current data still backs this up: ${suggestion.reason}</p>
+        <p style="color:${C.text};font-size:12px;line-height:1.6;margin:0 0 12px;">Current data still backs this up: ${suggestion.reason}</p>
       ` : suggestion.confident && suggestion.label!==s.type ? `
         <div style="background:${C.yellow}14;border:1px solid ${C.yellow}44;border-radius:10px;padding:10px 12px;margin-bottom:12px;">
           <div style="color:${C.yellow};font-size:11px;font-weight:800;margin-bottom:3px;">⚠ Drifted since you classified this</div>
-          <p style="color:${C.textSub};font-size:12px;line-height:1.6;margin:0;">You picked ${s.type}, but current data now suggests <b>${suggestion.label}</b>: ${suggestion.reason} Worth reassessing.</p>
+          <p style="color:${C.text};font-size:12px;line-height:1.6;margin:0;">You picked ${s.type}, but current data now suggests <b>${suggestion.label}</b>: ${suggestion.reason} Worth reassessing.</p>
         </div>
       ` : `
-        <p style="color:${C.textSub};font-size:12px;line-height:1.6;margin:0 0 12px;">${suggestion.reason}</p>
+        <p style="color:${C.text};font-size:12px;line-height:1.6;margin:0 0 12px;">${suggestion.reason}</p>
       `}
       <div style="background:${C.cardHigh};border-radius:10px;padding:12px 14px;">
         <div style="color:${C.teal};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px;">Plan of Attack</div>
@@ -1499,14 +1540,14 @@ function renderTabPlan(s) {
         </div>
         ${tranches}
       </div>
-      <div style="color:${C.textMuted};font-size:11.5px;line-height:1.5;">${gp.buyZone} — this is where the setup says buyers have the edge, not a guess.</div>
-      <div style="color:${C.teal};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;">Step 2 — Size It</div>
-      ${tradeEconomicsCard}
-      <div style="color:${C.teal};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;">Step 3 — Manage It While You Wait or Hold</div>
+      <div style="color:${C.text};font-size:11.5px;line-height:1.5;">${gp.buyZone} — this is where the setup says buyers have the edge, not a guess.</div>
+      <div style="color:${C.teal};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;">Step 2 — While You Wait or Hold</div>
+      <div style="color:${C.textMuted};font-size:11px;line-height:1.5;margin-top:-6px;margin-bottom:2px;">${isHolding?'What would actually justify exiting — not just any red day.':'What has to be true before this becomes a real trade, not just a candidate.'}</div>
       ${checklistCard}
       ${exitCheckCard}
       ${concernTriggerCards}
-      <div style="color:${C.teal};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;">Step 4 — Get Out</div>
+      ${fullEvidenceCard}
+      <div style="color:${C.teal};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;">Step 3 — Get Out</div>
       ${gp.profit&&gp.profit!=='—'?`
       <div style="background:${C.greenDim};border-radius:16px;border:1px solid ${C.green}33;padding:16px;display:flex;align-items:center;gap:14px;">
         <span style="font-size:26px;">🎯</span>
@@ -3618,7 +3659,7 @@ function showPositionTypeSheet(id) {
     ${ex.whyFits.map(w=>`<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:6px;"><span style="color:${C.green};font-size:12px;">✓</span><span style="color:${C.textSub};font-size:12.5px;line-height:1.5;">${w}</span></div>`).join('')}
     <div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin:16px 0 8px;">Why not the others</div>
     ${Object.keys(ex.whyNotOthers).map(t=>`<div style="margin-bottom:8px;"><div style="color:${C.text};font-size:12px;font-weight:700;margin-bottom:2px;">${t}</div><div style="color:${C.textSub};font-size:12px;line-height:1.5;">${ex.whyNotOthers[t]}</div></div>`).join('')}
-    <div style="color:${C.textMuted};font-size:11px;line-height:1.5;margin-top:12px;padding-top:12px;border-top:1px solid ${C.border};">StockIQ recommends — it never changes your selected strategy automatically. Use "Needs Strategy" reclassify flow if you want to switch.</div>`);
+    <div style="color:${C.text};font-size:11px;line-height:1.5;margin-top:12px;padding-top:12px;border-top:1px solid ${C.border};">StockIQ recommends — it never changes your selected strategy automatically. Use "Needs Strategy" reclassify flow if you want to switch.</div>`);
 }
 
 function showEntryQualitySheet(id) {
@@ -3779,9 +3820,9 @@ function renderTodaysFocusCard(s, type) {
       ${focus.ignore.length?`
       <div style="margin-bottom:10px;">
         <div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;margin-bottom:3px;">Ignore</div>
-        ${focus.ignore.map(i=>`<div style="color:${C.textSub};font-size:12.5px;line-height:1.5;">${i}</div>`).join('')}
+        ${focus.ignore.map(i=>`<div style="color:${C.text};font-size:12.5px;line-height:1.5;">${i}</div>`).join('')}
       </div>`:''}
-      <div style="color:${C.textSub};font-size:12.5px;line-height:1.6;padding-top:10px;border-top:1px solid ${C.border};">${focus.why}</div>
+      <div style="color:${C.text};font-size:12.5px;line-height:1.6;padding-top:10px;border-top:1px solid ${C.border};">${focus.why}</div>
       ${renderSupportingDataBox(s)}
     </div>`;
 }
@@ -3830,7 +3871,7 @@ function renderInvestmentPotentialCard(s) {
   return `
     <div style="background:${C.purpleDim};border:1px solid ${C.purple}44;border-radius:16px;padding:18px;">
       <div style="color:${C.purple};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:10px;">⭐ Core Long-Term Candidate</div>
-      <div style="color:${C.textMuted};font-size:11px;line-height:1.5;margin-bottom:10px;">Your research indicates this meets the characteristics of a core long-term holding:</div>
+      <div style="color:${C.text};font-size:11px;line-height:1.5;margin-bottom:10px;">Your research indicates this meets the characteristics of a core long-term holding:</div>
       ${ip.reasons.map(r=>`<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:6px;"><span style="color:${C.purple};font-size:12px;">✓</span><span style="color:${C.text};font-size:12.5px;line-height:1.5;">${r}</span></div>`).join('')}
       <div style="color:${C.textSub};font-size:12.5px;line-height:1.6;margin-top:10px;padding-top:10px;border-top:1px solid ${C.purple}33;">${ip.action}</div>
     </div>`;
@@ -3855,8 +3896,8 @@ function renderTodaysVerdictCard(s) {
         <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;"><span style="font-size:15px;">${meta.icon}</span><span style="color:${meta.color};font-size:12.5px;font-weight:800;">${opp.status}</span></div>
         ${renderConvictionBadge(conviction.level,'sm')}
       </div>
-      <div style="color:${C.textMuted};font-size:11px;line-height:1.6;margin-top:8px;">${conviction.level} Conviction: ${conviction.reason}</div>
-      <div style="color:${C.textMuted};font-size:11.5px;line-height:1.6;margin-top:8px;">${computeWhyThisStock(s)}</div>
+      <div style="color:${C.text};font-size:11px;line-height:1.6;margin-top:8px;">${conviction.level} Conviction: ${conviction.reason}</div>
+      <div style="color:${C.text};font-size:11.5px;line-height:1.6;margin-top:8px;">${computeWhyThisStock(s)}</div>
     </div>`;
 }
 
@@ -4341,7 +4382,7 @@ function renderTabOverview(s) {
       </div>
       ${!s.research ? `<div style="color:${C.text};font-size:12px;line-height:1.6;">No qualitative research added yet. This stays separate from your score — it's here for context, not the math.</div>` :
         parsedResearch ? `
-        ${parsedResearch.catalysts?`<p style="color:${C.textSub};font-size:12px;line-height:1.6;margin:0;">${parsedResearch.catalysts}</p>`:`<p style="color:${C.text};font-size:12px;line-height:1.6;margin:0;">See the full breakdown in Analysis or Deep Dive.</p>`}
+        ${parsedResearch.catalysts?`<p style="color:${C.text};font-size:12px;line-height:1.6;margin:0;">${parsedResearch.catalysts}</p>`:`<p style="color:${C.text};font-size:12px;line-height:1.6;margin:0;">See the full breakdown in Analysis or Deep Dive.</p>`}
         ` : `<p style="color:${C.textSub};font-size:12px;line-height:1.6;margin:0;">${s.research.length>220?s.research.slice(0,220)+'…':s.research}</p>`}
     </div>`;
 
@@ -4542,7 +4583,7 @@ function renderTabNotes(s) {
         </div>
         <div style="color:${C.text};font-size:12.5px;line-height:1.6;margin-bottom:12px;">Step 1: copy a prompt pre-filled with this stock's real numbers. Step 2: paste it into Claude (or ChatGPT) and let it research news, earnings, and analyst sentiment. Step 3: paste the answer back below — it saves automatically as you paste, no submit needed. StockIQ shows it alongside your score, but never factors it into the math — that stays pure and auditable.</div>
         <button id="copy-prompt-btn" onclick="copyAIPrompt('${s.id}')" style="width:100%;padding:12px;background:${C.purple}22;color:${C.purple};border:1px solid ${C.purple}66;border-radius:10px;font-size:13px;font-weight:800;cursor:pointer;margin-bottom:10px;">📋 Copy Trade Research Prompt</button>
-        <div style="color:${C.textMuted};font-size:11px;line-height:1.5;margin-bottom:8px;">Different question, same paste box below: is this a business worth 5-10 years, regardless of today's chart?</div>
+        <div style="color:${C.text};font-size:11px;line-height:1.5;margin-bottom:8px;">Different question, same paste box below: is this a business worth 5-10 years, regardless of today's chart?</div>
         <button id="copy-investment-prompt-btn" onclick="copyInvestmentPrompt('${s.id}')" style="width:100%;padding:12px;background:${C.tealDim};color:${C.teal};border:1px solid ${C.teal}66;border-radius:10px;font-size:13px;font-weight:800;cursor:pointer;margin-bottom:12px;">🏛️ Copy Investment Research Prompt</button>
         <div style="display:flex;justify-content:flex-end;margin-bottom:6px;">
           <span id="research-save-flag" style="color:${C.green};font-size:10px;font-weight:800;opacity:0;transition:opacity 0.3s;">✓ Saved</span>
