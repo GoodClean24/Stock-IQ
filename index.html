@@ -907,6 +907,7 @@ function renderStockCard(s, rank) {
   const needsReclass = needsReclassify(s);
   const opp = computeOpportunityStatus(s, s.type);
   const oppMeta = OPPORTUNITY_STATUS_META[opp.status];
+  const breakout = compute52WHighBreakout(s);
 
   return `
     <div class="fade-in" style="background:${C.card};border-radius:20px;border:1px solid ${C.border};padding:16px;cursor:pointer;position:relative;overflow:hidden;opacity:${s.archived?'0.6':'1'};" onclick="openDetail('${s.id}')">
@@ -925,6 +926,7 @@ function renderStockCard(s, rank) {
             <div style="display:flex;gap:5px;margin-top:3px;flex-wrap:wrap;">
               <span style="display:inline-block;background:${tc.bg};color:${tc.fg};font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;">${needsReclass?'Needs Strategy':s.type||'—'}</span>
               <span style="display:inline-block;background:${oppMeta.color}22;color:${oppMeta.color};font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;">${oppMeta.icon} ${opp.status}</span>
+              ${breakout.badge?`<span onclick="event.stopPropagation();showBreakoutSheet('${s.id}')" style="display:inline-block;background:${C.purple}22;color:${C.purple};font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;cursor:pointer;">🚀 52W High Breakout ${breakout.badge==='confirmed'?'Confirmed':'Watch'}</span>`:''}
             </div>
           </div>
         </div>
@@ -2097,6 +2099,83 @@ function computeStructureProxy(s) {
   return {lowerLow, higherHigh, higherLow, lowerHigh, sample:snaps.length};
 }
 
+// ── 52W HIGH BREAKOUT DETECTOR ───────────────────────────────────────────────
+// Deliberately narrow, by design decision with Kim: only detects breakouts
+// through THIS stock's own 52-week high — not a general base/swing-high
+// breakout engine, which needs real swing-high detection (not built). A
+// stock coiling under a lower prior swing high will never trigger this,
+// and that's intentional, not a bug — see handoff notes.
+//
+// Two badges, not one, because "coiling near the high" and "actually broke
+// out today" are different facts:
+//   Watch     — trend up, within 2% below the 52-week high, ATR contracting.
+//               Volume does NOT need to be elevated yet.
+//   Confirmed — trend up, price is in the near/above-high zone (2% below
+//               through 3% above), AND either made a fresh 20-day-high
+//               close or already cleared the 52-week high, on above-average
+//               volume, with ATR having been contracting beforehand.
+// Note: the trigger (new 20-day high) is deliberately gated to the
+// near/above-high zone — a stock making a fresh 20-day high while still
+// deep below its 52-week high is a different, unrelated setup and must not
+// get labeled a "52W High Breakout." Small but real correction to the
+// literal spec, flagged to Kim.
+//
+// Insufficient history is never treated as a failed condition — each
+// condition is either met, not met, or "not enough history to confirm."
+function compute20DayHighClose(s) {
+  const snaps = (s.snapshots||[]).filter(sn=>sn.price!=null).sort((a,b)=>new Date(a.date)-new Date(b.date));
+  if(snaps.length<20) return null;
+  const last20 = snaps.slice(-20).map(sn=>sn.price);
+  const currentClose = s.price!=null ? s.price : last20[last20.length-1];
+  return currentClose >= Math.max(...last20);
+}
+
+function compute52WHighBreakout(s) {
+  const hasTrendData = s.ma50!=null && s.ma200!=null && s.price!=null;
+  const trendUp = hasTrendData ? (s.price>s.ma50 && s.price>s.ma200) : null;
+
+  const pctFromHi52 = (s.hi52 && s.price) ? ((s.price - s.hi52)/s.hi52)*100 : null; // negative = below high
+  const nearHigh = pctFromHi52!=null ? (pctFromHi52>=-2 && pctFromHi52<=0) : null;
+  const aboveHigh = pctFromHi52!=null ? (pctFromHi52>0) : null;
+  const nearOrAboveZone = pctFromHi52!=null ? (pctFromHi52>=-2 && pctFromHi52<=3) : null;
+  const extensionOK = pctFromHi52!=null ? (pctFromHi52<=3) : null;
+
+  const atrContracting = computeATRDecline(s); // true/false/null — reuses existing helper
+  const new20DayHigh = compute20DayHighClose(s); // true/false/null
+
+  const volRatio = (s.vol!=null && s.avgvol) ? s.vol/s.avgvol : null;
+  const volAboveAvg = volRatio!=null ? volRatio>1 : null;
+
+  const triggerKnown = (new20DayHigh!=null || aboveHigh!=null) && nearOrAboveZone!=null;
+  const trigger = nearOrAboveZone===true && (new20DayHigh===true || aboveHigh===true);
+
+  const confirmedConditions = [
+    {label:'Price above the 50-day and 200-day averages', met: trendUp===true, evaluable: trendUp!=null},
+    {label:'New 20-day-high close, or already cleared the 52-week high', met: trigger===true, evaluable: triggerKnown},
+    {label:'No more than 3% extended above the 52-week high', met: !aboveHigh || extensionOK===true, evaluable: !aboveHigh || extensionOK!=null},
+    {label:'Volume above the 20-day average', met: volAboveAvg===true, evaluable: volAboveAvg!=null},
+    {label:'ATR had been contracting beforehand', met: atrContracting===true, evaluable: atrContracting!=null},
+  ];
+  const confirmedEvaluable = confirmedConditions.filter(c=>c.evaluable);
+  const confirmedInsufficient = confirmedEvaluable.length < confirmedConditions.length;
+  const confirmed = !confirmedInsufficient && confirmedConditions.every(c=>c.met);
+
+  const watchConditions = [
+    {label:'Price above the 50-day and 200-day averages', met: trendUp===true, evaluable: trendUp!=null},
+    {label:'Within 2% of the 52-week high, not yet through it', met: nearHigh===true, evaluable: nearHigh!=null},
+    {label:'ATR contracting', met: atrContracting===true, evaluable: atrContracting!=null},
+  ];
+  const watchEvaluable = watchConditions.filter(c=>c.evaluable);
+  const watchInsufficient = watchEvaluable.length < watchConditions.length;
+  const watch = !watchInsufficient && watchConditions.every(c=>c.met);
+
+  let badge = null;
+  if(confirmed) badge = 'confirmed';
+  else if(watch) badge = 'watch';
+
+  return {badge, pctFromHi52, confirmed, confirmedConditions, confirmedInsufficient, watch, watchConditions, watchInsufficient};
+}
+
 // Shared Consolidation checklist — reachable from either the "trend intact"
 // or "trend not intact" branch of the tree, since balance between buyers
 // and sellers doesn't care which side of the 200 SMA price sits on.
@@ -3233,9 +3312,25 @@ function computeWatchTomorrow(s, stage, type) {
 // Single source of truth for the profit target used anywhere reward:risk
 // math is needed — Section 4's Buy Readiness gate used to recompute this
 // same 52-week-high-or-3x-ATR logic inline; now both call this.
+// This used to cap the target at the 52-week high for every stock that
+// hadn't reached it yet, full stop — which correctly modeled a real ceiling
+// but wrongly capped a genuine breakout at almost zero upside too, since
+// "about to clear the high" and "stuck under it" looked identical to this
+// function. Now: only treat the 52-week high as the ceiling when either
+// there's a real, closer resistance level in the way, OR the 52W High
+// Breakout detector doesn't independently agree this looks like a setup.
+// When it does agree, fall through to the same measured-move math (3x ATR
+// past entry) already used for stocks with no 52-week-high ceiling at all —
+// no new formula invented, reusing what's already here.
 function computeTargetPrice(s, entryRef) {
   if(entryRef==null) return null;
-  if(s.hi52 && entryRef<s.hi52) return s.hi52;
+  if(s.hi52 && entryRef<s.hi52) {
+    const levels = computeKeyLevels(s);
+    const onlyCeilingIsThe52WHigh = !!(levels.resistance && levels.resistance.label==='52-week high');
+    const breakoutSignal = compute52WHighBreakout(s).badge;
+    const treatAsLaunchPad = onlyCeilingIsThe52WHigh && breakoutSignal && s.atr;
+    if(!treatAsLaunchPad) return s.hi52;
+  }
   if(s.atr) return entryRef + s.atr*3;
   return null;
 }
@@ -3319,8 +3414,16 @@ function computeOpportunityStatus(s, type) {
   const extendedThreshold = type==='Swing Trade' ? 10 : type==='Position Trade' ? 15 : null;
   const isExtended = extendedThreshold!=null && extendedPct!=null && extendedPct>extendedThreshold;
 
+  // A stock whose nearest resistance IS its own 52-week high, with nothing
+  // above it, isn't hitting a real ceiling — it's sitting at a potential
+  // launch pad. Only treat it that way when the 52W High Breakout detector
+  // independently agrees (trend up, ATR contracting, etc.) — being merely
+  // "close to the high" on its own is not enough, or every stalling stock
+  // near resistance would get waved through as a launch pad too.
+  const keyLevels = computeKeyLevels(s);
+  const nearResistanceIsLaunchPad = !!(keyLevels.resistance && keyLevels.resistance.label==='52-week high' && compute52WHighBreakout(s).badge);
   const tooCloseThreshold = type==='Swing Trade' ? 5 : type==='Position Trade' ? 8 : null;
-  const tooCloseToResistance = tooCloseThreshold!=null && eq.upsideToResistancePct!=null && eq.upsideToResistancePct < tooCloseThreshold;
+  const tooCloseToResistance = tooCloseThreshold!=null && eq.upsideToResistancePct!=null && eq.upsideToResistancePct < tooCloseThreshold && !nearResistanceIsLaunchPad;
 
   const poorRR = eq.rr && eq.rr.ratio!=null && eq.rr.ratio < 1.5;
   const trendDeteriorating = ['Trend Weakening','Confirmed Breakdown'].includes(ms.state);
@@ -3586,6 +3689,25 @@ function pillSheetHeader(title, color) {
       <span style="color:${color};font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;">${title}</span>
       <button onclick="closeAllOverlays()" style="background:none;border:none;color:${C.textMuted};font-size:20px;cursor:pointer;">✕</button>
     </div>`;
+}
+
+function showBreakoutSheet(id) {
+  const s = stocks.find(x=>String(x.id)===String(id));
+  if(!s) return;
+  const b = compute52WHighBreakout(s);
+  const isConfirmed = b.badge==='confirmed';
+  const title = isConfirmed ? '52W High Breakout Confirmed' : b.badge==='watch' ? '52W High Breakout Watch' : 'Not a Breakout Setup Right Now';
+  const conditions = isConfirmed ? b.confirmedConditions : b.watchConditions;
+  const rows = conditions.map(c=>`
+    <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid ${C.border};">
+      <span style="font-size:15px;">${!c.evaluable?'⏳':c.met?'✅':'❌'}</span>
+      <span style="color:${!c.evaluable?C.textMuted:C.text};font-size:13px;">${c.label}${!c.evaluable?' — not enough history to confirm':''}</span>
+    </div>`).join('');
+  showSheet(`
+    ${pillSheetHeader('Breakout Signal', C.purple)}
+    <div style="color:${C.text};font-size:18px;font-weight:900;margin-bottom:6px;">${title}</div>
+    <div style="color:${C.textMuted};font-size:12px;line-height:1.6;margin-bottom:16px;">Only detects a breakout through ${s.ticker}'s own 52-week high — not a general base or swing-high breakout. Those still need a manual look.</div>
+    ${rows}`);
 }
 
 function showOpportunitySheet(id) {
