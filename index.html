@@ -1456,7 +1456,8 @@ function renderTabPlan(s) {
       <div style="margin-left:20px;margin-top:10px;background:${C.cardHigh};border-radius:10px;padding:10px 14px;display:flex;justify-content:space-between;">
         <div><div style="color:${C.textMuted};font-size:10px;margin-bottom:2px;">Entry</div><div style="color:${C.text};font-size:13px;font-weight:700;">${fmtP(t.entryPrice)} × ${t.shares} shares</div></div>
         <div style="text-align:right;"><div style="color:${C.textMuted};font-size:10px;margin-bottom:2px;">Live P&L</div><div style="color:${tGl>=0?C.green:C.red};font-size:13px;font-weight:900;">${tGl>=0?'+':''}${tGl?.toFixed(2)}</div></div>
-      </div>` : '';
+      </div>
+      <div style="margin-left:20px;margin-top:6px;"><button onclick="confirmClearBuy('${s.id}','${t.label}')" style="background:none;border:none;color:${C.textSub};font-size:11px;font-weight:700;cursor:pointer;padding:2px 0;text-decoration:underline;">Clear this buy</button></div>` : '';
 
     const soldBlock = hasSold ? `
       <div style="margin-left:20px;margin-top:10px;background:${realizedGl>=0?C.greenDim:C.redDim};border-radius:10px;padding:10px 14px;border:1px solid ${realizedGl>=0?C.green:C.red}33;">
@@ -1465,7 +1466,8 @@ function renderTabPlan(s) {
           <span style="color:${realizedGl>=0?C.green:C.red};font-size:13px;font-weight:900;">${realizedGl>=0?'+':''}${realizedGl?.toFixed(2)} realized</span>
         </div>
         <div style="color:${C.textMuted};font-size:11px;">Bought at ${fmtP(t.entryPrice)} · Sold ${t.soldShares} shares</div>
-      </div>` : '';
+      </div>
+      <div style="margin-left:20px;margin-top:6px;"><button onclick="confirmClearBuy('${s.id}','${t.label}')" style="background:none;border:none;color:${C.textSub};font-size:11px;font-weight:700;cursor:pointer;padding:2px 0;text-decoration:underline;">Clear this buy</button></div>` : '';
 
     return `
       <div style="padding:16px 0;border-bottom:${i<s.tranche.length-1?`1px solid ${C.border}`:'none'};">
@@ -3262,13 +3264,14 @@ function computeStockProfile(s) {
     gapRisk = counted ? (gapsThrough/counted*100) : null;
   }
 
-  // Character label — volatility only. Never a quality or ranking judgment.
+  // Character label — based only on how much it moves. Never a judgment
+  // about whether the stock is a good buy.
   let character = 'Unclassified', characterNote = '';
   if(atrPct!=null && minStopPct!=null) {
-    if(atrPct < 2) { character = 'Slow Mover'; characterNote = 'Small daily range. May not travel far enough in 5-10 days to be worth the risk.'; }
-    else if(atrPct < 4) { character = 'Smooth Swinger'; characterNote = 'Moderate, steady range. Stops can sit reasonably tight.'; }
-    else if(atrPct < 7) { character = 'Fast Mover'; characterNote = 'Big daily range. Needs a wide stop, so size down to keep dollar risk the same.'; }
-    else { character = 'Wild'; characterNote = 'Very large daily range. Wide stop required; position size gets small fast.'; }
+    if(atrPct < 2) { character = 'Slow Mover'; characterNote = 'Small daily moves.'; }
+    else if(atrPct < 4) { character = 'Steady Mover'; characterNote = 'Moderate daily moves.'; }
+    else if(atrPct < 7) { character = 'Big Mover'; characterNote = 'Large daily moves.'; }
+    else { character = 'Very Big Mover'; characterNote = 'Very large daily moves.'; }
   }
 
   return {ok:true, rows:snaps.length, atrPct, normalDip, normalRunup, minStopPct,
@@ -3800,8 +3803,8 @@ function showProfileSheet(id) {
     showSheet(`
       ${pillSheetHeader('Stock Profile', C.blue)}
       <div style="color:${C.text};font-size:16px;font-weight:800;margin-bottom:8px;">Not enough history yet</div>
-      <div style="color:${C.textSub};font-size:13px;line-height:1.7;">This stock has ${p.rows} day${p.rows===1?'':'s'} of price history. The profile needs at least ${p.need} to measure how ${s.ticker} normally behaves.</div>
-      <div style="color:${C.textSub};font-size:13px;line-height:1.7;margin-top:12px;">Import a 1-year daily export for ${s.ticker} and this fills in immediately. StockIQ won't guess at these numbers from a generic default.</div>`);
+      <div style="color:${C.textSub};font-size:13px;line-height:1.8;">StockIQ has ${p.rows} day${p.rows===1?'':'s'} of prices for ${s.ticker}. It needs about ${p.need} to learn how this one normally behaves.</div>
+      <div style="color:${C.textSub};font-size:13px;line-height:1.8;margin-top:12px;">Import a year of daily history for ${s.ticker} and this fills in right away. StockIQ won't make up numbers it doesn't have.</div>`);
     return;
   }
   const sz = computeProfileSizing(s);
@@ -3814,31 +3817,46 @@ function showProfileSheet(id) {
       ${note?`<div style="color:${C.textSub};font-size:11px;line-height:1.6;margin-top:4px;">${note}</div>`:''}
     </div>`;
 
+  const plainCharacter = {
+    'Slow Mover': `${s.ticker} moves in small steps. It may not travel far enough in a week or two to be worth the risk.`,
+    'Steady Mover': `${s.ticker} moves at a steady, manageable pace. You don't need to give it much room.`,
+    'Big Mover': `${s.ticker} swings hard. You have to give it room, which means buying fewer shares to keep your risk the same.`,
+    'Very Big Mover': `${s.ticker} swings very hard. It needs a lot of room, so your share count gets small fast.`,
+  }[p.character] || '';
+
   showSheet(`
     ${pillSheetHeader('Stock Profile', C.blue)}
     <div style="color:${C.text};font-size:18px;font-weight:900;margin-bottom:4px;">${s.ticker} — ${p.character}</div>
-    <div style="color:${C.textSub};font-size:12px;line-height:1.6;margin-bottom:16px;">${p.characterNote}</div>
+    <div style="color:${C.textSub};font-size:13px;line-height:1.7;margin-bottom:18px;">${plainCharacter}</div>
 
-    ${row('Typical daily range (ATR)', p.atrPct!=null?p.atrPct.toFixed(1)+'% of price':'—', 'How much it moves on an average day.')}
-    ${row('Normal 10-day dip', p.normalDip!=null?p.normalDip.toFixed(1)+'%':'—', 'The everyday noise you have to sit through. Half of all 10-day stretches dip at least this much.')}
-    ${row('Normal 10-day run-up', p.normalRunup!=null?p.normalRunup.toFixed(1)+'%':'—', 'A realistic move to plan a target around, not a best case.')}
-    ${row('Minimum stop width', p.minStopPct!=null?p.minStopPct.toFixed(1)+'%':'—', 'Sits just outside normal noise. Tighter than this and routine wiggle stops you out.')}
+    ${row('How much it moves on a normal day', p.atrPct!=null?p.atrPct.toFixed(1)+'%':'—',
+      `On a typical day, ${s.ticker} swings about this much.`)}
+    ${row('How far it usually dips', p.normalDip!=null?p.normalDip.toFixed(1)+'%':'—',
+      `Over any two-week stretch, ${s.ticker} normally dips at least this much at some point, even when nothing is wrong. This is just noise you have to sit through.`)}
+    ${row('How far it usually climbs', p.normalRunup!=null?p.normalRunup.toFixed(1)+'%':'—',
+      `A realistic gain to aim for over two weeks. Not a best case, just what usually happens.`)}
+    ${row('How much room your stop needs', p.minStopPct!=null?p.minStopPct.toFixed(1)+'%':'—',
+      `Set your stop any tighter than this and normal dips will kick you out of a trade that was still fine.`)}
     ${p.gapsAvailable
-      ? row('Gap-through risk', p.gapRisk!=null?p.gapRisk.toFixed(1)+'% of days':'—', 'How often it opens below where your stop would sit. A stop can\'t protect you on those days.')
-      : row('Gap-through risk', 'Not available', 'Needs an Open column in your import. Without it StockIQ won\'t estimate this.')}
+      ? row('How often it jumps overnight', p.gapRisk!=null?p.gapRisk.toFixed(1)+'% of days':'—',
+        `On these days ${s.ticker} opened lower than where your stop would sit, so the stop couldn't protect you. It's the one risk you can't plan around.`)
+      : row('How often it jumps overnight', 'Can\'t tell yet',
+        `Your import needs an "Open" column to figure this out. StockIQ won't guess at it.`)}
 
     ${sz?`
     <div style="background:${C.blue}11;border:1px solid ${C.blue}33;border-radius:12px;padding:14px;margin-top:16px;">
-      <div style="color:${C.blue};font-size:11px;font-weight:800;letter-spacing:0.5px;margin-bottom:10px;">SIZING AT $${Math.round(sz.maxRisk)} RISK${sz.usingDefault?' (default)':''}</div>
-      <div style="color:${C.text};font-size:22px;font-weight:900;">${sz.shares} shares</div>
-      <div style="color:${C.textSub};font-size:12px;line-height:1.7;margin-top:6px;">
-        Stop at $${sz.stopPrice.toFixed(2)} (${sz.minStopPct.toFixed(1)}% below $${s.price.toFixed(2)}).<br>
-        Position cost about $${Math.round(sz.totalCost).toLocaleString()}. If the stop hits, you lose roughly $${Math.round(sz.maxRisk)}.
+      <div style="color:${C.blue};font-size:11px;font-weight:800;letter-spacing:0.5px;margin-bottom:10px;">IF YOU'RE WILLING TO LOSE $${Math.round(sz.maxRisk)}${sz.usingDefault?' (DEFAULT)':''}</div>
+      <div style="color:${C.text};font-size:22px;font-weight:900;">Buy ${sz.shares} shares</div>
+      <div style="color:${C.textSub};font-size:13px;line-height:1.8;margin-top:8px;">
+        That costs about $${Math.round(sz.totalCost).toLocaleString()}.<br>
+        Put your stop at $${sz.stopPrice.toFixed(2)}.<br>
+        If it hits that stop, you're out about $${Math.round(sz.maxRisk)}.
       </div>
     </div>`:''}
 
-    <div style="color:${C.textSub};font-size:11px;line-height:1.7;margin-top:16px;padding-top:14px;border-top:1px solid ${C.border};">
-      Based on ${p.rows} days of ${s.ticker}'s own history. This sizes the trade, it doesn't pick it. How far a stock moves is predictable from its past; which direction it goes is not, so nothing here says whether to buy.
+    <div style="color:${C.textSub};font-size:12px;line-height:1.8;margin-top:16px;padding-top:14px;border-top:1px solid ${C.border};">
+      All of this comes from ${p.rows} days of ${s.ticker}'s own history.<br><br>
+      One thing to be clear about: this tells you how big to go and where to put your stop. It does not tell you whether to buy. How much a stock bounces around is something you can count on. Which way it goes next isn't.
     </div>`);
 }
 
@@ -5096,6 +5114,48 @@ function showFillModal(stockId, trancheLabel) {
         <button onclick="doFill('${stockId}','${trancheLabel}')" style="flex:2;padding:13px;border-radius:12px;border:none;background:${C.green};color:#000;font-size:14px;font-weight:900;cursor:pointer;">✓ Confirm Buy</button>
       </div>
     </div>`);
+}
+
+// Clears a recorded buy (and any recorded sale on it) back to "Waiting."
+// Deliberately wipes the sale fields too — leaving a soldPrice attached to
+// a tranche with no entryPrice would leave the P&L math reading from a buy
+// that no longer exists. Always confirms first: this is real money data.
+function confirmClearBuy(stockId, trancheLabel) {
+  const s = stocks.find(x=>String(x.id)===String(stockId));
+  const t = (s?.tranche||[]).find(x=>x.label===trancheLabel);
+  if(!s||!t) return;
+  const hadSale = t.soldPrice!=null;
+  showModal(`
+    <div style="background:${C.card};border-radius:22px;padding:24px;border:1px solid ${C.yellow}44;">
+      <div style="color:${C.text};font-size:20px;font-weight:900;margin-bottom:8px;">Clear this buy?</div>
+      <div style="color:${C.textSub};font-size:13px;line-height:1.7;margin-bottom:8px;">
+        This erases what you entered for ${t.label}: ${fmtP(t.entryPrice)} × ${t.shares} shares${hadSale?`, plus the sale you recorded on ${t.soldDate}`:''}.
+      </div>
+      <div style="color:${C.textSub};font-size:13px;line-height:1.7;margin-bottom:20px;">
+        ${t.label} goes back to "Waiting." Your entry plan and everything else about ${s.ticker} stays exactly as it is.
+      </div>
+      <div style="display:flex;gap:10px;">
+        <button onclick="closeAllOverlays()" style="flex:1;padding:13px;border-radius:12px;border:1px solid ${C.border};background:none;color:${C.textSub};font-size:14px;font-weight:700;cursor:pointer;">Keep it</button>
+        <button onclick="doClearBuy('${stockId}','${trancheLabel}')" style="flex:2;padding:13px;border-radius:12px;border:none;background:${C.yellow};color:#000;font-size:14px;font-weight:900;cursor:pointer;">Clear it</button>
+      </div>
+    </div>`);
+}
+
+async function doClearBuy(stockId, trancheLabel) {
+  const s = stocks.find(x=>String(x.id)===String(stockId));
+  if(!s) return;
+  const updated = {...s, tranche: s.tranche.map(t=>{
+    if(t.label!==trancheLabel) return t;
+    const {entryPrice, shares, soldPrice, soldShares, soldDate, ...rest} = t;
+    return {...rest, status:'waiting'};
+  })};
+  stocks = stocks.map(x=>String(x.id)===String(stockId)?updated:x);
+  closeAllOverlays();
+  await fbSaveStock(updated);
+  showSaveStatus('saved');
+  setTimeout(()=>showSaveStatus('ready'),2000);
+  renderDetail(updated);
+  renderHome();
 }
 
 async function doFill(stockId, trancheLabel) {
