@@ -87,7 +87,7 @@ input[type=number]{-moz-appearance:textfield;}
   <!-- Portfolio box -->
   <div id="portfolio-box"></div>
   <!-- Tonight's Best Opportunities — the ranking engine -->
-  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · clean2</div>
+  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · list</div>
   <div id="tonights-opportunities"></div>
   <!-- Filter tags + sort -->
   <div id="filter-bar" style="background:#11141C;border-bottom:1px solid #1E2230;padding:9px 20px;"></div>
@@ -821,7 +821,7 @@ function renderStockList() {
     <div style="text-align:center;padding:20px 0 8px;">
       <button onclick="confirmClearAll()" style="background:none;border:none;color:${C.textMuted};font-size:12px;font-weight:600;cursor:pointer;text-decoration:underline;text-underline-offset:3px;">🧹 Clear ${clearableCount} untouched stocks (keeps anything with history)</button>
     </div>` : '';
-  el.innerHTML = filtered.map((s,i)=>renderStockCard(s,i+1)).join('') + clearFooter;
+  el.innerHTML = groupedListHTML(filtered) + clearFooter;
 }
 
 function showRowMenu(id) {
@@ -931,7 +931,58 @@ function computeSimpleAction(s) {
 }
 const SIMPLE_ACTION_META = {BUY:{color:C.green}, WAIT:{color:C.yellow}, HOLD:{color:C.teal}, EXIT:{color:C.red}};
 
+function renderCleanCard(s){
+  const simple = computeSimpleAction(s);
+  const word = simple.word || (s.type==='Long-Term Hold' ? (simple.longTermWord||'—') : '—');
+  const vc = SIMPLE_ACTION_META[word]?.color || C.textMuted;
+  const trend = computeTrendLabel(s);
+  const initials = (s.ticker||'??').slice(0,2);
+  const hue = Array.from(s.ticker||'XX').reduce((a,c)=>a+c.charCodeAt(0),0)%360;
+  const reason = (simple.reason||'').replace(/\s+/g,' ').trim();
+  return `
+   <div class="fade-in" style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:14px 16px;margin-bottom:12px;cursor:pointer;position:relative;overflow:hidden;opacity:${s.archived?'0.6':'1'};" onclick="openDetail('${s.id}')">
+     <div style="position:absolute;top:0;left:0;width:3px;height:100%;background:${vc};"></div>
+     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+       <div style="display:flex;gap:10px;align-items:center;min-width:0;">
+         <div style="width:36px;height:36px;border-radius:50%;background:hsl(${hue},45%,22%);border:1px solid hsl(${hue},45%,38%);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><span style="color:hsl(${hue},70%,78%);font-size:12px;font-weight:700;">${initials}</span></div>
+         <div style="min-width:0;">
+           <div style="display:flex;align-items:center;gap:6px;"><span style="color:${C.text};font-size:16px;font-weight:700;">${s.ticker}</span><button onclick="event.stopPropagation();toggleStar('${s.id}')" style="background:none;border:none;cursor:pointer;font-size:13px;color:${s.starred?C.yellow:'#6B7180'};padding:0;">${s.starred?'★':'☆'}</button></div>
+           <div style="color:#9AA0B0;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px;">${s.name||''}</div>
+         </div>
+       </div>
+       <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+         <span style="background:${vc};color:#0D0F16;border-radius:8px;padding:5px 12px;font-size:12px;font-weight:700;letter-spacing:0.03em;">${word}</span>
+         <button onclick="event.stopPropagation();showRowMenu('${s.id}')" style="background:none;border:none;color:#6B7180;cursor:pointer;padding:2px;"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg></button>
+       </div>
+     </div>
+     <div style="display:flex;align-items:center;gap:12px;">
+       <div style="flex:1;min-width:0;">${miniSparkline(s, trend.color)}</div>
+       <div style="text-align:right;flex-shrink:0;">
+         <div style="color:${C.text};font-size:18px;font-weight:700;">${fmtP(s.price)}</div>
+         <div style="color:${(s.pct||0)>=0?C.green:C.red};font-size:12px;font-weight:600;">${(s.pct||0)>=0?'▲':'▼'} ${Math.abs(s.pct||0).toFixed(2)}%</div>
+       </div>
+     </div>
+     ${reason?`<div style="color:#C7CCD8;font-size:12px;line-height:1.45;margin-top:11px;">${reason}</div>`:''}
+   </div>`;
+}
+// Groups the list into Buys / Waits / Holds, each sorted by % change (favorites first).
+function groupedListHTML(list){
+  const wordOf=s=>{const a=computeSimpleAction(s);return a.word||(s.type==='Long-Term Hold'?'HOLD':'—');};
+  const b={BUY:[],WAIT:[],HOLD:[]};
+  list.forEach(s=>{const w=wordOf(s); (w==='BUY'?b.BUY:w==='WAIT'?b.WAIT:b.HOLD).push(s);});
+  const byPct=(x,y)=>{if(x.starred&&!y.starred)return -1;if(!x.starred&&y.starred)return 1;return (y.pct||0)-(x.pct||0);};
+  const secs=[['BUY','Buys',C.green],['WAIT','Waits',C.yellow],['HOLD','Holds',C.teal]];
+  let html='';
+  secs.forEach(([k,label,color])=>{
+    const g=b[k]; if(!g.length)return; g.sort(byPct);
+    html+=`<div style="display:flex;align-items:center;gap:8px;margin:16px 4px 10px;"><span style="width:8px;height:8px;border-radius:50%;background:${color};"></span><span style="color:#C7CCD8;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;">${label}</span><span style="color:#7A8090;font-size:12px;">${g.length}</span></div>`;
+    html+=g.map(s=>renderCleanCard(s)).join('');
+  });
+  return html;
+}
+
 function renderStockCard(s, rank) {
+  return renderCleanCard(s);   // Option 3 clean card. Old busy card parked below.
   const cfg = vCfg(s.verdict);
   const gp = computeGamePlan(s);
   const setup = analyzeSetup(s);
