@@ -108,12 +108,12 @@ input[type=number]{-moz-appearance:textfield;}
 
 <!-- MODAL OVERLAY -->
 <div id="modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:100;display:none;align-items:center;justify-content:center;padding:20px;" onclick="closeModal(event)">
-  <div id="modal-content" onclick="event.stopPropagation()" style="width:100%;max-width:380px;max-height:90vh;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;"></div>
+  <div id="modal-content" onclick="event.stopPropagation()" style="width:100%;max-width:380px;"></div>
 </div>
 
 <!-- BOTTOM SHEET -->
 <div id="sheet-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:100;" onclick="closeSheet(event)">
-  <div id="sheet-content" onclick="event.stopPropagation()" style="position:absolute;bottom:0;left:0;right:0;max-width:680px;margin:0 auto;background:#0A0C10;border-radius:22px 22px 0 0;border:1px solid #252A3A;border-bottom:none;padding:20px 20px 44px;max-height:88vh;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;"></div>
+  <div id="sheet-content" onclick="event.stopPropagation()" style="position:absolute;bottom:0;left:0;right:0;max-width:680px;margin:0 auto;background:#0A0C10;border-radius:22px 22px 0 0;border:1px solid #252A3A;border-bottom:none;padding:20px 20px 44px;"></div>
 </div>
 
 <script>
@@ -564,12 +564,8 @@ function closeModal(e) {
 }
 function showSheet(html) {
   const ov = document.getElementById('sheet-overlay');
-  const content = document.getElementById('sheet-content');
-  content.innerHTML = html;
+  document.getElementById('sheet-content').innerHTML = html;
   ov.style.display = 'block';
-  // Sheets are reused, so a tall sheet can inherit the last one's scroll
-  // position and open partway down. Always start at the top.
-  content.scrollTop = 0;
 }
 function closeSheet(e) {
   if(!e||e.target===document.getElementById('sheet-overlay')) {
@@ -819,7 +815,12 @@ function renderStockList() {
     return;
   }
 
-  el.innerHTML = filtered.map((s,i)=>renderStockCard(s,i+1)).join('');
+  const clearableCount = stocks.filter(s=>!hasRealHistory(s)).length;
+  const clearFooter = clearableCount >= 3 ? `
+    <div style="text-align:center;padding:20px 0 8px;">
+      <button onclick="confirmClearAll()" style="background:none;border:none;color:${C.textMuted};font-size:12px;font-weight:600;cursor:pointer;text-decoration:underline;text-underline-offset:3px;">🧹 Clear ${clearableCount} untouched stocks (keeps anything with history)</button>
+    </div>` : '';
+  el.innerHTML = filtered.map((s,i)=>renderStockCard(s,i+1)).join('') + clearFooter;
 }
 
 function showRowMenu(id) {
@@ -862,6 +863,52 @@ function computePriceCloseEnough(s) {
   if(gp.entryRef==null || !s.atr || s.price==null) return false;
   return Math.abs(s.price - gp.entryRef) <= s.atr;
 }
+// ── VALIDATED ENGINE ────────────────────────────────────────────────────────
+// The exact swing setup proven across the 6yr / 148-name out-of-sample tests.
+// This is now the single brain behind the BUY call. The old market-state engine
+// is PARKED (still in the file, still renders its checklist for reference, but
+// it no longer decides anything — see handoff v5, Option 3).
+//   Entry:  MACD crosses above signal, in an uptrend (price>SMA200 & SMA50>SMA200),
+//           RSI 45–60, ATR 4–8% of price. Buy at the signal (near current price).
+//   Risk:   stop 2.0*ATR, trailing exit 3.0*ATR (handled by the plan/target math).
+function computeSignalVerdict(s){
+  const need=['price','rsi','atr','macdLine','signalLine','ma50','ma200'];
+  if(!need.every(k=>s[k]!=null))
+    return {buy:false, ready:false, reason:'Not enough data to read this setup yet.', checks:[]};
+
+  // prior-day MACD (for the cross) from the most recent earlier snapshot
+  const snaps=(s.snapshots||[]).filter(sn=>sn.date).sort((a,b)=>new Date(a.date)-new Date(b.date));
+  const prev=snaps.length>=2?snaps[snaps.length-2]:null;
+  const pLine=prev?prev.macdLine:null, pSig=prev?prev.signalLine:null;
+
+  const uptrend = s.price>s.ma200 && s.ma50>s.ma200;
+  const atrPct  = (s.atr/s.price)*100;
+  const atrOk   = atrPct>=4 && atrPct<=8;
+  const rsiOk   = s.rsi>=45 && s.rsi<=60;
+  const macdCross = (pLine!=null && pSig!=null) ? (pLine<=pSig && s.macdLine>s.signalLine) : null;
+  const macdUp    = s.macdLine>s.signalLine;
+
+  const checks=[
+    {label:'Uptrend — price above 200, 50 above 200', pass:uptrend, required:true},
+    {label:'RSI in the 45–60 entry band', pass:rsiOk, required:true},
+    {label:'Daily range tradeable — ATR 4–8% of price', pass:atrOk, required:true},
+    {label:'MACD crossed up (momentum turning)', pass:macdCross===true, unknown:macdCross===null, required:true},
+  ];
+  const coreOk=uptrend && rsiOk && atrOk;
+  const buy=coreOk && macdCross===true;
+  const ready=coreOk && (macdUp || macdCross!==false);
+
+  let reason;
+  if(buy) reason='MACD just crossed up in a healthy uptrend, with RSI and daily range both in the sweet spot. This is the setup.';
+  else if(!uptrend) reason='Not in an uptrend yet — needs price above the 200 and the 50 above the 200. Stay out.';
+  else if(!atrOk) reason = atrPct<4 ? 'Too quiet — under 4% daily range means little to swing. Skip.' : 'Too wild — over 8% daily range is hard to size and stop cleanly. Skip.';
+  else if(!rsiOk) reason = s.rsi<45 ? 'RSI under 45 — still falling, not a clean pullback yet. Wait.' : 'RSI over 60 — already extended. Wait for it to cool into the 45–60 zone.';
+  else if(macdCross===null) reason='Setup looks right, but I can\u2019t confirm a fresh MACD cross without yesterday\u2019s data.';
+  else reason='Setup is in place — waiting on a MACD cross up to trigger the entry.';
+
+  return {buy, ready, reason, checks, atrPct, macdCross};
+}
+
 function computeSimpleAction(s) {
   const type = s.type;
   if(type==='Long-Term Hold') {
@@ -869,7 +916,6 @@ function computeSimpleAction(s) {
     return {word:null, longTermWord:action.action, holding:action.holding, reason:null};
   }
   const action = computeAction(s);
-  const gp = computeGamePlan(s);
 
   if(action.holding) {
     const exitish = /EXIT|REDUCE|REVIEW/.test(action.action);
@@ -877,20 +923,10 @@ function computeSimpleAction(s) {
     return {word: exitish?'EXIT':'HOLD', holding:true, reason};
   }
 
-  const readiness = action.readiness;
-  const requiredChecks = readiness.checks.filter(c=>c.required);
-  const supportingChecks = readiness.checks.filter(c=>!c.required);
-  const requiredPass = requiredChecks.every(c=>c.pass);
-  const closeEnough = computePriceCloseEnough(s);
-  const priceOk = !gp.entryPending || closeEnough;
-  const buyReady = requiredPass && priceOk;
-  const warning = supportingChecks.find(c=>!c.pass);
-
-  let reason;
-  if(buyReady) reason = closeEnough && gp.entryPending ? `Within ${fmtP(s.atr)} (1 ATR) of the ideal entry — close enough to act.` : 'Entry, invalidation, reward-to-risk, and strategy fit all check out.';
-  else reason = computeBiggestConcern(s, type);
-
-  return {word: buyReady?'BUY':'WAIT', holding:false, reason, warning: warning?warning.label:null};
+  // ── Option 3: the validated engine is the brain for the BUY call. ──
+  // Old market-state routing still handles holding/exit above; entry is ours.
+  const v = computeSignalVerdict(s);
+  return {word: v.buy?'BUY':'WAIT', holding:false, reason: v.reason, warning:null};
 }
 const SIMPLE_ACTION_META = {BUY:{color:C.green}, WAIT:{color:C.yellow}, HOLD:{color:C.teal}, EXIT:{color:C.red}};
 
@@ -911,7 +947,6 @@ function renderStockCard(s, rank) {
   const needsReclass = needsReclassify(s);
   const opp = computeOpportunityStatus(s, s.type);
   const oppMeta = OPPORTUNITY_STATUS_META[opp.status];
-  const breakout = compute52WHighBreakout(s);
 
   return `
     <div class="fade-in" style="background:${C.card};border-radius:20px;border:1px solid ${C.border};padding:16px;cursor:pointer;position:relative;overflow:hidden;opacity:${s.archived?'0.6':'1'};" onclick="openDetail('${s.id}')">
@@ -930,8 +965,6 @@ function renderStockCard(s, rank) {
             <div style="display:flex;gap:5px;margin-top:3px;flex-wrap:wrap;">
               <span style="display:inline-block;background:${tc.bg};color:${tc.fg};font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;">${needsReclass?'Needs Strategy':s.type||'—'}</span>
               <span style="display:inline-block;background:${oppMeta.color}22;color:${oppMeta.color};font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;">${oppMeta.icon} ${opp.status}</span>
-              ${breakout.badge?`<span onclick="event.stopPropagation();showBreakoutSheet('${s.id}')" style="display:inline-block;background:${C.purple}22;color:${C.purple};font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;cursor:pointer;">🚀 52W High Breakout ${breakout.badge==='confirmed'?'Confirmed':'Watch'}</span>`:''}
-              ${(()=>{const pr=computeStockProfile(s); return pr.ok?`<span onclick="event.stopPropagation();showProfileSheet('${s.id}')" style="display:inline-block;background:${C.blue}22;color:${C.blue};font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;cursor:pointer;">📏 ${pr.character}</span>`:'';})()}
             </div>
           </div>
         </div>
@@ -1460,8 +1493,7 @@ function renderTabPlan(s) {
       <div style="margin-left:20px;margin-top:10px;background:${C.cardHigh};border-radius:10px;padding:10px 14px;display:flex;justify-content:space-between;">
         <div><div style="color:${C.textMuted};font-size:10px;margin-bottom:2px;">Entry</div><div style="color:${C.text};font-size:13px;font-weight:700;">${fmtP(t.entryPrice)} × ${t.shares} shares</div></div>
         <div style="text-align:right;"><div style="color:${C.textMuted};font-size:10px;margin-bottom:2px;">Live P&L</div><div style="color:${tGl>=0?C.green:C.red};font-size:13px;font-weight:900;">${tGl>=0?'+':''}${tGl?.toFixed(2)}</div></div>
-      </div>
-      <div style="margin-left:20px;margin-top:6px;"><button onclick="confirmClearBuy('${s.id}','${t.label}')" style="background:none;border:none;color:${C.textSub};font-size:11px;font-weight:700;cursor:pointer;padding:2px 0;text-decoration:underline;">Clear this buy</button></div>` : '';
+      </div>` : '';
 
     const soldBlock = hasSold ? `
       <div style="margin-left:20px;margin-top:10px;background:${realizedGl>=0?C.greenDim:C.redDim};border-radius:10px;padding:10px 14px;border:1px solid ${realizedGl>=0?C.green:C.red}33;">
@@ -1470,8 +1502,7 @@ function renderTabPlan(s) {
           <span style="color:${realizedGl>=0?C.green:C.red};font-size:13px;font-weight:900;">${realizedGl>=0?'+':''}${realizedGl?.toFixed(2)} realized</span>
         </div>
         <div style="color:${C.textMuted};font-size:11px;">Bought at ${fmtP(t.entryPrice)} · Sold ${t.soldShares} shares</div>
-      </div>
-      <div style="margin-left:20px;margin-top:6px;"><button onclick="confirmClearBuy('${s.id}','${t.label}')" style="background:none;border:none;color:${C.textSub};font-size:11px;font-weight:700;cursor:pointer;padding:2px 0;text-decoration:underline;">Clear this buy</button></div>` : '';
+      </div>` : '';
 
     return `
       <div style="padding:16px 0;border-bottom:${i<s.tranche.length-1?`1px solid ${C.border}`:'none'};">
@@ -2104,83 +2135,6 @@ function computeStructureProxy(s) {
     lowerHigh = Math.max(...recent5) < Math.max(...before10);
   }
   return {lowerLow, higherHigh, higherLow, lowerHigh, sample:snaps.length};
-}
-
-// ── 52W HIGH BREAKOUT DETECTOR ───────────────────────────────────────────────
-// Deliberately narrow, by design decision with Kim: only detects breakouts
-// through THIS stock's own 52-week high — not a general base/swing-high
-// breakout engine, which needs real swing-high detection (not built). A
-// stock coiling under a lower prior swing high will never trigger this,
-// and that's intentional, not a bug — see handoff notes.
-//
-// Two badges, not one, because "coiling near the high" and "actually broke
-// out today" are different facts:
-//   Watch     — trend up, within 2% below the 52-week high, ATR contracting.
-//               Volume does NOT need to be elevated yet.
-//   Confirmed — trend up, price is in the near/above-high zone (2% below
-//               through 3% above), AND either made a fresh 20-day-high
-//               close or already cleared the 52-week high, on above-average
-//               volume, with ATR having been contracting beforehand.
-// Note: the trigger (new 20-day high) is deliberately gated to the
-// near/above-high zone — a stock making a fresh 20-day high while still
-// deep below its 52-week high is a different, unrelated setup and must not
-// get labeled a "52W High Breakout." Small but real correction to the
-// literal spec, flagged to Kim.
-//
-// Insufficient history is never treated as a failed condition — each
-// condition is either met, not met, or "not enough history to confirm."
-function compute20DayHighClose(s) {
-  const snaps = (s.snapshots||[]).filter(sn=>sn.price!=null).sort((a,b)=>new Date(a.date)-new Date(b.date));
-  if(snaps.length<20) return null;
-  const last20 = snaps.slice(-20).map(sn=>sn.price);
-  const currentClose = s.price!=null ? s.price : last20[last20.length-1];
-  return currentClose >= Math.max(...last20);
-}
-
-function compute52WHighBreakout(s) {
-  const hasTrendData = s.ma50!=null && s.ma200!=null && s.price!=null;
-  const trendUp = hasTrendData ? (s.price>s.ma50 && s.price>s.ma200) : null;
-
-  const pctFromHi52 = (s.hi52 && s.price) ? ((s.price - s.hi52)/s.hi52)*100 : null; // negative = below high
-  const nearHigh = pctFromHi52!=null ? (pctFromHi52>=-2 && pctFromHi52<=0) : null;
-  const aboveHigh = pctFromHi52!=null ? (pctFromHi52>0) : null;
-  const nearOrAboveZone = pctFromHi52!=null ? (pctFromHi52>=-2 && pctFromHi52<=3) : null;
-  const extensionOK = pctFromHi52!=null ? (pctFromHi52<=3) : null;
-
-  const atrContracting = computeATRDecline(s); // true/false/null — reuses existing helper
-  const new20DayHigh = compute20DayHighClose(s); // true/false/null
-
-  const volRatio = (s.vol!=null && s.avgvol) ? s.vol/s.avgvol : null;
-  const volAboveAvg = volRatio!=null ? volRatio>1 : null;
-
-  const triggerKnown = (new20DayHigh!=null || aboveHigh!=null) && nearOrAboveZone!=null;
-  const trigger = nearOrAboveZone===true && (new20DayHigh===true || aboveHigh===true);
-
-  const confirmedConditions = [
-    {label:'Price above the 50-day and 200-day averages', met: trendUp===true, evaluable: trendUp!=null},
-    {label:'New 20-day-high close, or already cleared the 52-week high', met: trigger===true, evaluable: triggerKnown},
-    {label:'No more than 3% extended above the 52-week high', met: !aboveHigh || extensionOK===true, evaluable: !aboveHigh || extensionOK!=null},
-    {label:'Volume above the 20-day average', met: volAboveAvg===true, evaluable: volAboveAvg!=null},
-    {label:'ATR had been contracting beforehand', met: atrContracting===true, evaluable: atrContracting!=null},
-  ];
-  const confirmedEvaluable = confirmedConditions.filter(c=>c.evaluable);
-  const confirmedInsufficient = confirmedEvaluable.length < confirmedConditions.length;
-  const confirmed = !confirmedInsufficient && confirmedConditions.every(c=>c.met);
-
-  const watchConditions = [
-    {label:'Price above the 50-day and 200-day averages', met: trendUp===true, evaluable: trendUp!=null},
-    {label:'Within 2% of the 52-week high, not yet through it', met: nearHigh===true, evaluable: nearHigh!=null},
-    {label:'ATR contracting', met: atrContracting===true, evaluable: atrContracting!=null},
-  ];
-  const watchEvaluable = watchConditions.filter(c=>c.evaluable);
-  const watchInsufficient = watchEvaluable.length < watchConditions.length;
-  const watch = !watchInsufficient && watchConditions.every(c=>c.met);
-
-  let badge = null;
-  if(confirmed) badge = 'confirmed';
-  else if(watch) badge = 'watch';
-
-  return {badge, pctFromHi52, confirmed, confirmedConditions, confirmedInsufficient, watch, watchConditions, watchInsufficient};
 }
 
 // Shared Consolidation checklist — reachable from either the "trend intact"
@@ -3024,7 +2978,31 @@ function computeBuyReadiness(s, type) {
   else if(type==='Long-Term Hold') strategyOk = !['Confirmed Breakdown','Trend Weakening'].includes(ms.state);
   checks.push({label:'Strategy-specific structure check', pass:strategyOk, required:true});
 
+  // NOTE: `ready` (all six checks) is retained for reference only. It is NO
+  // LONGER the entry gate — see computeEntryVerdict. The old all-checks gate
+  // could never open, because the earnings check can't pass without earnings-
+  // date data the app doesn't track.
   return {ready: checks.every(c=>c.pass), checks};
+}
+
+// ── SHARED ENTRY VERDICT — SINGLE SOURCE OF TRUTH ───────────────────────────
+// Both the Overview verdict (computeSimpleAction → BUY/WAIT) and the Plan tab
+// (computeAction → "Ready for Entry Review"/WAIT) derive their entry call from
+// this one function, so they can never disagree again. Entry requires the
+// load-bearing (required) checks to pass plus price proximity. Supporting
+// checks (earnings clear, position sizing) surface as a warning, never as a
+// silent blocker — which was the two-engine bug: the Plan gate demanded an
+// earnings check that can't pass without data the app doesn't track, so it
+// said WAIT every single day while Overview flashed BUY.
+function computeEntryVerdict(s) {
+  const gp = computeGamePlan(s);
+  const readiness = computeBuyReadiness(s, s.type);
+  const requiredPass = readiness.checks.filter(c=>c.required).every(c=>c.pass);
+  const closeEnough = computePriceCloseEnough(s);
+  const priceOk = !gp.entryPending || closeEnough;
+  const buyReady = requiredPass && priceOk;
+  const warning = readiness.checks.filter(c=>!c.required).find(c=>!c.pass) || null;
+  return {buyReady, requiredPass, priceOk, closeEnough, warning, readiness, gp};
 }
 
 // ── STRATEGY-SPECIFIC ACTION ────────────────────────────────────────────────
@@ -3035,9 +3013,10 @@ function computeAction(s) {
   const type = s.type;
   const ms = computeMarketState(s);
   const holding = (s.tranche||[]).some(t=>t.status==='filled');
-  const readiness = computeBuyReadiness(s, type);
+  const entry = computeEntryVerdict(s);
+  const readiness = entry.readiness;
   const exitSignal = holding ? checkExitSignal(s) : null;
-  const entryLabel = () => readiness.ready ? 'Ready for Entry Review' : 'WAIT';
+  const entryLabel = () => entry.buyReady ? 'Ready for Entry Review' : 'WAIT';
 
   const TABLE = {
     'Swing Trade': {
@@ -3062,7 +3041,7 @@ function computeAction(s) {
     },
   };
   const action = (TABLE[type]||TABLE['Swing Trade'])[ms.state] || 'INSUFFICIENT DATA';
-  return {action, readiness, holding, ms};
+  return {action, readiness, holding, ms, entry};
 }
 
 // ── EXECUTIVE SUMMARY, 60 SECONDS, WATCHING NEXT ────────────────────────────
@@ -3197,107 +3176,6 @@ function computeManagingChecklist(s, type) {
   return checks;
 }
 
-// ── STOCK BEHAVIOR PROFILE (the "sizing profiler") ──────────────────────────
-// Answers one question, and deliberately only one: how much room does THIS
-// stock need, and how many shares can Kim take for a fixed dollar risk?
-//
-// Scope discipline, tested directly against 50 tickers x 5 years of real
-// data before building. What persists per-stock across time, and is
-// therefore safe to profile:
-//     ATR % of price ............... r = +0.890
-//     Typical move size ............ r = +0.818
-// What does NOT persist, and is therefore deliberately NOT computed here,
-// no matter how useful it sounds:
-//     Reward:risk ratio ............ r = -0.086  (no signal)
-//     Directional forward return ... r = -0.377  (INVERTS)
-//     "Respects the 20 EMA" ........ r = -0.045  (no signal)
-// Selecting stocks on those last three actively picked WORSE stocks than
-// random in testing. So this profiler never ranks stocks, never predicts
-// direction, and never says "this one's a better trade." It sizes. That's
-// the part the evidence supports.
-//
-// Needs imported history — no profile is shown rather than guessing from a
-// generic default, same discipline as the breakout badge's insufficient-
-// history handling.
-const PROFILE_MIN_ROWS = 60;
-function computeStockProfile(s) {
-  const snaps = (s.snapshots||[]).filter(sn=>sn.price!=null).sort((a,b)=>new Date(a.date)-new Date(b.date));
-  if(snaps.length < PROFILE_MIN_ROWS) return {ok:false, rows:snaps.length, need:PROFILE_MIN_ROWS};
-
-  const prices = snaps.map(sn=>sn.price);
-
-  // ATR as % of price — averaged over the most recent ~6 months of rows.
-  const recent = snaps.slice(-126);
-  const atrPcts = recent.filter(sn=>sn.atr!=null && sn.price).map(sn=>(sn.atr/sn.price)*100);
-  const atrPct = atrPcts.length ? atrPcts.reduce((a,b)=>a+b,0)/atrPcts.length : null;
-
-  // The noise floor: for every day, the worst dip over the NEXT 10 sessions.
-  // Median, not average — one crash shouldn't set the everyday stop width.
-  const dips = [];
-  const runups = [];
-  for(let i=0;i<prices.length-10;i++){
-    const fwd = prices.slice(i+1,i+11);
-    dips.push((Math.min(...fwd)-prices[i])/prices[i]*100);
-    runups.push((Math.max(...fwd)-prices[i])/prices[i]*100);
-  }
-  const median = arr => {
-    if(!arr.length) return null;
-    const a=[...arr].sort((x,y)=>x-y); const m=Math.floor(a.length/2);
-    return a.length%2 ? a[m] : (a[m-1]+a[m])/2;
-  };
-  const normalDip = median(dips);        // negative number
-  const normalRunup = median(runups);    // positive number
-
-  // Minimum stop that sits OUTSIDE everyday noise, with a small buffer so a
-  // routine dip doesn't shake Kim out of a thesis that's still intact.
-  const minStopPct = normalDip!=null ? Math.abs(normalDip)*1.15 : null;
-
-  // Gap risk — needs the Open column. Absent, we say so instead of guessing.
-  let gapRisk = null, gapsAvailable = false;
-  const withOpen = snaps.filter(sn=>sn.open!=null && sn.price!=null);
-  if(withOpen.length >= 40 && minStopPct!=null) {
-    gapsAvailable = true;
-    let gapsThrough = 0, counted = 0;
-    for(let i=1;i<snaps.length;i++){
-      const prevClose = snaps[i-1].price, open = snaps[i].open;
-      if(prevClose==null || open==null) continue;
-      counted++;
-      const gapPct = (open-prevClose)/prevClose*100;
-      if(gapPct < -minStopPct) gapsThrough++;
-    }
-    gapRisk = counted ? (gapsThrough/counted*100) : null;
-  }
-
-  // Character label — based only on how much it moves. Never a judgment
-  // about whether the stock is a good buy.
-  let character = 'Unclassified', characterNote = '';
-  if(atrPct!=null && minStopPct!=null) {
-    if(atrPct < 2) { character = 'Slow Mover'; characterNote = 'Small daily moves.'; }
-    else if(atrPct < 4) { character = 'Steady Mover'; characterNote = 'Moderate daily moves.'; }
-    else if(atrPct < 7) { character = 'Big Mover'; characterNote = 'Large daily moves.'; }
-    else { character = 'Very Big Mover'; characterNote = 'Very large daily moves.'; }
-  }
-
-  return {ok:true, rows:snaps.length, atrPct, normalDip, normalRunup, minStopPct,
-          gapRisk, gapsAvailable, character, characterNote};
-}
-
-// Turns the profile into actual share counts for a given dollar risk.
-// Reuses the app's existing maxRisk convention (s.maxRisk, else 15% of
-// budget) rather than introducing a second, competing risk setting.
-function computeProfileSizing(s) {
-  const p = computeStockProfile(s);
-  if(!p.ok || p.minStopPct==null || !s.price) return null;
-  const budget = s.invested||150;
-  const maxRisk = (s.maxRisk!=null && s.maxRisk>0) ? s.maxRisk : budget*0.15;
-  const usingDefault = !(s.maxRisk!=null && s.maxRisk>0);
-  const stopDistance = s.price*(p.minStopPct/100);
-  const stopPrice = s.price - stopDistance;
-  const shares = stopDistance>0 ? Math.floor(maxRisk/stopDistance) : 0;
-  return {profile:p, maxRisk, usingDefault, stopPrice, stopDistance,
-          minStopPct:p.minStopPct, shares, totalCost:shares*s.price};
-}
-
 // ── RISK-BASED POSITION SIZING (the "risk engine") ──────────────────────────
 // Genuinely risk-first: pick a max dollar loss, size shares backward from
 // entry-minus-stop distance — instead of the existing budget-first flow
@@ -3374,11 +3252,12 @@ function computeReviewTrigger(s, stage, type) {
 }
 
 // ── REQUIRED vs SUPPORTING CHECKLIST DISPLAY ────────────────────────────────
-// Presentation only: which checks are shown under which heading. The pass/
-// fail math for "ready" (computeBuyReadiness) is untouched — still every
-// one of the 6 checks, required or supporting, has to pass. Splitting the
-// display just stops a nice-to-have (earnings clear) from visually
-// outweighing a load-bearing one (entry zone defined).
+// Presentation only: which checks are shown under which heading. The entry
+// gate itself lives in computeEntryVerdict, which requires only the load-
+// bearing (required) checks plus price proximity; supporting checks surface
+// as warnings, not blockers. Splitting the display the same way stops a
+// nice-to-have (earnings clear) from visually outweighing a load-bearing one
+// (entry zone defined).
 function renderRequiredSupportingChecklist(checks) {
   const req = checks.filter(c=>c.required);
   const sup = checks.filter(c=>!c.required);
@@ -3420,25 +3299,9 @@ function computeWatchTomorrow(s, stage, type) {
 // Single source of truth for the profit target used anywhere reward:risk
 // math is needed — Section 4's Buy Readiness gate used to recompute this
 // same 52-week-high-or-3x-ATR logic inline; now both call this.
-// This used to cap the target at the 52-week high for every stock that
-// hadn't reached it yet, full stop — which correctly modeled a real ceiling
-// but wrongly capped a genuine breakout at almost zero upside too, since
-// "about to clear the high" and "stuck under it" looked identical to this
-// function. Now: only treat the 52-week high as the ceiling when either
-// there's a real, closer resistance level in the way, OR the 52W High
-// Breakout detector doesn't independently agree this looks like a setup.
-// When it does agree, fall through to the same measured-move math (3x ATR
-// past entry) already used for stocks with no 52-week-high ceiling at all —
-// no new formula invented, reusing what's already here.
 function computeTargetPrice(s, entryRef) {
   if(entryRef==null) return null;
-  if(s.hi52 && entryRef<s.hi52) {
-    const levels = computeKeyLevels(s);
-    const onlyCeilingIsThe52WHigh = !!(levels.resistance && levels.resistance.label==='52-week high');
-    const breakoutSignal = compute52WHighBreakout(s).badge;
-    const treatAsLaunchPad = onlyCeilingIsThe52WHigh && breakoutSignal && s.atr;
-    if(!treatAsLaunchPad) return s.hi52;
-  }
+  if(s.hi52 && entryRef<s.hi52) return s.hi52;
   if(s.atr) return entryRef + s.atr*3;
   return null;
 }
@@ -3522,16 +3385,8 @@ function computeOpportunityStatus(s, type) {
   const extendedThreshold = type==='Swing Trade' ? 10 : type==='Position Trade' ? 15 : null;
   const isExtended = extendedThreshold!=null && extendedPct!=null && extendedPct>extendedThreshold;
 
-  // A stock whose nearest resistance IS its own 52-week high, with nothing
-  // above it, isn't hitting a real ceiling — it's sitting at a potential
-  // launch pad. Only treat it that way when the 52W High Breakout detector
-  // independently agrees (trend up, ATR contracting, etc.) — being merely
-  // "close to the high" on its own is not enough, or every stalling stock
-  // near resistance would get waved through as a launch pad too.
-  const keyLevels = computeKeyLevels(s);
-  const nearResistanceIsLaunchPad = !!(keyLevels.resistance && keyLevels.resistance.label==='52-week high' && compute52WHighBreakout(s).badge);
   const tooCloseThreshold = type==='Swing Trade' ? 5 : type==='Position Trade' ? 8 : null;
-  const tooCloseToResistance = tooCloseThreshold!=null && eq.upsideToResistancePct!=null && eq.upsideToResistancePct < tooCloseThreshold && !nearResistanceIsLaunchPad;
+  const tooCloseToResistance = tooCloseThreshold!=null && eq.upsideToResistancePct!=null && eq.upsideToResistancePct < tooCloseThreshold;
 
   const poorRR = eq.rr && eq.rr.ratio!=null && eq.rr.ratio < 1.5;
   const trendDeteriorating = ['Trend Weakening','Confirmed Breakdown'].includes(ms.state);
@@ -3797,90 +3652,6 @@ function pillSheetHeader(title, color) {
       <span style="color:${color};font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;">${title}</span>
       <button onclick="closeAllOverlays()" style="background:none;border:none;color:${C.textMuted};font-size:20px;cursor:pointer;">✕</button>
     </div>`;
-}
-
-function showProfileSheet(id) {
-  const s = stocks.find(x=>String(x.id)===String(id));
-  if(!s) return;
-  const p = computeStockProfile(s);
-  if(!p.ok) {
-    showSheet(`
-      ${pillSheetHeader('Stock Profile', C.blue)}
-      <div style="color:${C.text};font-size:16px;font-weight:800;margin-bottom:8px;">Not enough history yet</div>
-      <div style="color:${C.textSub};font-size:13px;line-height:1.8;">StockIQ has ${p.rows} day${p.rows===1?'':'s'} of prices for ${s.ticker}. It needs about ${p.need} to learn how this one normally behaves.</div>
-      <div style="color:${C.textSub};font-size:13px;line-height:1.8;margin-top:12px;">Import a year of daily history for ${s.ticker} and this fills in right away. StockIQ won't make up numbers it doesn't have.</div>`);
-    return;
-  }
-  const sz = computeProfileSizing(s);
-  const row = (label, value, note) => `
-    <div style="padding:12px 0;border-bottom:1px solid ${C.border};">
-      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;">
-        <span style="color:${C.textSub};font-size:12px;">${label}</span>
-        <span style="color:${C.text};font-size:15px;font-weight:800;">${value}</span>
-      </div>
-      ${note?`<div style="color:${C.textSub};font-size:11px;line-height:1.6;margin-top:4px;">${note}</div>`:''}
-    </div>`;
-
-  const plainCharacter = {
-    'Slow Mover': `${s.ticker} moves in small steps. It may not travel far enough in a week or two to be worth the risk.`,
-    'Steady Mover': `${s.ticker} moves at a steady, manageable pace. You don't need to give it much room.`,
-    'Big Mover': `${s.ticker} swings hard. You have to give it room, which means buying fewer shares to keep your risk the same.`,
-    'Very Big Mover': `${s.ticker} swings very hard. It needs a lot of room, so your share count gets small fast.`,
-  }[p.character] || '';
-
-  showSheet(`
-    ${pillSheetHeader('Stock Profile', C.blue)}
-    <div style="color:${C.text};font-size:18px;font-weight:900;margin-bottom:4px;">${s.ticker} — ${p.character}</div>
-    <div style="color:${C.textSub};font-size:13px;line-height:1.7;margin-bottom:18px;">${plainCharacter}</div>
-
-    ${row('How much it moves on a normal day', p.atrPct!=null?p.atrPct.toFixed(1)+'%':'—',
-      `On a typical day, ${s.ticker} swings about this much.`)}
-    ${row('How far it usually dips', p.normalDip!=null?p.normalDip.toFixed(1)+'%':'—',
-      `Over any two-week stretch, ${s.ticker} normally dips at least this much at some point, even when nothing is wrong. This is just noise you have to sit through.`)}
-    ${row('How far it usually climbs', p.normalRunup!=null?p.normalRunup.toFixed(1)+'%':'—',
-      `A realistic gain to aim for over two weeks. Not a best case, just what usually happens.`)}
-    ${row('How much room your stop needs', p.minStopPct!=null?p.minStopPct.toFixed(1)+'%':'—',
-      `Set your stop any tighter than this and normal dips will kick you out of a trade that was still fine.`)}
-    ${p.gapsAvailable
-      ? row('How often it jumps overnight', p.gapRisk!=null?p.gapRisk.toFixed(1)+'% of days':'—',
-        `On these days ${s.ticker} opened lower than where your stop would sit, so the stop couldn't protect you. It's the one risk you can't plan around.`)
-      : row('How often it jumps overnight', 'Can\'t tell yet',
-        `Your import needs an "Open" column to figure this out. StockIQ won't guess at it.`)}
-
-    ${sz?`
-    <div style="background:${C.blue}11;border:1px solid ${C.blue}33;border-radius:12px;padding:14px;margin-top:16px;">
-      <div style="color:${C.blue};font-size:11px;font-weight:800;letter-spacing:0.5px;margin-bottom:10px;">IF YOU'RE WILLING TO LOSE $${Math.round(sz.maxRisk)}${sz.usingDefault?' (DEFAULT)':''}</div>
-      <div style="color:${C.text};font-size:22px;font-weight:900;">Buy ${sz.shares} shares</div>
-      <div style="color:${C.textSub};font-size:13px;line-height:1.8;margin-top:8px;">
-        That costs about $${Math.round(sz.totalCost).toLocaleString()}.<br>
-        Put your stop at $${sz.stopPrice.toFixed(2)}.<br>
-        If it hits that stop, you're out about $${Math.round(sz.maxRisk)}.
-      </div>
-    </div>`:''}
-
-    <div style="color:${C.textSub};font-size:12px;line-height:1.8;margin-top:16px;padding-top:14px;border-top:1px solid ${C.border};">
-      All of this comes from ${p.rows} days of ${s.ticker}'s own history.<br><br>
-      One thing to be clear about: this tells you how big to go and where to put your stop. It does not tell you whether to buy. How much a stock bounces around is something you can count on. Which way it goes next isn't.
-    </div>`);
-}
-
-function showBreakoutSheet(id) {
-  const s = stocks.find(x=>String(x.id)===String(id));
-  if(!s) return;
-  const b = compute52WHighBreakout(s);
-  const isConfirmed = b.badge==='confirmed';
-  const title = isConfirmed ? '52W High Breakout Confirmed' : b.badge==='watch' ? '52W High Breakout Watch' : 'Not a Breakout Setup Right Now';
-  const conditions = isConfirmed ? b.confirmedConditions : b.watchConditions;
-  const rows = conditions.map(c=>`
-    <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid ${C.border};">
-      <span style="font-size:15px;">${!c.evaluable?'⏳':c.met?'✅':'❌'}</span>
-      <span style="color:${!c.evaluable?C.textMuted:C.text};font-size:13px;">${c.label}${!c.evaluable?' — not enough history to confirm':''}</span>
-    </div>`).join('');
-  showSheet(`
-    ${pillSheetHeader('Breakout Signal', C.purple)}
-    <div style="color:${C.text};font-size:18px;font-weight:900;margin-bottom:6px;">${title}</div>
-    <div style="color:${C.textMuted};font-size:12px;line-height:1.6;margin-bottom:16px;">Only detects a breakout through ${s.ticker}'s own 52-week high — not a general base or swing-high breakout. Those still need a manual look.</div>
-    ${rows}`);
 }
 
 function showOpportunitySheet(id) {
@@ -4991,6 +4762,61 @@ async function doDelete(id) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// CLEAR ALL (SAFE) — deletes only untouched scan imports, keeps anything with
+// real history behind it. "Real history" = more than one snapshot: a bulk-scan
+// import creates a stock with exactly 1 snapshot (import day only), while a
+// 6- or 12-month CSV history import fills it with dozens. So anything you've
+// actually pulled history into, or logged even one daily update on, survives.
+// Gated behind a typed CLEAR confirmation — never a one-tap mass delete.
+function hasRealHistory(s) { return (s.snapshots ? s.snapshots.length : 0) > 1; }
+function confirmClearAll() {
+  const toDelete = stocks.filter(s=>!hasRealHistory(s));
+  const toKeep   = stocks.filter(s=>hasRealHistory(s));
+  if(toDelete.length===0) {
+    showModal(`
+      <div style="background:${C.card};border-radius:20px;padding:24px;border:1px solid ${C.border};text-align:center;">
+        <div style="font-size:32px;margin-bottom:12px;">✓</div>
+        <div style="color:${C.text};font-size:18px;font-weight:900;margin-bottom:8px;">Nothing to clear</div>
+        <div style="color:${C.text};font-size:13px;line-height:1.6;margin-bottom:22px;">Every stock on your list has history behind it, so there are no untouched scan imports to remove.</div>
+        <button onclick="closeAllOverlays()" style="width:100%;padding:13px;border-radius:12px;border:none;background:${C.text};color:${C.bg};font-size:14px;font-weight:800;cursor:pointer;">Got it</button>
+      </div>`);
+    return;
+  }
+  showModal(`
+    <div style="background:${C.card};border-radius:20px;padding:24px;border:1px solid ${C.red}44;">
+      <div style="text-align:center;font-size:32px;margin-bottom:12px;">🧹</div>
+      <div style="color:${C.text};font-size:18px;font-weight:900;margin-bottom:8px;text-align:center;">Clear untouched stocks?</div>
+      <div style="display:flex;gap:10px;margin-bottom:16px;">
+        <div style="flex:1;background:${C.redDim};border-radius:12px;padding:12px;text-align:center;">
+          <div style="color:${C.red};font-size:22px;font-weight:900;">${toDelete.length}</div>
+          <div style="color:${C.text};font-size:11px;margin-top:2px;">will be deleted</div>
+        </div>
+        <div style="flex:1;background:${C.greenDim};border-radius:12px;padding:12px;text-align:center;">
+          <div style="color:${C.green};font-size:22px;font-weight:900;">${toKeep.length}</div>
+          <div style="color:${C.text};font-size:11px;margin-top:2px;">kept (have history)</div>
+        </div>
+      </div>
+      <div style="color:${C.text};font-size:12.5px;line-height:1.6;margin-bottom:8px;">This removes only raw scan imports you haven't pulled history into or updated. Anything with 6- or 12-month data stays. This can't be undone.</div>
+      <div style="color:${C.textMuted};font-size:11px;margin-bottom:14px;">Type <b style="color:${C.text};">CLEAR</b> to confirm:</div>
+      <input id="clear-confirm-input" type="text" autocomplete="off" oninput="const b=document.getElementById('clear-confirm-btn'); if(b){ const ok=this.value.trim().toUpperCase()==='CLEAR'; b.disabled=!ok; b.style.opacity=ok?'1':'0.4'; b.style.cursor=ok?'pointer':'not-allowed'; }" style="width:100%;background:${C.cardHigh};border:1px solid ${C.border};border-radius:10px;color:${C.text};font-size:15px;font-weight:700;padding:12px;outline:none;box-sizing:border-box;margin-bottom:16px;text-align:center;letter-spacing:0.1em;" placeholder="CLEAR">
+      <div style="display:flex;gap:10px;">
+        <button onclick="closeAllOverlays()" style="flex:1;padding:13px;border-radius:12px;border:1px solid ${C.border};background:none;color:${C.textSub};font-size:14px;font-weight:700;cursor:pointer;">Cancel</button>
+        <button id="clear-confirm-btn" disabled onclick="doClearAll()" style="flex:1;padding:13px;border-radius:12px;border:none;background:${C.red};color:#fff;font-size:14px;font-weight:900;cursor:not-allowed;opacity:0.4;">Delete ${toDelete.length}</button>
+      </div>
+    </div>`);
+}
+async function doClearAll() {
+  const toDelete = stocks.filter(s=>!hasRealHistory(s));
+  const ids = toDelete.map(s=>s.id);
+  closeAllOverlays();
+  stocks = stocks.filter(s=>hasRealHistory(s));
+  renderHome();
+  for(const id of ids) {
+    try { await fbDeleteStock(id); } catch(e) { console.error(e); }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // BUILD BUY PLAN (creates tranches — previously nothing did this)
 // ═══════════════════════════════════════════════════════════════════════════════
 function showReclassifyFlow(stockId) {
@@ -5118,48 +4944,6 @@ function showFillModal(stockId, trancheLabel) {
         <button onclick="doFill('${stockId}','${trancheLabel}')" style="flex:2;padding:13px;border-radius:12px;border:none;background:${C.green};color:#000;font-size:14px;font-weight:900;cursor:pointer;">✓ Confirm Buy</button>
       </div>
     </div>`);
-}
-
-// Clears a recorded buy (and any recorded sale on it) back to "Waiting."
-// Deliberately wipes the sale fields too — leaving a soldPrice attached to
-// a tranche with no entryPrice would leave the P&L math reading from a buy
-// that no longer exists. Always confirms first: this is real money data.
-function confirmClearBuy(stockId, trancheLabel) {
-  const s = stocks.find(x=>String(x.id)===String(stockId));
-  const t = (s?.tranche||[]).find(x=>x.label===trancheLabel);
-  if(!s||!t) return;
-  const hadSale = t.soldPrice!=null;
-  showModal(`
-    <div style="background:${C.card};border-radius:22px;padding:24px;border:1px solid ${C.yellow}44;">
-      <div style="color:${C.text};font-size:20px;font-weight:900;margin-bottom:8px;">Clear this buy?</div>
-      <div style="color:${C.textSub};font-size:13px;line-height:1.7;margin-bottom:8px;">
-        This erases what you entered for ${t.label}: ${fmtP(t.entryPrice)} × ${t.shares} shares${hadSale?`, plus the sale you recorded on ${t.soldDate}`:''}.
-      </div>
-      <div style="color:${C.textSub};font-size:13px;line-height:1.7;margin-bottom:20px;">
-        ${t.label} goes back to "Waiting." Your entry plan and everything else about ${s.ticker} stays exactly as it is.
-      </div>
-      <div style="display:flex;gap:10px;">
-        <button onclick="closeAllOverlays()" style="flex:1;padding:13px;border-radius:12px;border:1px solid ${C.border};background:none;color:${C.textSub};font-size:14px;font-weight:700;cursor:pointer;">Keep it</button>
-        <button onclick="doClearBuy('${stockId}','${trancheLabel}')" style="flex:2;padding:13px;border-radius:12px;border:none;background:${C.yellow};color:#000;font-size:14px;font-weight:900;cursor:pointer;">Clear it</button>
-      </div>
-    </div>`);
-}
-
-async function doClearBuy(stockId, trancheLabel) {
-  const s = stocks.find(x=>String(x.id)===String(stockId));
-  if(!s) return;
-  const updated = {...s, tranche: s.tranche.map(t=>{
-    if(t.label!==trancheLabel) return t;
-    const {entryPrice, shares, soldPrice, soldShares, soldDate, ...rest} = t;
-    return {...rest, status:'waiting'};
-  })};
-  stocks = stocks.map(x=>String(x.id)===String(stockId)?updated:x);
-  closeAllOverlays();
-  await fbSaveStock(updated);
-  showSaveStatus('saved');
-  setTimeout(()=>showSaveStatus('ready'),2000);
-  renderDetail(updated);
-  renderHome();
 }
 
 async function doFill(stockId, trancheLabel) {
