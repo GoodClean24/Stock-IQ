@@ -87,6 +87,7 @@ input[type=number]{-moz-appearance:textfield;}
   <!-- Portfolio box -->
   <div id="portfolio-box"></div>
   <!-- Tonight's Best Opportunities — the ranking engine -->
+  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · clean</div>
   <div id="tonights-opportunities"></div>
   <!-- Filter tags + sort -->
   <div id="filter-bar" style="background:#11141C;border-bottom:1px solid #1E2230;padding:9px 20px;"></div>
@@ -1109,7 +1110,103 @@ function openDetail(id) {
   showScreen('detail');
 }
 
+// ── CLEAN DETAIL SCREEN (Option 3) ──────────────────────────────────────────
+// Simple screen driven entirely by the validated engine: verdict + reason,
+// the 4-point setup check, and the trade plan — every row tappable for a
+// plain-language explainer that uses THIS stock's live numbers.
+function planNumbers(s){
+  const entry=s.price, atr=s.atr;
+  const riskPerShare=(atr!=null)?2*atr:null;
+  const stop=(entry!=null&&riskPerShare!=null)?entry-riskPerShare:null;
+  const budget=s.invested||0;
+  const shares=(budget>0&&entry>0)?budget/entry:null;
+  return {entry, atr, riskPerShare, stop, budget, shares};
+}
+// Live-number explainer text. Each returns a short, plain paragraph.
+const LEARN = {
+  uptrend:(s)=>`We only buy with the longer trend, never against it. This checks price is above its 200-day and 50-day averages, and the 50 sits above the 200. Right now price is ${fmtP(s.price)} and the 200-day is ${s.ma200!=null?fmtP(s.ma200):'—'}. ${(s.price>s.ma200&&s.ma50>s.ma200)?'Trend is up — good.':'Not lined up yet — that\u2019s why this one is a wait.'}`,
+  rsi:(s)=>`RSI measures momentum from 0 to 100. The 45–60 pocket is where a stock has cooled off enough to be a good entry but isn\u2019t still falling. Under 45 it\u2019s dropping, over 60 it\u2019s already extended. Yours is ${s.rsi!=null?s.rsi.toFixed(1):'—'}.`,
+  atr:(s)=>{const p=(s.atr&&s.price)?(s.atr/s.price*100):null; return `ATR is how much this stock moves on an average day. We want 4–8% of price: enough room to swing for real gains, not so wild you can\u2019t manage the risk. Yours is ${p!=null?p.toFixed(1)+'%':'—'} (about ${s.atr!=null?fmtP(s.atr):'—'} a day).`;},
+  macd:(s)=>{const up=(s.macdLine!=null&&s.signalLine!=null)?s.macdLine>s.signalLine:null; return `MACD crossing up means short-term momentum just turned positive — the trigger that says \u201cnow,\u201d not \u201csomeday.\u201d Right now MACD is ${up===null?'unknown':(up?'above':'below')} its signal line.`;},
+  entry:(s)=>{const p=planNumbers(s); return `Buy at or near the current price, ${fmtP(p.entry)}. We don\u2019t wait for a lower price — the backtests showed waiting for a dip missed the best trades and kept the weak ones.`;},
+  stop:(s)=>{const p=planNumbers(s); return `Your bail-out price. If it falls to ${p.stop!=null?fmtP(p.stop):'—'} you sell, no debating it. It sits 2 ATR (about ${p.riskPerShare!=null?fmtP(p.riskPerShare):'—'} a share) below entry — far enough that normal daily wiggle won\u2019t hit it, close enough that a real breakdown does.`;},
+  exit:(s)=>{const p=planNumbers(s); return `How you leave a winner. No fixed target — as the stock climbs, this trails 3 ATR (about ${p.atr!=null?fmtP(3*p.atr):'—'}) behind its high and only sells on a real pullback. That\u2019s what lets winners run instead of capping them.`;},
+  size:(s)=>{const p=planNumbers(s); return `How many shares. The right way is to risk 1% of your account divided by your ${p.riskPerShare!=null?fmtP(p.riskPerShare):'—'}-a-share stop. With your ${fmtP(p.budget)} budget set here that\u2019s about ${p.shares!=null?p.shares.toFixed(1):'—'} shares (fractional is fine).`;},
+};
+function showLearn(key, sid){
+  const s=(stocks||[]).find(x=>String(x.id)===String(sid)); if(!s||!LEARN[key])return;
+  const titles={uptrend:'Uptrend',rsi:'RSI 45–60',atr:'Daily range (ATR)',macd:'MACD cross',entry:'Entry',stop:'Stop loss',exit:'Trailing exit',size:'Position size'};
+  const ov=document.createElement('div');
+  ov.id='learn-overlay';
+  ov.style.cssText='position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.55);display:flex;align-items:flex-end;justify-content:center;';
+  ov.onclick=()=>ov.remove();
+  ov.innerHTML=`<div onclick="event.stopPropagation()" style="background:${C.card};border-top:1px solid ${C.border};border-radius:18px 18px 0 0;max-width:440px;width:100%;padding:20px 20px 28px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <div style="color:${C.text};font-size:16px;font-weight:600;">${titles[key]||''}</div>
+      <button onclick="document.getElementById('learn-overlay').remove()" style="background:none;border:none;color:${C.textSub};font-size:22px;cursor:pointer;line-height:1;">×</button>
+    </div>
+    <div style="color:${C.textSub||'#AEB4C2'};font-size:14px;line-height:1.65;">${LEARN[key](s)}</div>
+  </div>`;
+  document.body.appendChild(ov);
+}
+function renderCleanDetail(s){
+  const v=computeSignalVerdict(s);
+  const p=planNumbers(s);
+  const isBuy=v.buy, C_=C;
+  const vColor=isBuy?C.green:(v.ready?C.yellow:C.textMuted);
+  const vBg=isBuy?(C.green+'22'):(v.ready?(C.yellow+'22'):(C.textMuted+'22'));
+  const vWord=isBuy?'BUY':'WAIT';
+  const row=(key,label,val,pass)=>`<button onclick="showLearn('${key}','${s.id}')" style="all:unset;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 2px;border-bottom:1px solid ${C.border};width:100%;box-sizing:border-box;">
+    <span style="display:flex;align-items:center;gap:9px;">${pass!=null?`<span style="color:${pass?C.green:C.red};font-size:15px;">${pass?'✓':'✕'}</span>`:''}<span style="color:${C.text};font-size:13.5px;">${label}</span></span>
+    <span style="display:flex;align-items:center;gap:8px;color:${C.textSub};font-size:13px;">${val!=null?val:''}<span style="color:${C.textMuted};font-size:14px;">›</span></span>
+  </button>`;
+  const checks=v.checks||[];
+  const cGet=(frag)=>checks.find(c=>c.label.toLowerCase().includes(frag));
+  const planRows = isBuy ? `
+    ${row('entry','Entry','Now, near '+fmtP(p.entry),null)}
+    ${row('stop','Stop loss',p.stop!=null?fmtP(p.stop):'—',null)}
+    ${row('exit','Trailing exit','3× ATR',null)}
+    ${row('size','Size',p.shares!=null?p.shares.toFixed(1)+' sh':'set budget',null)}`
+   : `<div style="color:${C.textMuted};font-size:12.5px;padding:12px 2px;line-height:1.5;">Your trade plan appears here once this is a BUY. No setup yet means no trade to plan.</div>`;
+
+  document.getElementById('detail-content').innerHTML=`
+   <div style="max-width:480px;margin:0 auto;">
+    <div style="background:${C.card};border-bottom:1px solid ${C.border};padding:16px 20px;display:flex;align-items:center;justify-content:space-between;">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <button onclick="showScreen('home');renderHome();" style="background:none;border:none;color:${C.textSub};font-size:24px;cursor:pointer;line-height:1;">←</button>
+        <div><div style="color:${C.text};font-size:20px;font-weight:600;">${s.ticker}</div>
+        <div style="color:${C.textSub};font-size:12px;">${s.name||''} · ${(s.type||'swing').toLowerCase().replace(' trade','')}</div></div>
+      </div>
+      <div style="text-align:right;"><div style="color:${C.text};font-size:18px;font-weight:600;">${fmtP(s.price)}</div>
+      <div style="color:${(s.pct||0)>=0?C.green:C.red};font-size:12px;">${(s.pct||0)>=0?'▲':'▼'} ${Math.abs(s.pct||0).toFixed(2)}%</div></div>
+    </div>
+
+    <div style="padding:22px 20px;text-align:center;border-bottom:1px solid ${C.border};">
+      <div style="display:inline-block;background:${vBg};color:${vColor};font-size:22px;font-weight:600;letter-spacing:0.03em;padding:8px 30px;border-radius:10px;">${vWord}</div>
+      <div style="color:${C.textSub||'#AEB4C2'};font-size:13px;line-height:1.6;margin-top:14px;">${v.reason||''}</div>
+    </div>
+
+    <div style="padding:14px 20px;border-bottom:1px solid ${C.border};">
+      <div style="color:${C.textMuted};font-size:11px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">The setup <span style="text-transform:none;letter-spacing:0;">· tap any row to learn</span></div>
+      ${row('uptrend','Uptrend (price above 200, 50 above 200)',null,cGet('uptrend')?cGet('uptrend').pass:null)}
+      ${row('rsi','RSI in the 45–60 band',null,cGet('rsi')?cGet('rsi').pass:null)}
+      ${row('atr','Daily range tradeable (ATR 4–8%)',null,cGet('range')?cGet('range').pass:null)}
+      ${row('macd','MACD crossed up',null,cGet('macd')?cGet('macd').pass:null)}
+    </div>
+
+    <div style="padding:14px 20px;">
+      <div style="color:${C.textMuted};font-size:11px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">Your plan</div>
+      ${planRows}
+    </div>
+
+    <div style="padding:4px 20px 24px;">
+      <button onclick="openMentor('${s.id}')" style="background:${C.cardHigh};color:${C.purple};border:1px solid ${C.purple}44;border-radius:12px;padding:11px;font-size:13px;font-weight:600;cursor:pointer;width:100%;">Mentor — walk me through this trade</button>
+    </div>
+   </div>`;
+}
+
 function renderDetail(s) {
+  return renderCleanDetail(s);   // Option 3: clean screen. Old busy render parked below (unreachable, kept for reference).
   const filled = (s.tranche||[]).filter(t=>t.status==='filled');
   const totalInv = filled.reduce((a,t)=>a+(t.entryPrice||0)*(t.shares||0),0);
   const totalVal = filled.reduce((a,t)=>a+s.price*(t.shares||0),0);
