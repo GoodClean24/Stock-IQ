@@ -87,7 +87,7 @@ input[type=number]{-moz-appearance:textfield;}
   <!-- Portfolio box -->
   <div id="portfolio-box"></div>
   <!-- Tonight's Best Opportunities — the ranking engine -->
-  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · clean</div>
+  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · clean2</div>
   <div id="tonights-opportunities"></div>
   <!-- Filter tags + sort -->
   <div id="filter-bar" style="background:#11141C;border-bottom:1px solid #1E2230;padding:9px 20px;"></div>
@@ -1145,7 +1145,7 @@ function showLearn(key, sid){
       <div style="color:${C.text};font-size:16px;font-weight:600;">${titles[key]||''}</div>
       <button onclick="document.getElementById('learn-overlay').remove()" style="background:none;border:none;color:${C.textSub};font-size:22px;cursor:pointer;line-height:1;">×</button>
     </div>
-    <div style="color:${C.textSub||'#AEB4C2'};font-size:14px;line-height:1.65;">${LEARN[key](s)}</div>
+    <div style="color:#D5DAE5;font-size:14px;line-height:1.65;">${LEARN[key](s)}</div>
   </div>`;
   document.body.appendChild(ov);
 }
@@ -1153,12 +1153,12 @@ function renderCleanDetail(s){
   const v=computeSignalVerdict(s);
   const p=planNumbers(s);
   const isBuy=v.buy, C_=C;
-  const vColor=isBuy?C.green:(v.ready?C.yellow:C.textMuted);
-  const vBg=isBuy?(C.green+'22'):(v.ready?(C.yellow+'22'):(C.textMuted+'22'));
+  const vColor=isBuy?'#0D0F16':(v.ready?'#0D0F16':'#0D0F16');
+  const vBg=isBuy?C.green:(v.ready?C.yellow:'#E8A317');
   const vWord=isBuy?'BUY':'WAIT';
   const row=(key,label,val,pass)=>`<button onclick="showLearn('${key}','${s.id}')" style="all:unset;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 2px;border-bottom:1px solid ${C.border};width:100%;box-sizing:border-box;">
     <span style="display:flex;align-items:center;gap:9px;">${pass!=null?`<span style="color:${pass?C.green:C.red};font-size:15px;">${pass?'✓':'✕'}</span>`:''}<span style="color:${C.text};font-size:13.5px;">${label}</span></span>
-    <span style="display:flex;align-items:center;gap:8px;color:${C.textSub};font-size:13px;">${val!=null?val:''}<span style="color:${C.textMuted};font-size:14px;">›</span></span>
+    <span style="display:flex;align-items:center;gap:8px;color:#CDD2DE;font-size:13px;">${val!=null?val:''}<span style="color:#8A90A0;font-size:14px;">›</span></span>
   </button>`;
   const checks=v.checks||[];
   const cGet=(frag)=>checks.find(c=>c.label.toLowerCase().includes(frag));
@@ -1167,7 +1167,7 @@ function renderCleanDetail(s){
     ${row('stop','Stop loss',p.stop!=null?fmtP(p.stop):'—',null)}
     ${row('exit','Trailing exit','3× ATR',null)}
     ${row('size','Size',p.shares!=null?p.shares.toFixed(1)+' sh':'set budget',null)}`
-   : `<div style="color:${C.textMuted};font-size:12.5px;padding:12px 2px;line-height:1.5;">Your trade plan appears here once this is a BUY. No setup yet means no trade to plan.</div>`;
+   : `<div style="color:#C7CCD8;font-size:12.5px;padding:12px 2px;line-height:1.5;">Your trade plan appears here once this is a BUY. No setup yet means no trade to plan.</div>`;
 
   document.getElementById('detail-content').innerHTML=`
    <div style="max-width:480px;margin:0 auto;">
@@ -1175,7 +1175,7 @@ function renderCleanDetail(s){
       <div style="display:flex;align-items:center;gap:12px;">
         <button onclick="showScreen('home');renderHome();" style="background:none;border:none;color:${C.textSub};font-size:24px;cursor:pointer;line-height:1;">←</button>
         <div><div style="color:${C.text};font-size:20px;font-weight:600;">${s.ticker}</div>
-        <div style="color:${C.textSub};font-size:12px;">${s.name||''} · ${(s.type||'swing').toLowerCase().replace(' trade','')}</div></div>
+        <div style="color:#AEB4C2;font-size:12px;">${s.name||''} · ${(s.type||'swing').toLowerCase().replace(' trade','')}</div></div>
       </div>
       <div style="text-align:right;"><div style="color:${C.text};font-size:18px;font-weight:600;">${fmtP(s.price)}</div>
       <div style="color:${(s.pct||0)>=0?C.green:C.red};font-size:12px;">${(s.pct||0)>=0?'▲':'▼'} ${Math.abs(s.pct||0).toFixed(2)}%</div></div>
@@ -1183,11 +1183,11 @@ function renderCleanDetail(s){
 
     <div style="padding:22px 20px;text-align:center;border-bottom:1px solid ${C.border};">
       <div style="display:inline-block;background:${vBg};color:${vColor};font-size:22px;font-weight:600;letter-spacing:0.03em;padding:8px 30px;border-radius:10px;">${vWord}</div>
-      <div style="color:${C.textSub||'#AEB4C2'};font-size:13px;line-height:1.6;margin-top:14px;">${v.reason||''}</div>
+      <div style="color:#E2E6EF;font-size:13.5px;line-height:1.6;margin-top:14px;">${v.reason||''}</div>
     </div>
 
     <div style="padding:14px 20px;border-bottom:1px solid ${C.border};">
-      <div style="color:${C.textMuted};font-size:11px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">The setup <span style="text-transform:none;letter-spacing:0;">· tap any row to learn</span></div>
+      <div style="color:#AEB4C2;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">The setup <span style="text-transform:none;letter-spacing:0;color:#8A90A0;">· tap any row to learn</span></div>
       ${row('uptrend','Uptrend (price above 200, 50 above 200)',null,cGet('uptrend')?cGet('uptrend').pass:null)}
       ${row('rsi','RSI in the 45–60 band',null,cGet('rsi')?cGet('rsi').pass:null)}
       ${row('atr','Daily range tradeable (ATR 4–8%)',null,cGet('range')?cGet('range').pass:null)}
@@ -1195,7 +1195,7 @@ function renderCleanDetail(s){
     </div>
 
     <div style="padding:14px 20px;">
-      <div style="color:${C.textMuted};font-size:11px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">Your plan</div>
+      <div style="color:#AEB4C2;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">Your plan</div>
       ${planRows}
     </div>
 
