@@ -87,7 +87,7 @@ input[type=number]{-moz-appearance:textfield;}
   <!-- Portfolio box -->
   <div id="portfolio-box"></div>
   <!-- Tonight's Best Opportunities — the ranking engine -->
-  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · clearall</div>
+  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · upload</div>
   <div id="tonights-opportunities"></div>
   <!-- Filter tags + sort -->
   <div id="filter-bar" style="background:#11141C;border-bottom:1px solid #1E2230;padding:9px 20px;"></div>
@@ -1268,7 +1268,8 @@ function renderCleanDetail(s){
       ${planRows}
     </div>
 
-    <div style="padding:4px 20px 24px;">
+    <div style="padding:4px 20px 24px;display:flex;flex-direction:column;gap:10px;">
+      <button onclick="showImportFlow('${s.id}')" style="background:${isWatch?'#1D4ED8':C.cardHigh};color:${isWatch?'#fff':C.teal};border:1px solid ${isWatch?'#1D4ED8':C.teal+'55'};border-radius:12px;padding:12px;font-size:13px;font-weight:700;cursor:pointer;width:100%;">${isWatch?'Upload 12-month history to confirm':'Upload / update history'}</button>
       <button onclick="openMentor('${s.id}')" style="background:${C.cardHigh};color:${C.purple};border:1px solid ${C.purple}44;border-radius:12px;padding:11px;font-size:13px;font-weight:600;cursor:pointer;width:100%;">Mentor — walk me through this trade</button>
     </div>
    </div>`;
