@@ -87,7 +87,7 @@ input[type=number]{-moz-appearance:textfield;}
   <!-- Portfolio box -->
   <div id="portfolio-box"></div>
   <!-- Tonight's Best Opportunities — the ranking engine -->
-  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · 3-state</div>
+  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · clearall</div>
   <div id="tonights-opportunities"></div>
   <!-- Filter tags + sort -->
   <div id="filter-bar" style="background:#11141C;border-bottom:1px solid #1E2230;padding:9px 20px;"></div>
@@ -817,9 +817,11 @@ function renderStockList() {
   }
 
   const clearableCount = stocks.filter(s=>!hasRealHistory(s)).length;
-  const clearFooter = clearableCount >= 3 ? `
-    <div style="text-align:center;padding:20px 0 8px;">
-      <button onclick="confirmClearAll()" style="background:none;border:none;color:${C.textMuted};font-size:12px;font-weight:600;cursor:pointer;text-decoration:underline;text-underline-offset:3px;">🧹 Clear ${clearableCount} untouched stocks (keeps anything with history)</button>
+  const totalCount = stocks.filter(s=>!s.archived).length;
+  const clearFooter = totalCount > 0 ? `
+    <div style="text-align:center;padding:22px 0 10px;display:flex;flex-direction:column;gap:12px;align-items:center;">
+      ${clearableCount>=3?`<button onclick="confirmClearAll()" style="background:none;border:none;color:${C.textMuted};font-size:12px;font-weight:600;cursor:pointer;text-decoration:underline;text-underline-offset:3px;">🧹 Clear ${clearableCount} untouched stocks (keeps anything with history)</button>`:''}
+      <button onclick="confirmClearEverything()" style="background:none;border:1px solid ${C.red}55;color:${C.red};font-size:12px;font-weight:700;cursor:pointer;padding:8px 16px;border-radius:10px;">Clear ALL ${totalCount} stocks</button>
     </div>` : '';
   el.innerHTML = groupedListHTML(filtered) + clearFooter;
 }
@@ -4974,6 +4976,36 @@ async function doClearAll() {
   const ids = toDelete.map(s=>s.id);
   closeAllOverlays();
   stocks = stocks.filter(s=>hasRealHistory(s));
+  renderHome();
+  for(const id of ids) {
+    try { await fbDeleteStock(id); } catch(e) { console.error(e); }
+  }
+}
+
+function confirmClearEverything() {
+  const n = stocks.length;
+  if(n===0){ closeAllOverlays(); return; }
+  showModal(`
+    <div style="background:${C.card};border-radius:20px;padding:24px;border:1px solid ${C.red}44;">
+      <div style="text-align:center;font-size:32px;margin-bottom:12px;">🗑️</div>
+      <div style="color:${C.text};font-size:18px;font-weight:900;margin-bottom:8px;text-align:center;">Clear every stock?</div>
+      <div style="background:${C.redDim};border-radius:12px;padding:14px;text-align:center;margin-bottom:14px;">
+        <div style="color:${C.red};font-size:26px;font-weight:900;">${n}</div>
+        <div style="color:${C.text};font-size:11px;margin-top:2px;">stocks will be deleted — including ones with history</div>
+      </div>
+      <div style="color:${C.text};font-size:12.5px;line-height:1.6;margin-bottom:8px;">This wipes your entire list, history and all. It can't be undone. You'll be starting from an empty board.</div>
+      <div style="color:${C.textMuted};font-size:11px;margin-bottom:14px;">Type <b style="color:${C.text};">CLEAR</b> to confirm:</div>
+      <input id="clear-all-input" type="text" autocomplete="off" oninput="const b=document.getElementById('clear-all-btn'); if(b){ const ok=this.value.trim().toUpperCase()==='CLEAR'; b.disabled=!ok; b.style.opacity=ok?'1':'0.4'; b.style.cursor=ok?'pointer':'not-allowed'; }" style="width:100%;background:${C.cardHigh};border:1px solid ${C.border};border-radius:10px;color:${C.text};font-size:15px;font-weight:700;padding:12px;outline:none;box-sizing:border-box;margin-bottom:16px;text-align:center;letter-spacing:0.1em;" placeholder="CLEAR">
+      <div style="display:flex;gap:10px;">
+        <button onclick="closeAllOverlays()" style="flex:1;padding:13px;border-radius:12px;border:1px solid ${C.border};background:none;color:${C.textSub};font-size:14px;font-weight:700;cursor:pointer;">Cancel</button>
+        <button id="clear-all-btn" disabled onclick="doClearEverything()" style="flex:1;padding:13px;border-radius:12px;border:none;background:${C.red};color:#fff;font-size:14px;font-weight:900;cursor:not-allowed;opacity:0.4;">Delete all ${n}</button>
+      </div>
+    </div>`);
+}
+async function doClearEverything() {
+  const ids = stocks.map(s=>s.id);
+  closeAllOverlays();
+  stocks = [];
   renderHome();
   for(const id of ids) {
     try { await fbDeleteStock(id); } catch(e) { console.error(e); }
