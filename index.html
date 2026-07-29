@@ -87,7 +87,7 @@ input[type=number]{-moz-appearance:textfield;}
   <!-- Portfolio box -->
   <div id="portfolio-box"></div>
   <!-- Tonight's Best Opportunities — the ranking engine -->
-  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · atrfix</div>
+  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · detail2</div>
   <div id="tonights-opportunities"></div>
   <!-- Filter tags + sort -->
   <div id="filter-bar" style="background:#11141C;border-bottom:1px solid #1E2230;padding:9px 20px;"></div>
@@ -227,6 +227,28 @@ let mentorShowLimitedIntro = false; // whether step 0 is the Limited History int
 let searchQuery = '';
 let sortMode = 'opportunity'; // 'opportunity' | 'price' | 'pct' | 'name'
 let portfolioHidden = false;
+let accountSize = parseFloat(localStorage.getItem('stockiq_account')||'0') || 0;
+function setAccountSize(){
+  showModal(`
+    <div style="background:${C.card};border-radius:20px;padding:24px;border:1px solid ${C.border};">
+      <div style="color:${C.text};font-size:18px;font-weight:800;text-align:center;margin-bottom:6px;">Account size</div>
+      <div style="color:#AEB4C2;font-size:12.5px;line-height:1.55;text-align:center;margin-bottom:16px;">Used to size every trade at 1% risk. If your account is $10,000, each trade risks $100, and the app works out the shares from your stop.</div>
+      <input id="acct-input" type="text" inputmode="decimal" value="${accountSize||''}" placeholder="e.g. 10000" style="width:100%;background:${C.cardHigh};border:1px solid ${C.border};border-radius:10px;color:${C.text};font-size:18px;font-weight:700;padding:13px;outline:none;box-sizing:border-box;margin-bottom:16px;text-align:center;">
+      <div style="display:flex;gap:10px;">
+        <button onclick="closeAllOverlays()" style="flex:1;padding:13px;border-radius:12px;border:1px solid ${C.border};background:none;color:${C.textSub};font-size:14px;font-weight:700;cursor:pointer;">Cancel</button>
+        <button onclick="saveAccountSize(document.getElementById('acct-input').value)" style="flex:1;padding:13px;border-radius:12px;border:none;background:${C.green};color:#000;font-size:14px;font-weight:900;cursor:pointer;">Save</button>
+      </div>
+    </div>`);
+}
+function saveAccountSize(val){
+  const n = parseFloat(String(val).replace(/[^0-9.]/g,''));
+  accountSize = (n>0)?n:0;
+  try{ localStorage.setItem('stockiq_account', String(accountSize)); }catch(e){}
+  closeAllOverlays();
+  if(detailStockId){ const s=stocks.find(x=>String(x.id)===String(detailStockId)); if(s) renderDetail(s); }
+  renderHome();
+}
+let detailStockId = null;
 let reclassifyDismissed = new Set(); // session-only — "Review Later" on the Both-strategy banner
 
 // Old type values migrate automatically; 'Both' is deliberately left alone —
@@ -1187,9 +1209,10 @@ function planNumbers(s){
   const entry=s.price, atr=s.atr;
   const riskPerShare=(atr!=null)?2*atr:null;
   const stop=(entry!=null&&riskPerShare!=null)?entry-riskPerShare:null;
-  const budget=s.invested||0;
-  const shares=(budget>0&&entry>0)?budget/entry:null;
-  return {entry, atr, riskPerShare, stop, budget, shares};
+  const trailDist=(atr!=null)?3*atr:null;
+  const riskDollars=accountSize>0 ? accountSize*0.01 : null;
+  const shares=(riskDollars!=null && riskPerShare)? riskDollars/riskPerShare : null;
+  return {entry, atr, riskPerShare, stop, trailDist, riskDollars, shares};
 }
 // Live-number explainer text. Each returns a short, plain paragraph.
 const LEARN = {
@@ -1200,7 +1223,9 @@ const LEARN = {
   entry:(s)=>{const p=planNumbers(s); return `Buy at or near the current price, ${fmtP(p.entry)}. We don\u2019t wait for a lower price — the backtests showed waiting for a dip missed the best trades and kept the weak ones.`;},
   stop:(s)=>{const p=planNumbers(s); return `Your bail-out price. If it falls to ${p.stop!=null?fmtP(p.stop):'—'} you sell, no debating it. It sits 2 ATR (about ${p.riskPerShare!=null?fmtP(p.riskPerShare):'—'} a share) below entry — far enough that normal daily wiggle won\u2019t hit it, close enough that a real breakdown does.`;},
   exit:(s)=>{const p=planNumbers(s); return `How you leave a winner. No fixed target — as the stock climbs, this trails 3 ATR (about ${p.atr!=null?fmtP(3*p.atr):'—'}) behind its high and only sells on a real pullback. That\u2019s what lets winners run instead of capping them.`;},
-  size:(s)=>{const p=planNumbers(s); return `How many shares. The right way is to risk 1% of your account divided by your ${p.riskPerShare!=null?fmtP(p.riskPerShare):'—'}-a-share stop. With your ${fmtP(p.budget)} budget set here that\u2019s about ${p.shares!=null?p.shares.toFixed(1):'—'} shares (fractional is fine).`;},
+  size:(s)=>{const p=planNumbers(s); return accountSize>0
+    ? `How many shares, sized so you risk 1% of your ${fmtP(accountSize)} account — ${fmtP(p.riskDollars)} on this trade. Divided by your ${p.riskPerShare!=null?fmtP(p.riskPerShare):'—'}-a-share stop, that\u2019s about ${p.shares!=null?p.shares.toFixed(1):'—'} shares (fractional is fine).`
+    : `Set your account size and the app sizes every trade to risk 1% of it. The stop here is ${p.riskPerShare!=null?fmtP(p.riskPerShare):'—'} a share, so a $10,000 account (risking $100) would be about ${p.riskPerShare?(100/p.riskPerShare).toFixed(1):'—'} shares.`;},
 };
 function showLearn(key, sid){
   const s=(stocks||[]).find(x=>String(x.id)===String(sid)); if(!s||!LEARN[key])return;
@@ -1218,9 +1243,53 @@ function showLearn(key, sid){
   </div>`;
   document.body.appendChild(ov);
 }
+function openSimpleMentor(id){
+  const s = stocks.find(x=>String(x.id)===String(id)); if(!s) return;
+  const v = computeSignalVerdict(s);
+  const p = planNumbers(s);
+  const state = v.state || 'WAIT';
+  const vc = state==='BUY'?C.green:(state==='WATCH'?'#3B82F6':'#E8A317');
+  const checkLine = (key,label) => {
+    const c = (v.checks||[]).find(x=>x.label.toLowerCase().includes(key));
+    const pass = c ? c.pass : false;
+    return `<div style="display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid ${C.border};">
+      <span style="color:${pass?C.green:C.red};font-size:15px;flex-shrink:0;">${pass?'✓':'✕'}</span>
+      <div><div style="color:${C.text};font-size:13.5px;font-weight:600;margin-bottom:2px;">${label}</div>
+      <div style="color:#C7CCD8;font-size:12.5px;line-height:1.55;">${LEARN[key]?LEARN[key](s):''}</div></div>
+    </div>`;
+  };
+  const planPart = state==='BUY' ? `
+    <div style="color:#AEB4C2;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;margin:16px 0 8px;">Your plan</div>
+    <div style="color:#C7CCD8;font-size:12.5px;line-height:1.7;">
+      Buy near ${fmtP(p.entry)}. Set your stop at ${p.stop!=null?fmtP(p.stop):'—'} — that\u2019s where you\u2019re wrong and you get out. Then let it run with a trailing exit that stays ${p.trailDist!=null?fmtP(p.trailDist):'—'} behind the high, so a winner isn\u2019t capped. ${accountSize>0?`Sized to risk 1% of your account, about ${p.shares!=null?p.shares.toFixed(1):'—'} shares.`:'Set your account size to get the share count.'}
+    </div>` : '';
+  showModal(`
+    <div style="background:${C.card};border-radius:20px;padding:22px;border:1px solid ${C.border};max-height:80vh;overflow-y:auto;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+        <div style="color:${C.text};font-size:17px;font-weight:800;">${s.ticker} · walkthrough</div>
+        <button onclick="closeAllOverlays()" style="background:none;border:none;color:${C.textSub};font-size:22px;cursor:pointer;line-height:1;">×</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;"><span style="background:${vc};color:#0D0F16;font-size:14px;font-weight:800;padding:4px 16px;border-radius:8px;">${state}</span><span style="color:#C7CCD8;font-size:12.5px;line-height:1.5;flex:1;">${v.reason||''}</span></div>
+      <div style="color:#AEB4C2;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:4px;">Why — the four checks</div>
+      ${checkLine('uptrend','Uptrend')}
+      ${checkLine('rsi','RSI 45–60')}
+      ${checkLine('atr','Daily range (ATR 4–8%)')}
+      ${checkLine('macd','MACD cross')}
+      ${planPart}
+    </div>`);
+}
 function renderCleanDetail(s){
+  detailStockId = s.id;
   const v=computeSignalVerdict(s);
   const p=planNumbers(s);
+  const atrPctNow = (s.atr&&s.price)?(s.atr/s.price*100):null;
+  const upPct = (s.price&&s.ma200)?((s.price/s.ma200-1)*100):null;
+  const setupVals = {
+    uptrend: upPct!=null ? `${upPct>=0?'+':''}${upPct.toFixed(0)}% vs 200d` : '',
+    rsi: s.rsi!=null ? s.rsi.toFixed(0) : '',
+    atr: atrPctNow!=null ? atrPctNow.toFixed(1)+'%' : '',
+    macd: (s.macdLine!=null&&s.signalLine!=null) ? `${s.macdLine.toFixed(2)} / ${s.signalLine.toFixed(2)}` : '',
+  };
   const state=v.state||(v.buy?'BUY':'WAIT');
   const isBuy=state==='BUY', isWatch=state==='WATCH';
   const vColor='#0D0F16';
@@ -1243,18 +1312,20 @@ function renderCleanDetail(s){
     ${gapRow('Signal line (MACD must cross above)', s.signalLine!=null?s.signalLine.toFixed(3):'—')}
     ${gapRow('Gap left to close', macdGap!=null?(macdGap>=0?'crossed ✓':Math.abs(macdGap).toFixed(3)):'—', macdGap!=null&&macdGap>=0?C.green:C.yellow)}`
    : `<div style="color:#9FC0F5;font-size:12.5px;padding:12px 2px;line-height:1.55;">This one has the setup. Load its 12-month history (the Python file with dates) to confirm the MACD trigger and get the full entry, stop, and size.</div>`;
+  const sizeRow = accountSize>0
+    ? row('size','Size', p.shares!=null?p.shares.toFixed(1)+' sh':'—', null)
+    : `<button onclick="setAccountSize()" style="all:unset;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 2px;border-bottom:1px solid ${C.border};width:100%;box-sizing:border-box;"><span style="color:${C.text};font-size:13.5px;">Size</span><span style="display:flex;align-items:center;gap:8px;color:${C.green};font-size:13px;font-weight:600;">Set account size<span style="color:${C.textMuted};font-size:14px;">›</span></span></button>`;
   const planRows = isBuy ? `
     ${row('entry','Entry','Now, near '+fmtP(p.entry),null)}
     ${row('stop','Stop loss',p.stop!=null?fmtP(p.stop):'—',null)}
-    ${row('exit','Trailing exit','3× ATR',null)}
-    ${row('size','Size',p.shares!=null?p.shares.toFixed(1)+' sh':'set budget',null)}`
+    ${row('exit','Trailing exit',p.trailDist!=null?fmtP(p.trailDist)+' · 3× ATR':'3× ATR',null)}
+    ${sizeRow}`
    : isWatch ? `<div style="padding:6px 2px;">${watchResult}</div>`
    : `<div style="color:#C7CCD8;font-size:12.5px;padding:12px 2px;line-height:1.5;">Your trade plan appears here once this is a BUY. No setup yet means no trade to plan.</div>`;
 
   document.getElementById('detail-content').innerHTML=`
    <div style="max-width:480px;margin:0 auto;">
-    <div style="background:${C.card};border-bottom:1px solid ${C.border};padding:16px 20px;display:flex;align-items:center;justify-content:space-between;">
-      <div style="display:flex;align-items:center;gap:12px;">
+    <div style="background:${C.card};border-bottom:1px solid ${C.border};padding:16px 20px;display:flex;align-items:center;justify-content:space-between;">      <div style="display:flex;align-items:center;gap:12px;">
         <button onclick="showScreen('home');renderHome();" style="background:none;border:none;color:${C.textSub};font-size:24px;cursor:pointer;line-height:1;">←</button>
         <div><div style="color:${C.text};font-size:20px;font-weight:600;">${s.ticker}</div>
         <div style="color:#AEB4C2;font-size:12px;">${s.name||''} · ${(s.type||'swing').toLowerCase().replace(' trade','')}</div></div>
@@ -1263,7 +1334,13 @@ function renderCleanDetail(s){
       <div style="color:${(s.pct||0)>=0?C.green:C.red};font-size:12px;">${(s.pct||0)>=0?'▲':'▼'} ${Math.abs(s.pct||0).toFixed(2)}%</div></div>
     </div>
 
-    <div style="padding:22px 20px;text-align:center;border-bottom:1px solid ${C.border};">
+    <div style="display:flex;gap:8px;padding:14px 20px 0;">
+      <div style="flex:1;background:${C.cardHigh};border-radius:10px;padding:9px;text-align:center;"><div style="color:#8A90A0;font-size:10px;letter-spacing:0.05em;">PRICE</div><div style="color:${C.text};font-size:15px;font-weight:700;">${fmtP(s.price)}</div></div>
+      <div style="flex:1;background:${C.cardHigh};border-radius:10px;padding:9px;text-align:center;"><div style="color:#8A90A0;font-size:10px;letter-spacing:0.05em;">RSI</div><div style="color:${C.text};font-size:15px;font-weight:700;">${s.rsi!=null?s.rsi.toFixed(0):'—'}</div></div>
+      <div style="flex:1;background:${C.cardHigh};border-radius:10px;padding:9px;text-align:center;"><div style="color:#8A90A0;font-size:10px;letter-spacing:0.05em;">ATR</div><div style="color:${C.text};font-size:15px;font-weight:700;">${atrPctNow!=null?atrPctNow.toFixed(1)+'%':'—'}</div></div>
+    </div>
+
+    <div style="padding:18px 20px 22px;text-align:center;border-bottom:1px solid ${C.border};">
       <div style="display:inline-block;background:${vBg};color:${vColor};font-size:22px;font-weight:600;letter-spacing:0.03em;padding:8px 30px;border-radius:10px;">${vWord}</div>
       <div style="color:#E2E6EF;font-size:13.5px;line-height:1.6;margin-top:14px;">${v.reason||''}</div>
     </div>
@@ -1275,10 +1352,10 @@ function renderCleanDetail(s){
 
     <div style="padding:14px 20px;border-bottom:1px solid ${C.border};">
       <div style="color:#AEB4C2;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">The setup <span style="text-transform:none;letter-spacing:0;color:#8A90A0;">· tap any row to learn</span></div>
-      ${row('uptrend','Uptrend (price above 200, 50 above 200)',null,cGet('uptrend')?cGet('uptrend').pass:null)}
-      ${row('rsi','RSI in the 45–60 band',null,cGet('rsi')?cGet('rsi').pass:null)}
-      ${row('atr','Daily range tradeable (ATR 4–8%)',null,cGet('range')?cGet('range').pass:null)}
-      ${row('macd','MACD crossed up',null,cGet('macd')?cGet('macd').pass:null)}
+      ${row('uptrend','Uptrend (price above 200, 50 above 200)',setupVals.uptrend,cGet('uptrend')?cGet('uptrend').pass:null)}
+      ${row('rsi','RSI in the 45–60 band',setupVals.rsi,cGet('rsi')?cGet('rsi').pass:null)}
+      ${row('atr','Daily range tradeable (ATR 4–8%)',setupVals.atr,cGet('range')?cGet('range').pass:null)}
+      ${row('macd','MACD crossed up',setupVals.macd,cGet('macd')?cGet('macd').pass:null)}
     </div>
 
     <div style="padding:14px 20px;">
@@ -1288,7 +1365,7 @@ function renderCleanDetail(s){
 
     <div style="padding:4px 20px 24px;display:flex;flex-direction:column;gap:10px;">
       <button onclick="showImportFlow('${s.id}')" style="background:${(isWatch&&!hasHist)?'#1D4ED8':C.cardHigh};color:${(isWatch&&!hasHist)?'#fff':C.teal};border:1px solid ${(isWatch&&!hasHist)?'#1D4ED8':C.teal+'55'};border-radius:12px;padding:12px;font-size:13px;font-weight:700;cursor:pointer;width:100%;">${hasHist?'↻ Update history':'Upload 12-month history to confirm'}</button>
-      <button onclick="openMentor('${s.id}')" style="background:${C.cardHigh};color:${C.purple};border:1px solid ${C.purple}44;border-radius:12px;padding:11px;font-size:13px;font-weight:600;cursor:pointer;width:100%;">Mentor — walk me through this trade</button>
+      <button onclick="openSimpleMentor('${s.id}')" style="background:${C.cardHigh};color:${C.purple};border:1px solid ${C.purple}44;border-radius:12px;padding:11px;font-size:13px;font-weight:600;cursor:pointer;width:100%;">Mentor — walk me through this trade</button>
     </div>
    </div>`;
 }
