@@ -87,7 +87,7 @@ input[type=number]{-moz-appearance:textfield;}
   <!-- Portfolio box -->
   <div id="portfolio-box"></div>
   <!-- Tonight's Best Opportunities — the ranking engine -->
-  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · clearfix</div>
+  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · overview</div>
   <div id="tonights-opportunities"></div>
   <!-- Filter tags + sort -->
   <div id="filter-bar" style="background:#11141C;border-bottom:1px solid #1E2230;padding:9px 20px;"></div>
@@ -581,8 +581,8 @@ function closeAllOverlays() {
 // ═══════════════════════════════════════════════════════════════════════════════
 // HOME RENDER
 // ═══════════════════════════════════════════════════════════════════════════════
-const TAGS = ['All','★ Favorites','Buy Zone','Watch','Wait','Pass','Swing Trade','Position Trade','Long-Term Hold','Archived'];
-const TAG_COLORS = {'Buy Zone':C.green,'Watch':C.yellow,'Wait':C.orange,'Pass':C.red};
+const TAGS = ['All','★ Favorites','Buys','Watch','Waits','Archived'];
+const TAG_COLORS = {'Buys':C.green,'Watch':'#3B82F6','Waits':C.yellow};
 
 // Generic "not built yet" notice — used for nav items / tiles that are visual
 // placeholders so we never pretend a feature exists when it doesn't.
@@ -788,10 +788,10 @@ function renderStockList() {
     if(s.archived) return false; // archived stocks never appear outside the Archived tag
     if(activeTag==='All') return true;
     if(activeTag==='★ Favorites') return s.starred;
-    if(activeTag==='Swing Trade') return s.type==='Swing Trade';
-    if(activeTag==='Position Trade') return s.type==='Position Trade';
-    if(activeTag==='Long-Term Hold') return s.type==='Long-Term Hold';
-    return s.verdict===activeTag;
+    if(activeTag==='Buys') return computeSimpleAction(s).word==='BUY';
+    if(activeTag==='Watch') return computeSimpleAction(s).word==='WATCH';
+    if(activeTag==='Waits') return computeSimpleAction(s).word==='WAIT';
+    return true;
   });
 
   // Secondary sort on top of the starred-first ranking, per the Sort by control
@@ -4336,21 +4336,28 @@ function computeRankingSentence(item) {
 function renderTonightsOpportunities() {
   const el = document.getElementById('tonights-opportunities');
   if(!el) return;
-  const ranking = computeOpportunityRanking(stocks);
-  const survivors = ranking.filter(x=>!x.eliminated).slice(0,3);
-  if(!survivors.length) { el.innerHTML = ''; return; }
+  const active = (stocks||[]).filter(s=>!s.archived);
+  const rank = {BUY:0, WATCH:1};
+  const scored = active.map(s=>({s, a:computeSimpleAction(s)}))
+    .filter(x=>x.a.word==='BUY' || x.a.word==='WATCH')
+    .sort((x,y)=>{ const r=(rank[x.a.word]??9)-(rank[y.a.word]??9); return r!==0 ? r : (y.s.pct||0)-(x.s.pct||0); })
+    .slice(0,3);
+  if(!scored.length){
+    el.innerHTML = `<div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;margin:0 16px 14px;"><div style="color:#AEB4C2;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;">Tonight's Best Opportunities</div><div style="color:#C7CCD8;font-size:13px;line-height:1.5;">No buy or watch setups right now. Run a scan or upload data to surface candidates.</div></div>`;
+    return;
+  }
   const medals = ['🥇','🥈','🥉'];
   el.innerHTML = `
     <div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:18px;margin:0 16px 14px;">
-      <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">Tonight's Best Opportunities</div>
-      ${survivors.map((item,i)=>`
-        <div onclick="openDetail('${item.s.id}')" style="display:flex;gap:12px;align-items:flex-start;padding:10px 0;${i<survivors.length-1?`border-bottom:1px solid ${C.border};`:''}cursor:pointer;">
+      <div style="color:#AEB4C2;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">Tonight's Best Opportunities</div>
+      ${scored.map((x,i)=>{ const c=SIMPLE_ACTION_META[x.a.word]?.color||C.textMuted; return `
+        <div onclick="openDetail('${x.s.id}')" style="display:flex;gap:12px;align-items:flex-start;padding:11px 0;${i<scored.length-1?`border-bottom:1px solid ${C.border};`:''}cursor:pointer;">
           <span style="font-size:20px;flex-shrink:0;">${medals[i]}</span>
-          <div style="min-width:0;">
-            <div style="color:${C.text};font-size:14px;font-weight:900;margin-bottom:3px;">${item.s.ticker}</div>
-            <div style="color:${C.textSub};font-size:12px;line-height:1.55;">${computeRankingSentence(item)}</div>
+          <div style="min-width:0;flex:1;">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;"><span style="color:${C.text};font-size:14px;font-weight:700;">${x.s.ticker}</span><span style="background:${c};color:#0D0F16;font-size:10px;font-weight:700;padding:2px 8px;border-radius:6px;">${x.a.word}</span></div>
+            <div style="color:#C7CCD8;font-size:12px;line-height:1.55;">${x.a.reason||''}</div>
           </div>
-        </div>`).join('')}
+        </div>`; }).join('')}
     </div>`;
 }
 
@@ -5617,6 +5624,17 @@ async function doAddStock() {
 // answers to the same question instead of one source of truth.
 let pendingScanRows = [];
 let pendingScanSources = [];
+let pendingScanDate = null;
+// Pull a trading date out of a scan filename so you don't have to add it by hand.
+// Handles YYYY-MM-DD, MM-DD-YYYY, MM-DD-YY with -, _, or . separators.
+function extractDateFromFilename(name){
+  if(!name) return null;
+  let m = name.match(/(20\d{2})[-_.](\d{1,2})[-_.](\d{1,2})/);
+  if(m) return `${parseInt(m[2])}/${parseInt(m[3])}/${m[1].slice(2)}`;
+  m = name.match(/(\d{1,2})[-_.](\d{1,2})[-_.](20\d{2}|\d{2})/);
+  if(m){ const yy = m[3].length===4 ? m[3].slice(2) : m[3]; return `${parseInt(m[1])}/${parseInt(m[2])}/${yy}`; }
+  return null;
+}
 let pendingScanNewCount = 0;
 
 // Proper CSV row splitter — handles quoted fields with commas inside them
@@ -5752,6 +5770,8 @@ function previewScanCSV(input) {
     const withDupFlag = rows.map(r=>({...r, isDup: existingTickers.has(r.ticker)}));
     pendingScanRows = withDupFlag;
     pendingScanNewCount = withDupFlag.filter(r=>!r.isDup).length;
+    const fnRaw = extractDateFromFilename(file.name);
+    pendingScanDate = fnRaw ? parseCSVDate(fnRaw) : null;
 
     const preview = withDupFlag.slice(0,8).map(r=>`
       <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid ${C.border};">
@@ -5771,9 +5791,11 @@ function previewScanCSV(input) {
           ${preview}${withDupFlag.length>8?`<div style="color:${C.textMuted};font-size:11px;padding-top:8px;">+ ${withDupFlag.length-8} more</div>`:''}
         </div>
         ${withDupFlag.length-pendingScanNewCount>0?`<div style="background:${C.yellowDim};border-radius:10px;padding:12px;margin-bottom:16px;border:1px solid ${C.yellow}33;"><span style="color:${C.textSub};font-size:12px;line-height:1.5;">${withDupFlag.length-pendingScanNewCount} ticker${withDupFlag.length-pendingScanNewCount===1?'':'s'} already on your list — skipped, not duplicated.</span></div>`:''}
+        <div style="display:flex;align-items:center;gap:8px;background:${pendingScanDate?C.green+'12':'#E8A31712'};border-radius:10px;padding:10px 12px;margin-bottom:16px;">
+          <span style="color:${pendingScanDate?C.green:'#E8A317'};font-size:13px;">${pendingScanDate?'✓':'○'}</span>
+          <span style="color:${pendingScanDate?'#8FE0B8':'#E8B45C'};font-size:12px;">${pendingScanDate?`Dated ${pendingScanDate} (read from filename)`:'No date in filename — using today. Add a date like 2026-07-28 to the filename to set it.'}</span>
+        </div>
         <div style="display:flex;gap:10px;">
-          <button onclick="closeAllOverlays()" style="flex:1;padding:13px;border-radius:12px;border:1px solid ${C.border};background:none;color:${C.textSub};font-size:14px;font-weight:700;cursor:pointer;">Cancel</button>
-          <button onclick="doBulkImportScan()" style="flex:2;padding:13px;border-radius:12px;border:none;background:${C.teal};color:#000;font-size:14px;font-weight:900;cursor:pointer;" ${pendingScanNewCount===0?'disabled':''}>Import ${pendingScanNewCount} New ✓</button>
         </div>
       </div>`);
   };
@@ -5781,7 +5803,7 @@ function previewScanCSV(input) {
 }
 async function doBulkImportScan() {
   closeAllOverlays();
-  const todayStr = today();
+  const todayStr = pendingScanDate || today();
   const toCreate = pendingScanRows.filter(r=>!r.isDup && r.ticker);
   const created = [];
   for(const r of toCreate) {
@@ -5810,7 +5832,7 @@ async function doBulkImportScan() {
     created.push(newStock);
   }
   stocks = [...created, ...stocks];
-  pendingScanRows = []; pendingScanSources = []; pendingScanNewCount = 0;
+  pendingScanRows = []; pendingScanSources = []; pendingScanNewCount = 0; pendingScanDate = null;
   renderHome();
   for(const s of created) {
     try { await fbSaveStock(s); } catch(e) { console.error(e); }
