@@ -87,7 +87,7 @@ input[type=number]{-moz-appearance:textfield;}
   <!-- Portfolio box -->
   <div id="portfolio-box"></div>
   <!-- Tonight's Best Opportunities — the ranking engine -->
-  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · upload</div>
+  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · csvfix</div>
   <div id="tonights-opportunities"></div>
   <!-- Filter tags + sort -->
   <div id="filter-bar" style="background:#11141C;border-bottom:1px solid #1E2230;padding:9px 20px;"></div>
@@ -5857,7 +5857,7 @@ function parseCSV(text) {
   const idx = {};
   const colMap = {
     date:      ['date','Date','DATE'],
-    close:     ['close','Close','CLOSE','Last','last','LAST'],
+    close:     ['close','Close','CLOSE','Last','last','LAST','Day Close','day close','DAY CLOSE','Adj Close','adj close','Close Price'],
     open:      ['open','Open','OPEN'],
     high:      ['high','High','HIGH'],
     low:       ['low','Low','LOW'],
@@ -5874,6 +5874,21 @@ function parseCSV(text) {
   Object.keys(colMap).forEach(key => {
     const match = colMap[key].find(name => headers.includes(name));
     if(match !== undefined) idx[key] = headers.indexOf(match);
+  });
+
+  // Fuzzy fallback: if an exact name wasn't found, match on a normalized keyword
+  // so variants like "Day Close", "RSI 14", "SMA_200" still resolve.
+  const norm = h => h.toLowerCase().replace(/[^a-z0-9]/g,'');
+  const fuzzy = {
+    close:['close','last'], vol:['volume'], rsi:['rsi'], atr:['atr'],
+    ma50:['sma50','ma50'], ma200:['sma200','ma200'], ma20:['ema20','ma20'],
+    macdLine:['macd12','macdline','macdval'], signalLine:['macds','macdsignal','signal'],
+    high:['high'], low:['low'], open:['open'], date:['date'],
+  };
+  Object.keys(fuzzy).forEach(key => {
+    if(idx[key] !== undefined) return;
+    const hit = headers.findIndex(h => fuzzy[key].some(kw => norm(h).includes(kw)));
+    if(hit >= 0) idx[key] = hit;
   });
 
   const rows = [];
