@@ -87,7 +87,7 @@ input[type=number]{-moz-appearance:textfield;}
   <!-- Portfolio box -->
   <div id="portfolio-box"></div>
   <!-- Tonight's Best Opportunities — the ranking engine -->
-  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · riskreward</div>
+  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · paper</div>
   <div id="tonights-opportunities"></div>
   <!-- Filter tags + sort -->
   <div id="filter-bar" style="background:#11141C;border-bottom:1px solid #1E2230;padding:9px 20px;"></div>
@@ -657,57 +657,43 @@ function renderMarket() {
       <span style="color:${C.textSub};font-size:11px;">${it.l}</span>
       <span style="color:${C.text};font-size:11px;font-weight:700;">${it.v}</span>
     </div>
-  `).join('');
+  `).join('') + `
+    <button onclick="setAccountSize()" style="all:unset;display:flex;align-items:center;gap:5px;cursor:pointer;">
+      <span style="color:${C.textSub};font-size:11px;">Account</span>
+      <span style="color:${accountSize>0?C.green:'#E8A317'};font-size:11px;font-weight:700;">${accountSize>0?fmtP(accountSize):'set'} ✏️</span>
+    </button>`;
 }
 
 function renderPortfolioBox() {
   const el = document.getElementById('portfolio-box');
-  const allFilled = stocks.flatMap(s =>
-    (s.tranche||[]).filter(t=>t.status==='filled').map(t=>({...t,stock:s}))
-  );
-  if(allFilled.length===0){el.innerHTML='';return;}
-  const totalVal = allFilled.reduce((a,t)=>a+t.stock.price*(t.shares||0),0);
-  const totalCost= allFilled.reduce((a,t)=>a+(t.entryPrice||0)*(t.shares||0),0);
-  const gl = totalVal-totalCost;
-  const glPct = totalCost>0?(gl/totalCost)*100:0;
-  const isUp = gl>=0;
-  // Day gain — sum of each position's per-share price change (from the last
-  // update you logged) times shares held. Real, not simulated — but it only
-  // reflects movement since your last daily update, not live market time.
-  const dayGain = allFilled.reduce((a,t)=>a+((t.stock.change||0)*(t.shares||0)),0);
-  const dayUp = dayGain>=0;
-
+  const open = stocks.filter(s=>s.position).map(s=>({...s.position, price:s.price}));
+  const realized = stocks.flatMap(s=>(s.realized||[]));
+  if(open.length===0 && realized.length===0){ el.innerHTML=''; return; }
+  const totalVal  = open.reduce((a,t)=>a+t.price*(t.shares||0),0);
+  const totalCost = open.reduce((a,t)=>a+(t.entry||0)*(t.shares||0),0);
+  const openPL = totalVal-totalCost;
+  const realizedPL = realized.reduce((a,r)=>a+(r.pl||0),0);
+  const openUp = openPL>=0, realUp = realizedPL>=0;
   const mask = (txt) => portfolioHidden ? '••••••' : txt;
 
   el.innerHTML = `
     <div style="margin:14px 16px;">
       <div style="background:${C.card};border:1.5px solid ${C.border};border-radius:20px;padding:18px 20px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-          <span style="color:${C.textMuted};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.1em;">My Portfolio</span>
+          <span style="color:${C.textMuted};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.1em;">My Paper Portfolio</span>
           <button onclick="togglePortfolioVisibility()" style="background:none;border:none;color:${C.textMuted};cursor:pointer;padding:2px;">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${portfolioHidden?'<path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a18.5 18.5 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>':'<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>'}</svg>
           </button>
         </div>
-        <div style="color:${C.text};font-size:32px;font-weight:900;letter-spacing:-0.02em;margin-bottom:5px;">${mask(fmtP(totalVal))}</div>
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;">
-          <span style="color:${dayUp?C.green:C.red};font-size:14px;font-weight:800;">${dayUp?'▲':'▼'} ${mask((dayUp?'+':'')+fmtP(dayGain))}</span>
-          <span style="color:${C.textMuted};font-size:12px;">Today</span>
-        </div>
+        <div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:3px;">Realized profit (closed trades)</div>
+        <div style="color:${realUp?C.green:C.red};font-size:32px;font-weight:900;letter-spacing:-0.02em;margin-bottom:12px;">${mask((realUp?'+':'')+fmtP(realizedPL))}</div>
         <div style="height:1px;background:${C.border};margin-bottom:14px;"></div>
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
-          <div>
-            <div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">Invested</div>
-            <div style="color:${C.text};font-size:13px;font-weight:800;">${mask(fmtP(totalCost))}</div>
-          </div>
-          <div>
-            <div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">Day Gain</div>
-            <div style="color:${dayUp?C.green:C.red};font-size:13px;font-weight:800;">${mask((dayUp?'+':'')+fmtP(dayGain))}</div>
-          </div>
-          <div>
-            <div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">Total Gain</div>
-            <div style="color:${isUp?C.green:C.red};font-size:13px;font-weight:800;">${mask((isUp?'+':'')+fmtP(gl)+` (${glPct.toFixed(1)}%)`)}</div>
-          </div>
+          <div><div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">Open positions</div><div style="color:${C.text};font-size:13px;font-weight:800;">${open.length}</div></div>
+          <div><div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">Open value</div><div style="color:${C.text};font-size:13px;font-weight:800;">${mask(fmtP(totalVal))}</div></div>
+          <div><div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">Unrealized</div><div style="color:${openUp?C.green:C.red};font-size:13px;font-weight:800;">${mask((open.length?((openUp?'+':'')+fmtP(openPL)):'—'))}</div></div>
         </div>
+        <div style="color:${C.textMuted};font-size:10px;margin-top:12px;">${realized.length} closed trade${realized.length===1?'':'s'} · win rate ${realized.length?Math.round(realized.filter(r=>r.pl>=0).length/realized.length*100):0}%</div>
       </div>
     </div>`;
 }
@@ -1251,42 +1237,87 @@ function setPlannedInvest(id, val){
   scheduleSave(updated);
   renderDetail(updated);
 }
+// ── Paper-trade tracking ──────────────────────────────────────────────────
+function buyStock(id){
+  const s = stocks.find(x=>String(x.id)===String(id)); if(!s) return;
+  const p = planNumbers(s);
+  const shares = s.plannedInvest ? s.plannedInvest/s.price : (p.shares||0);
+  if(!shares || shares<=0){ setAccountSize(); return; }
+  const updated = {...s, position:{shares, entry:s.price, date:today()}};
+  stocks = stocks.map(x=>String(x.id)===String(id)?updated:x);
+  scheduleSave(updated); renderDetail(updated); renderHome();
+}
+function cancelBuy(id){
+  const s = stocks.find(x=>String(x.id)===String(id)); if(!s) return;
+  const updated = {...s}; delete updated.position;
+  stocks = stocks.map(x=>String(x.id)===String(id)?updated:x);
+  scheduleSave(updated); renderDetail(updated); renderHome();
+}
+function sellStock(id){
+  const s = stocks.find(x=>String(x.id)===String(id)); if(!s||!s.position) return;
+  const pos = s.position;
+  const pl = (s.price - pos.entry) * pos.shares;
+  const plPct = pos.entry ? (s.price/pos.entry-1)*100 : 0;
+  const rec = {shares:pos.shares, entry:pos.entry, exit:s.price, pl, plPct, dateIn:pos.date, dateOut:today()};
+  const updated = {...s, realized:[...(s.realized||[]), rec]}; delete updated.position;
+  stocks = stocks.map(x=>String(x.id)===String(id)?updated:x);
+  scheduleSave(updated); renderDetail(updated); renderHome();
+  const up = pl>=0;
+  showModal(`
+    <div style="background:${C.card};border-radius:20px;padding:24px;border:1px solid ${C.border};text-align:center;">
+      <div style="color:${up?C.green:C.red};font-size:30px;margin-bottom:6px;">${up?'✓':'—'}</div>
+      <div style="color:${C.text};font-size:18px;font-weight:800;margin-bottom:4px;">Sold ${s.ticker}</div>
+      <div style="color:#9AA0B0;font-size:12.5px;margin-bottom:14px;">${pos.shares.toFixed(1)} shares · ${fmtP(pos.entry)} → ${fmtP(s.price)}</div>
+      <div style="background:${C.cardHigh};border-radius:12px;padding:16px;margin-bottom:16px;">
+        <div style="color:#8A90A0;font-size:11px;">${up?'PROFIT':'LOSS'}</div>
+        <div style="color:${up?C.green:C.red};font-size:26px;font-weight:900;">${up?'+':''}${fmtP(pl)}</div>
+        <div style="color:${up?C.green:C.red};font-size:13px;font-weight:600;">${up?'+':''}${plPct.toFixed(1)}%</div>
+      </div>
+      <button onclick="closeAllOverlays()" style="width:100%;padding:13px;border-radius:12px;border:none;background:${C.text};color:${C.bg};font-size:14px;font-weight:800;cursor:pointer;">Done</button>
+    </div>`);
+}
 function riskRewardHTML(s){
   const p = planNumbers(s);
   if(p.riskPerShare==null || !s.price) return '';
-  const stopDist = p.riskPerShare;
-  const recShares = p.shares, recInvest = recShares!=null?recShares*s.price:null, recRisk = p.riskDollars;
-  const wi = s.plannedInvest||0;
-  const wiShares = wi>0 ? wi/s.price : null;
-  const wiRisk = wiShares!=null ? wiShares*stopDist : null;
-  const wiPctAcct = (wiRisk!=null&&accountSize>0) ? wiRisk/accountSize*100 : null;
-  const line=(k,v,color)=>`<div style="display:flex;justify-content:space-between;padding:6px 0;"><span style="color:#9AA0B0;font-size:12.5px;">${k}</span><span style="color:${color||C.text};font-size:12.5px;font-weight:600;">${v}</span></div>`;
-  const reward=(risk)=> risk!=null ? `
-      <div style="border-top:1px solid ${C.border};margin-top:6px;padding-top:6px;">
-      ${line('If it runs 2× your risk', '+'+fmtP(2*risk), C.green)}
-      ${line('If it runs 3× your risk', '+'+fmtP(3*risk), C.green)}</div>` : '';
+  const price = s.price;
+  const stopPS = p.riskPerShare;                 // 2×ATR per share
+  const stopPrice = price - stopPS;
+  const recInvest = (p.shares!=null) ? p.shares*price : null;   // 1%-risk suggested $
+  const invest = s.plannedInvest || recInvest || 0;
+  const shares = invest>0 ? invest/price : null;
+  const riskTotal = shares!=null ? shares*stopPS : null;
+  const riskPctInv = (riskTotal!=null&&invest>0) ? riskTotal/invest*100 : null;
+  const riskPctAcct = (riskTotal!=null&&accountSize>0) ? riskTotal/accountSize*100 : null;
+  const line=(k,v,color)=>`<div style="display:flex;justify-content:space-between;padding:6px 0;"><span style="color:#9AA0B0;font-size:12.5px;">${k}</span><span style="color:${color||C.text};font-size:12.5px;font-weight:600;text-align:right;">${v}</span></div>`;
+  const moveRow=(pct)=>line(`If it rises ${pct}%`, `+${fmtP(invest*pct/100)} total · +${fmtP(price*pct/100)}/sh`, C.green);
+  const recHint = accountSize>0
+    ? `<div style="font-size:11px;color:#8FE0B8;margin-bottom:8px;">Account ${fmtP(accountSize)} · <button onclick="setAccountSize()" style="all:unset;color:${C.green};font-weight:700;cursor:pointer;">change</button>${(recInvest!=null && Math.abs((s.plannedInvest||recInvest)-recInvest)>1)?` · 1%-risk size <button onclick="setPlannedInvest('${s.id}','${recInvest.toFixed(0)}')" style="all:unset;color:${C.green};font-weight:700;cursor:pointer;">${fmtP(recInvest)} →</button>`:''}</div>`
+    : `<div style="font-size:11px;color:#E8B45C;margin-bottom:8px;"><button onclick="setAccountSize()" style="all:unset;color:${C.green};font-weight:700;cursor:pointer;">Set account size</button> to get the 1%-risk recommendation.</div>`;
   return `
    <div style="color:#AEB4C2;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;margin:18px 0 8px;">Risk &amp; reward</div>
-   <div style="background:${C.cardHigh};border-radius:12px;padding:12px 14px;margin-bottom:10px;">
-     <div style="color:${C.teal};font-size:11px;font-weight:700;margin-bottom:6px;">RECOMMENDED · risk 1%</div>
-     ${accountSize>0 ? `
-       ${line('Shares', recShares!=null?recShares.toFixed(1):'—')}
-       ${line('Invested', recInvest!=null?fmtP(recInvest):'—')}
-       ${line('Max risk if stopped', recRisk!=null?fmtP(recRisk)+' (1%)':'—', C.red)}
-       ${reward(recRisk)}`
-     : `<div style="color:#C7CCD8;font-size:12px;line-height:1.5;"><button onclick="setAccountSize()" style="all:unset;color:${C.green};font-weight:700;cursor:pointer;">Set account size →</button> to see the 1% recommendation.</div>`}
+   <div style="background:${C.cardHigh};border-radius:12px;padding:14px;">
+     <div style="font-size:11px;color:#9FC0F5;font-weight:700;margin-bottom:6px;">HOW MUCH ARE YOU PUTTING IN?</div>
+     ${recHint}
+     <input type="text" inputmode="decimal" value="${s.plannedInvest||''}" placeholder="${recInvest!=null?'e.g. '+recInvest.toFixed(0):'e.g. 2000'}" onchange="setPlannedInvest('${s.id}', this.value)" style="width:100%;background:${C.card};border:1px solid ${C.border};border-radius:8px;color:${C.text};font-size:15px;font-weight:700;padding:10px;outline:none;box-sizing:border-box;text-align:center;">
+     ${invest>0 ? `
+       <div style="text-align:center;color:${C.text};font-size:14px;font-weight:700;margin:12px 0 4px;">${shares.toFixed(1)} shares · ${fmtP(price)} each · ${fmtP(invest)} in</div>
+
+       <div style="border-top:1px solid ${C.border};margin-top:8px;padding-top:8px;">
+         <div style="font-size:11px;color:${C.red};font-weight:700;margin-bottom:2px;">THE DOWNSIDE (your risk)</div>
+         ${line('Stop loss', fmtP(stopPrice)+'/sh')}
+         ${line('If stopped, you lose', fmtP(riskTotal)+' total · '+fmtP(stopPS)+'/sh', C.red)}
+         ${riskPctInv!=null?line('= of your investment', riskPctInv.toFixed(1)+'%', C.textSub):''}
+         ${riskPctAcct!=null&&riskPctAcct>1.5?`<div style="color:${C.yellow};font-size:11.5px;line-height:1.5;margin-top:6px;">Heads up — that's ${riskPctAcct.toFixed(1)}% of your account, more than the 1% guide.</div>`:''}
+       </div>
+
+       <div style="border-top:1px solid ${C.border};margin-top:8px;padding-top:8px;">
+         <div style="font-size:11px;color:${C.green};font-weight:700;margin-bottom:2px;">THE UPSIDE (potential profit)</div>
+         ${moveRow(10)}
+         ${moveRow(20)}
+         ${moveRow(30)}
+       </div>` : ''}
    </div>
-   <div style="background:${C.cardHigh};border-radius:12px;padding:12px 14px;">
-     <div style="color:#9FC0F5;font-size:11px;font-weight:700;margin-bottom:8px;">WHAT IF I INVEST…</div>
-     <input type="text" inputmode="decimal" value="${wi||''}" placeholder="e.g. 2000" onchange="setPlannedInvest('${s.id}', this.value)" style="width:100%;background:${C.card};border:1px solid ${C.border};border-radius:8px;color:${C.text};font-size:14px;font-weight:700;padding:9px;outline:none;box-sizing:border-box;margin-bottom:${wi>0?'10px':'0'};text-align:center;">
-     ${wi>0 ? `
-       ${line('Shares', wiShares!=null?wiShares.toFixed(1):'—')}
-       ${line('Max risk if stopped', wiRisk!=null?fmtP(wiRisk):'—', C.red)}
-       ${wiPctAcct!=null?line('= of your account', wiPctAcct.toFixed(1)+'%', wiPctAcct>1?C.yellow:C.textSub):''}
-       ${reward(wiRisk)}
-       ${wiPctAcct!=null&&wiPctAcct>1.5?`<div style="color:${C.yellow};font-size:11.5px;line-height:1.5;margin-top:8px;">Heads up — this risks more than 1% of your account. Bigger swings both ways.</div>`:''}` : ''}
-   </div>
-   <div style="color:#8A90A0;font-size:11px;line-height:1.5;margin-top:8px;">The exit is a trailing stop, so there's no fixed profit target — reward is shown as multiples of your risk. How far it actually runs is up to the stock.</div>`;
+   <div style="color:#8A90A0;font-size:11px;line-height:1.5;margin-top:8px;">No fixed profit target — the trailing stop lets a winner run as far as it goes, so the upside above is just "if it rises this much." How far it actually runs is up to the stock.</div>`;
 }
 function openSimpleMentor(id){
   const s = stocks.find(x=>String(x.id)===String(id)); if(!s) return;
@@ -1350,6 +1381,10 @@ function renderCleanDetail(s){
   };
   const state=v.state||(v.buy?'BUY':'WAIT');
   const isBuy=state==='BUY', isWatch=state==='WATCH';
+  const pos = s.position || null;
+  const held = !!pos;
+  const uPL = held ? (s.price-pos.entry)*pos.shares : null;
+  const uPLpct = held && pos.entry ? (s.price/pos.entry-1)*100 : null;
   const vColor='#0D0F16';
   const vBg=isBuy?C.green:(isWatch?'#3B82F6':'#E8A317');
   const vWord=state;
@@ -1397,6 +1432,22 @@ function renderCleanDetail(s){
       <div style="color:#E2E6EF;font-size:13.5px;line-height:1.6;margin-top:14px;">${v.reason||''}</div>
     </div>
 
+    ${held ? `
+    <div style="padding:14px 20px;border-bottom:1px solid ${C.border};">
+      <div style="color:#AEB4C2;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;">Your position</div>
+      <div style="background:${C.cardHigh};border-radius:12px;padding:14px;">
+        <div style="display:flex;justify-content:space-between;padding:5px 0;"><span style="color:#9AA0B0;font-size:12.5px;">Bought</span><span style="color:${C.text};font-size:12.5px;font-weight:600;">${pos.shares.toFixed(1)} sh @ ${fmtP(pos.entry)}</span></div>
+        <div style="display:flex;justify-content:space-between;padding:5px 0;"><span style="color:#9AA0B0;font-size:12.5px;">Now worth</span><span style="color:${C.text};font-size:12.5px;font-weight:600;">${fmtP(s.price*pos.shares)}</span></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0 2px;border-top:1px solid ${C.border};margin-top:4px;">
+          <span style="color:#9AA0B0;font-size:12.5px;">Profit / loss</span>
+          <span style="color:${uPL>=0?C.green:C.red};font-size:17px;font-weight:800;">${uPL>=0?'+':''}${fmtP(uPL)} <span style="font-size:12px;">(${uPL>=0?'+':''}${uPLpct.toFixed(1)}%)</span></span>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:10px;">
+        <button onclick="sellStock('${s.id}')" style="flex:2;padding:12px;border-radius:12px;border:none;background:${C.green};color:#000;font-size:13px;font-weight:800;cursor:pointer;">Sell — lock in ${uPL>=0?'profit':'loss'}</button>
+        <button onclick="cancelBuy('${s.id}')" style="flex:1;padding:12px;border-radius:12px;border:1px solid ${C.border};background:none;color:${C.textSub};font-size:13px;font-weight:700;cursor:pointer;">Delete</button>
+      </div>
+    </div>` : ''}
     <div style="padding:9px 20px;border-bottom:1px solid ${C.border};display:flex;align-items:center;justify-content:center;gap:8px;background:${hasHist?C.green+'12':'#E8A31712'};">
       <span style="color:${hasHist?C.green:'#E8A317'};font-size:13px;">${hasHist?'✓':'○'}</span>
       <span style="color:${hasHist?'#8FE0B8':'#E8B45C'};font-size:12px;">${hasHist?`${snaps.length} days of history loaded · ${histFrom} → ${histTo}`:'No history loaded yet — upload below to confirm'}</span>
@@ -1417,6 +1468,7 @@ function renderCleanDetail(s){
     </div>
 
     <div style="padding:4px 20px 24px;display:flex;flex-direction:column;gap:10px;">
+      ${(isBuy && !held) ? `<button onclick="buyStock('${s.id}')" style="background:${C.green};color:#000;border:none;border-radius:12px;padding:13px;font-size:14px;font-weight:800;cursor:pointer;width:100%;">Buy ${p.shares!=null?p.shares.toFixed(1)+' shares':'this'} at ${fmtP(s.price)}</button>` : ''}
       <button onclick="showImportFlow('${s.id}')" style="background:${(isWatch&&!hasHist)?'#1D4ED8':C.cardHigh};color:${(isWatch&&!hasHist)?'#fff':C.teal};border:1px solid ${(isWatch&&!hasHist)?'#1D4ED8':C.teal+'55'};border-radius:12px;padding:12px;font-size:13px;font-weight:700;cursor:pointer;width:100%;">${hasHist?'↻ Update history':'Upload 12-month history to confirm'}</button>
       <button onclick="openSimpleMentor('${s.id}')" style="background:${C.cardHigh};color:${C.purple};border:1px solid ${C.purple}44;border-radius:12px;padding:11px;font-size:13px;font-weight:600;cursor:pointer;width:100%;">Mentor — walk me through this trade</button>
     </div>
