@@ -87,7 +87,7 @@ input[type=number]{-moz-appearance:textfield;}
   <!-- Portfolio box -->
   <div id="portfolio-box"></div>
   <!-- Tonight's Best Opportunities — the ranking engine -->
-  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · loaded</div>
+  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · clearfix</div>
   <div id="tonights-opportunities"></div>
   <!-- Filter tags + sort -->
   <div id="filter-bar" style="background:#11141C;border-bottom:1px solid #1E2230;padding:9px 20px;"></div>
@@ -4982,11 +4982,9 @@ function confirmClearAll() {
         </div>
       </div>
       <div style="color:${C.text};font-size:12.5px;line-height:1.6;margin-bottom:8px;">This removes only raw scan imports you haven't pulled history into or updated. Anything with 6- or 12-month data stays. This can't be undone.</div>
-      <div style="color:${C.textMuted};font-size:11px;margin-bottom:14px;">Type <b style="color:${C.text};">CLEAR</b> to confirm:</div>
-      <input id="clear-confirm-input" type="text" autocomplete="off" oninput="const b=document.getElementById('clear-confirm-btn'); if(b){ const ok=this.value.trim().toUpperCase()==='CLEAR'; b.disabled=!ok; b.style.opacity=ok?'1':'0.4'; b.style.cursor=ok?'pointer':'not-allowed'; }" style="width:100%;background:${C.cardHigh};border:1px solid ${C.border};border-radius:10px;color:${C.text};font-size:15px;font-weight:700;padding:12px;outline:none;box-sizing:border-box;margin-bottom:16px;text-align:center;letter-spacing:0.1em;" placeholder="CLEAR">
       <div style="display:flex;gap:10px;">
         <button onclick="closeAllOverlays()" style="flex:1;padding:13px;border-radius:12px;border:1px solid ${C.border};background:none;color:${C.textSub};font-size:14px;font-weight:700;cursor:pointer;">Cancel</button>
-        <button id="clear-confirm-btn" disabled onclick="doClearAll()" style="flex:1;padding:13px;border-radius:12px;border:none;background:${C.red};color:#fff;font-size:14px;font-weight:900;cursor:not-allowed;opacity:0.4;">Delete ${toDelete.length}</button>
+        <button onclick="doClearAll()" style="flex:1;padding:13px;border-radius:12px;border:none;background:${C.red};color:#fff;font-size:14px;font-weight:900;cursor:pointer;">Delete ${toDelete.length}</button>
       </div>
     </div>`);
 }
@@ -5012,12 +5010,10 @@ function confirmClearEverything() {
         <div style="color:${C.red};font-size:26px;font-weight:900;">${n}</div>
         <div style="color:${C.text};font-size:11px;margin-top:2px;">stocks will be deleted — including ones with history</div>
       </div>
-      <div style="color:${C.text};font-size:12.5px;line-height:1.6;margin-bottom:8px;">This wipes your entire list, history and all. It can't be undone. You'll be starting from an empty board.</div>
-      <div style="color:${C.textMuted};font-size:11px;margin-bottom:14px;">Type <b style="color:${C.text};">CLEAR</b> to confirm:</div>
-      <input id="clear-all-input" type="text" autocomplete="off" oninput="const b=document.getElementById('clear-all-btn'); if(b){ const ok=this.value.trim().toUpperCase()==='CLEAR'; b.disabled=!ok; b.style.opacity=ok?'1':'0.4'; b.style.cursor=ok?'pointer':'not-allowed'; }" style="width:100%;background:${C.cardHigh};border:1px solid ${C.border};border-radius:10px;color:${C.text};font-size:15px;font-weight:700;padding:12px;outline:none;box-sizing:border-box;margin-bottom:16px;text-align:center;letter-spacing:0.1em;" placeholder="CLEAR">
+      <div style="color:${C.text};font-size:12.5px;line-height:1.6;margin-bottom:16px;">This wipes your entire list, history and all. It can't be undone. You'll be starting from an empty board.</div>
       <div style="display:flex;gap:10px;">
         <button onclick="closeAllOverlays()" style="flex:1;padding:13px;border-radius:12px;border:1px solid ${C.border};background:none;color:${C.textSub};font-size:14px;font-weight:700;cursor:pointer;">Cancel</button>
-        <button id="clear-all-btn" disabled onclick="doClearEverything()" style="flex:1;padding:13px;border-radius:12px;border:none;background:${C.red};color:#fff;font-size:14px;font-weight:900;cursor:not-allowed;opacity:0.4;">Delete all ${n}</button>
+        <button onclick="doClearEverything()" style="flex:1;padding:13px;border-radius:12px;border:none;background:${C.red};color:#fff;font-size:14px;font-weight:900;cursor:pointer;">Delete all ${n}</button>
       </div>
     </div>`);
 }
