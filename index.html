@@ -87,7 +87,7 @@ input[type=number]{-moz-appearance:textfield;}
   <!-- Portfolio box -->
   <div id="portfolio-box"></div>
   <!-- Tonight's Best Opportunities — the ranking engine -->
-  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · paper</div>
+  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · buyscreen</div>
   <div id="tonights-opportunities"></div>
   <!-- Filter tags + sort -->
   <div id="filter-bar" style="background:#11141C;border-bottom:1px solid #1E2230;padding:9px 20px;"></div>
@@ -681,9 +681,12 @@ function renderPortfolioBox() {
       <div style="background:${C.card};border:1.5px solid ${C.border};border-radius:20px;padding:18px 20px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
           <span style="color:${C.textMuted};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.1em;">My Paper Portfolio</span>
-          <button onclick="togglePortfolioVisibility()" style="background:none;border:none;color:${C.textMuted};cursor:pointer;padding:2px;">
+          <div style="display:flex;align-items:center;gap:12px;">
+            <button onclick="resetPaperPortfolio()" style="background:none;border:none;color:${C.textMuted};font-size:11px;cursor:pointer;text-decoration:underline;text-underline-offset:2px;">reset</button>
+            <button onclick="togglePortfolioVisibility()" style="background:none;border:none;color:${C.textMuted};cursor:pointer;padding:2px;">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${portfolioHidden?'<path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a18.5 18.5 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>':'<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>'}</svg>
           </button>
+          </div>
         </div>
         <div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:3px;">Realized profit (closed trades)</div>
         <div style="color:${realUp?C.green:C.red};font-size:32px;font-weight:900;letter-spacing:-0.02em;margin-bottom:12px;">${mask((realUp?'+':'')+fmtP(realizedPL))}</div>
@@ -1237,7 +1240,70 @@ function setPlannedInvest(id, val){
   scheduleSave(updated);
   renderDetail(updated);
 }
+function resetPaperPortfolio(){
+  const openN = stocks.filter(s=>s.position).length;
+  const realN = stocks.reduce((a,s)=>a+((s.realized||[]).length),0);
+  showModal(`
+    <div style="background:${C.card};border-radius:20px;padding:24px;border:1px solid ${C.border};">
+      <div style="color:${C.text};font-size:18px;font-weight:800;text-align:center;margin-bottom:8px;">Reset paper portfolio?</div>
+      <div style="color:#C7CCD8;font-size:12.5px;line-height:1.6;text-align:center;margin-bottom:18px;">Clears all paper trades — ${openN} open position${openN===1?'':'s'}, ${realN} closed trade${realN===1?'':'s'}, and any leftover totals from the old build. Your stocks and their history stay. Can't be undone.</div>
+      <div style="display:flex;gap:10px;">
+        <button onclick="closeAllOverlays()" style="flex:1;padding:13px;border-radius:12px;border:1px solid ${C.border};background:none;color:${C.textSub};font-size:14px;font-weight:700;cursor:pointer;">Cancel</button>
+        <button onclick="doResetPaperPortfolio()" style="flex:1;padding:13px;border-radius:12px;border:none;background:${C.red};color:#fff;font-size:14px;font-weight:900;cursor:pointer;">Reset</button>
+      </div>
+    </div>`);
+}
+function doResetPaperPortfolio(){
+  stocks = stocks.map(s=>{ const u={...s}; delete u.position; delete u.realized; delete u.tranche; delete u.invested; delete u.plannedInvest; return u; });
+  stocks.forEach(u=>scheduleSave(u));
+  closeAllOverlays(); renderHome();
+}
 // ── Paper-trade tracking ──────────────────────────────────────────────────
+function openBuyScreen(id){
+  const s = stocks.find(x=>String(x.id)===String(id)); if(!s) return;
+  const p = planNumbers(s);
+  const defInvest = s.plannedInvest || (p.shares!=null?p.shares*s.price:0) || 0;
+  showModal(`
+    <div style="background:${C.card};border-radius:20px;padding:22px;border:1px solid ${C.border};">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+        <div style="color:${C.text};font-size:18px;font-weight:800;">Buy ${s.ticker}</div>
+        <button onclick="closeAllOverlays()" style="background:none;border:none;color:${C.textSub};font-size:22px;cursor:pointer;line-height:1;">×</button>
+      </div>
+      <div style="color:#9AA0B0;font-size:12px;margin-bottom:16px;">App price is ${fmtP(s.price)}. Adjust to the price you actually filled at.</div>
+
+      <div style="color:#9AA0B0;font-size:11px;font-weight:700;margin-bottom:5px;">PRICE YOU FILLED AT</div>
+      <input id="buy-price" type="text" inputmode="decimal" value="${s.price}" oninput="updateBuyPreview()" style="width:100%;background:${C.cardHigh};border:1px solid ${C.border};border-radius:10px;color:${C.text};font-size:16px;font-weight:700;padding:11px;outline:none;box-sizing:border-box;text-align:center;margin-bottom:14px;">
+
+      <div style="color:#9AA0B0;font-size:11px;font-weight:700;margin-bottom:5px;">AMOUNT TO INVEST</div>
+      <input id="buy-amount" type="text" inputmode="decimal" value="${defInvest>0?defInvest.toFixed(0):''}" placeholder="e.g. 1000" oninput="updateBuyPreview()" style="width:100%;background:${C.cardHigh};border:1px solid ${C.border};border-radius:10px;color:${C.text};font-size:16px;font-weight:700;padding:11px;outline:none;box-sizing:border-box;text-align:center;margin-bottom:12px;">
+
+      <div id="buy-preview" style="text-align:center;color:${C.text};font-size:14px;font-weight:700;margin-bottom:16px;min-height:20px;"></div>
+
+      <div style="display:flex;gap:10px;">
+        <button onclick="closeAllOverlays()" style="flex:1;padding:13px;border-radius:12px;border:1px solid ${C.border};background:none;color:${C.textSub};font-size:14px;font-weight:700;cursor:pointer;">Cancel</button>
+        <button onclick="confirmBuy('${s.id}')" style="flex:2;padding:13px;border-radius:12px;border:none;background:${C.green};color:#000;font-size:14px;font-weight:800;cursor:pointer;">Confirm buy</button>
+      </div>
+    </div>`);
+  updateBuyPreview();
+}
+function updateBuyPreview(){
+  const pe=document.getElementById('buy-price'), ae=document.getElementById('buy-amount'), out=document.getElementById('buy-preview');
+  if(!pe||!ae||!out) return;
+  const price=parseFloat(String(pe.value).replace(/[^0-9.]/g,''))||0;
+  const amt=parseFloat(String(ae.value).replace(/[^0-9.]/g,''))||0;
+  const shares=price>0?amt/price:0;
+  out.innerHTML = shares>0 ? `${shares.toFixed(1)} shares at ${fmtP(price)}` : `<span style="color:${C.textMuted};font-weight:400;">Enter a price and amount</span>`;
+}
+function confirmBuy(id){
+  const s = stocks.find(x=>String(x.id)===String(id)); if(!s) return;
+  const price=parseFloat(String(document.getElementById('buy-price').value).replace(/[^0-9.]/g,''))||0;
+  const amt=parseFloat(String(document.getElementById('buy-amount').value).replace(/[^0-9.]/g,''))||0;
+  if(price<=0||amt<=0) return;
+  const shares=amt/price;
+  const updated = {...s, position:{shares, entry:price, date:today()}};
+  stocks = stocks.map(x=>String(x.id)===String(id)?updated:x);
+  scheduleSave(updated); closeAllOverlays(); renderDetail(updated); renderHome();
+}
 function buyStock(id){
   const s = stocks.find(x=>String(x.id)===String(id)); if(!s) return;
   const p = planNumbers(s);
@@ -1288,8 +1354,8 @@ function riskRewardHTML(s){
   const riskTotal = shares!=null ? shares*stopPS : null;
   const riskPctInv = (riskTotal!=null&&invest>0) ? riskTotal/invest*100 : null;
   const riskPctAcct = (riskTotal!=null&&accountSize>0) ? riskTotal/accountSize*100 : null;
-  const line=(k,v,color)=>`<div style="display:flex;justify-content:space-between;padding:6px 0;"><span style="color:#9AA0B0;font-size:12.5px;">${k}</span><span style="color:${color||C.text};font-size:12.5px;font-weight:600;text-align:right;">${v}</span></div>`;
-  const moveRow=(pct)=>line(`If it rises ${pct}%`, `+${fmtP(invest*pct/100)} total · +${fmtP(price*pct/100)}/sh`, C.green);
+  const line=(k,v,color)=>`<div style="display:flex;justify-content:space-between;padding:6px 0;"><span style="color:#9AA0B0;font-size:12.5px;">${k}</span><span style="color:${color||C.text};font-size:13px;font-weight:700;text-align:right;">${v}</span></div>`;
+  const moveRow=(pct)=>line(`If it climbs ${pct}%`, '+'+fmtP(invest*pct/100), C.green);
   const recHint = accountSize>0
     ? `<div style="font-size:11px;color:#8FE0B8;margin-bottom:8px;">Account ${fmtP(accountSize)} · <button onclick="setAccountSize()" style="all:unset;color:${C.green};font-weight:700;cursor:pointer;">change</button>${(recInvest!=null && Math.abs((s.plannedInvest||recInvest)-recInvest)>1)?` · 1%-risk size <button onclick="setPlannedInvest('${s.id}','${recInvest.toFixed(0)}')" style="all:unset;color:${C.green};font-weight:700;cursor:pointer;">${fmtP(recInvest)} →</button>`:''}</div>`
     : `<div style="font-size:11px;color:#E8B45C;margin-bottom:8px;"><button onclick="setAccountSize()" style="all:unset;color:${C.green};font-weight:700;cursor:pointer;">Set account size</button> to get the 1%-risk recommendation.</div>`;
@@ -1300,24 +1366,24 @@ function riskRewardHTML(s){
      ${recHint}
      <input type="text" inputmode="decimal" value="${s.plannedInvest||''}" placeholder="${recInvest!=null?'e.g. '+recInvest.toFixed(0):'e.g. 2000'}" onchange="setPlannedInvest('${s.id}', this.value)" style="width:100%;background:${C.card};border:1px solid ${C.border};border-radius:8px;color:${C.text};font-size:15px;font-weight:700;padding:10px;outline:none;box-sizing:border-box;text-align:center;">
      ${invest>0 ? `
-       <div style="text-align:center;color:${C.text};font-size:14px;font-weight:700;margin:12px 0 4px;">${shares.toFixed(1)} shares · ${fmtP(price)} each · ${fmtP(invest)} in</div>
+       <div style="text-align:center;color:${C.text};font-size:14px;font-weight:700;margin:12px 0 4px;">${shares.toFixed(1)} shares · ${fmtP(price)} each</div>
 
        <div style="border-top:1px solid ${C.border};margin-top:8px;padding-top:8px;">
-         <div style="font-size:11px;color:${C.red};font-weight:700;margin-bottom:2px;">THE DOWNSIDE (your risk)</div>
-         ${line('Stop loss', fmtP(stopPrice)+'/sh')}
-         ${line('If stopped, you lose', fmtP(riskTotal)+' total · '+fmtP(stopPS)+'/sh', C.red)}
-         ${riskPctInv!=null?line('= of your investment', riskPctInv.toFixed(1)+'%', C.textSub):''}
-         ${riskPctAcct!=null&&riskPctAcct>1.5?`<div style="color:${C.yellow};font-size:11.5px;line-height:1.5;margin-top:6px;">Heads up — that's ${riskPctAcct.toFixed(1)}% of your account, more than the 1% guide.</div>`:''}
-       </div>
-
-       <div style="border-top:1px solid ${C.border};margin-top:8px;padding-top:8px;">
-         <div style="font-size:11px;color:${C.green};font-weight:700;margin-bottom:2px;">THE UPSIDE (potential profit)</div>
+         <div style="font-size:11px;color:${C.green};font-weight:700;margin-bottom:2px;">IF THE STOCK CLIMBS…</div>
          ${moveRow(10)}
          ${moveRow(20)}
          ${moveRow(30)}
+       </div>
+
+       <div style="border-top:1px solid ${C.border};margin-top:8px;padding-top:8px;">
+         <div style="font-size:11px;color:${C.red};font-weight:700;margin-bottom:2px;">IF IT HITS YOUR STOP</div>
+         ${line('Sell at', fmtP(stopPrice))}
+         ${line('You lose', fmtP(riskTotal), C.red)}
+         ${riskPctInv!=null?line('That\u2019s of your '+fmtP(invest), riskPctInv.toFixed(1)+'%', C.textSub):''}
+         ${riskPctAcct!=null&&riskPctAcct>1.5?`<div style="color:${C.yellow};font-size:11.5px;line-height:1.5;margin-top:6px;">Heads up — that's ${riskPctAcct.toFixed(1)}% of your account, more than the 1% guide.</div>`:''}
        </div>` : ''}
    </div>
-   <div style="color:#8A90A0;font-size:11px;line-height:1.5;margin-top:8px;">No fixed profit target — the trailing stop lets a winner run as far as it goes, so the upside above is just "if it rises this much." How far it actually runs is up to the stock.</div>`;
+   <div style="color:#8A90A0;font-size:11px;line-height:1.5;margin-top:8px;">No fixed profit target — the trailing stop lets a winner run, so the climb amounts above are just "if it rises this much," not a promise.</div>`;
 }
 function openSimpleMentor(id){
   const s = stocks.find(x=>String(x.id)===String(id)); if(!s) return;
@@ -1468,7 +1534,7 @@ function renderCleanDetail(s){
     </div>
 
     <div style="padding:4px 20px 24px;display:flex;flex-direction:column;gap:10px;">
-      ${(isBuy && !held) ? `<button onclick="buyStock('${s.id}')" style="background:${C.green};color:#000;border:none;border-radius:12px;padding:13px;font-size:14px;font-weight:800;cursor:pointer;width:100%;">Buy ${p.shares!=null?p.shares.toFixed(1)+' shares':'this'} at ${fmtP(s.price)}</button>` : ''}
+      ${(isBuy && !held) ? `<button onclick="openBuyScreen('${s.id}')" style="background:${C.green};color:#000;border:none;border-radius:12px;padding:13px;font-size:14px;font-weight:800;cursor:pointer;width:100%;">Buy ${s.ticker}</button>` : ''}
       <button onclick="showImportFlow('${s.id}')" style="background:${(isWatch&&!hasHist)?'#1D4ED8':C.cardHigh};color:${(isWatch&&!hasHist)?'#fff':C.teal};border:1px solid ${(isWatch&&!hasHist)?'#1D4ED8':C.teal+'55'};border-radius:12px;padding:12px;font-size:13px;font-weight:700;cursor:pointer;width:100%;">${hasHist?'↻ Update history':'Upload 12-month history to confirm'}</button>
       <button onclick="openSimpleMentor('${s.id}')" style="background:${C.cardHigh};color:${C.purple};border:1px solid ${C.purple}44;border-radius:12px;padding:11px;font-size:13px;font-weight:600;cursor:pointer;width:100%;">Mentor — walk me through this trade</button>
     </div>
