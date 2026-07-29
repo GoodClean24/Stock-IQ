@@ -87,7 +87,7 @@ input[type=number]{-moz-appearance:textfield;}
   <!-- Portfolio box -->
   <div id="portfolio-box"></div>
   <!-- Tonight's Best Opportunities — the ranking engine -->
-  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · list</div>
+  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · macd-fallback</div>
   <div id="tonights-opportunities"></div>
   <!-- Filter tags + sort -->
   <div id="filter-bar" style="background:#11141C;border-bottom:1px solid #1E2230;padding:9px 20px;"></div>
@@ -896,16 +896,19 @@ function computeSignalVerdict(s){
     {label:'MACD crossed up (momentum turning)', pass:macdCross===true, unknown:macdCross===null, required:true},
   ];
   const coreOk=uptrend && rsiOk && atrOk;
-  const buy=coreOk && macdCross===true;
+  // With 2+ days we require a REAL cross. With only one day (macdCross unknown),
+  // fall back to "MACD above signal" so single-day scan data can still surface a
+  // BUY. Self-correcting: once real history is loaded, the strict cross applies.
+  const macdTrigger = (macdCross===null) ? macdUp : (macdCross===true);
+  const buy=coreOk && macdTrigger;
   const ready=coreOk && (macdUp || macdCross!==false);
 
   let reason;
-  if(buy) reason='MACD just crossed up in a healthy uptrend, with RSI and daily range both in the sweet spot. This is the setup.';
+  if(buy) reason='MACD is up in a healthy uptrend, with RSI and daily range both in the sweet spot. This is the setup.';
   else if(!uptrend) reason='Not in an uptrend yet — needs price above the 200 and the 50 above the 200. Stay out.';
   else if(!atrOk) reason = atrPct<4 ? 'Too quiet — under 4% daily range means little to swing. Skip.' : 'Too wild — over 8% daily range is hard to size and stop cleanly. Skip.';
   else if(!rsiOk) reason = s.rsi<45 ? 'RSI under 45 — still falling, not a clean pullback yet. Wait.' : 'RSI over 60 — already extended. Wait for it to cool into the 45–60 zone.';
-  else if(macdCross===null) reason='Setup looks right, but I can\u2019t confirm a fresh MACD cross without yesterday\u2019s data.';
-  else reason='Setup is in place — waiting on a MACD cross up to trigger the entry.';
+  else reason='Setup is in place — waiting on MACD to turn up to trigger the entry.';
 
   return {buy, ready, reason, checks, atrPct, macdCross};
 }
