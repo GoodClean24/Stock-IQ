@@ -87,7 +87,7 @@ input[type=number]{-moz-appearance:textfield;}
   <!-- Portfolio box -->
   <div id="portfolio-box"></div>
   <!-- Tonight's Best Opportunities — the ranking engine -->
-  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · scanbtn</div>
+  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · atrfix</div>
   <div id="tonights-opportunities"></div>
   <!-- Filter tags + sort -->
   <div id="filter-bar" style="background:#11141C;border-bottom:1px solid #1E2230;padding:9px 20px;"></div>
@@ -5691,6 +5691,7 @@ function parseScanCSV(text) {
     macdLine:   ['MACD','macd'],
     signalLine: ['MACDSignal','macdsignal','MACDs','MACD_Signal'],
     atr:        ['ATR14','atr14','ATR_14','ATR'],
+    atrPct:     ['ATRPercentage','atrpercentage','ATR%','ATRpct','ATR_Percentage','AtrPercentage'],
     hi52:       ['High52W','high52w','52WHigh','Hi52'],
     lo52:       ['Low52W','low52w','52WLow','Lo52'],
   };
@@ -5713,13 +5714,19 @@ function parseScanCSV(text) {
     // but the comma separators inside the number are still there.
     const num = k => idx[k]!==undefined && cols[idx[k]]!=='' ? parseFloat(String(cols[idx[k]]).replace(/,/g,'')) : null;
     const str = k => idx[k]!==undefined && cols[idx[k]]!=='' ? cols[idx[k]] : null;
+    const _price = num('price');
+    const _atrPct = num('atrPct');
+    // TOS scan exports often carry a reliable ATRPercentage column but an
+    // unreliable raw ATR14 column. When the percentage is present, derive the
+    // true dollar ATR from it so the app's ATR% and stop/size math are correct.
+    const _atr = (_atrPct!=null && _price) ? _price*_atrPct/100 : num('atr');
     rows.push({
       ticker: ticker.toUpperCase(),
       sector: str('sector'), industry: str('industry'),
-      price: num('price'), vol: num('vol'), avgvol: num('avgvol'),
+      price: _price, vol: num('vol'), avgvol: num('avgvol'),
       ma20: num('ma20'), ma50: num('ma50'), ma200: num('ma200'),
       rsi: num('rsi'), macdLine: num('macdLine'), signalLine: num('signalLine'),
-      atr: num('atr'), hi52: num('hi52'), lo52: num('lo52'),
+      atr: _atr, hi52: num('hi52'), lo52: num('lo52'),
     });
   }
   return rows;
