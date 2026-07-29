@@ -87,7 +87,7 @@ input[type=number]{-moz-appearance:textfield;}
   <!-- Portfolio box -->
   <div id="portfolio-box"></div>
   <!-- Tonight's Best Opportunities — the ranking engine -->
-  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · tracker</div>
+  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · boughttop</div>
   <div id="tonights-opportunities"></div>
   <!-- Filter tags + sort -->
   <div id="filter-bar" style="background:#11141C;border-bottom:1px solid #1E2230;padding:9px 20px;"></div>
@@ -1003,13 +1003,14 @@ function renderCleanCard(s){
 // Groups the list into Buys / Waits / Holds, each sorted by % change (favorites first).
 function groupedListHTML(list){
   const wordOf=s=>{const a=computeSimpleAction(s);return a.word||(s.type==='Long-Term Hold'?'HOLD':'—');};
-  const b={BUY:[],WATCH:[],WAIT:[],HOLD:[]};
-  list.forEach(s=>{const w=wordOf(s); (b[w]||b.HOLD).push(s);});
+  const b={BOUGHT:[],BUY:[],WATCH:[],WAIT:[],HOLD:[]};
+  list.forEach(s=>{ if(s.position){ b.BOUGHT.push(s); return; } const w=wordOf(s); (b[w]||b.HOLD).push(s); });
   const byPct=(x,y)=>{if(x.starred&&!y.starred)return -1;if(!x.starred&&y.starred)return 1;return (y.pct||0)-(x.pct||0);};
-  const secs=[['BUY','Buys',C.green],['WATCH','Watch — pull history','#3B82F6'],['WAIT','Waits',C.yellow],['HOLD','Holds',C.teal]];
+  const byPL=(x,y)=>{const px=(x.price-x.position.entry)*x.position.shares, py=(y.price-y.position.entry)*y.position.shares; return py-px;};
+  const secs=[['BOUGHT','Bought','#E0A82E',byPL],['BUY','Buys',C.green,byPct],['WATCH','Watch — pull history','#3B82F6',byPct],['WAIT','Waits',C.yellow,byPct],['HOLD','Holds',C.teal,byPct]];
   let html='';
-  secs.forEach(([k,label,color])=>{
-    const g=b[k]; if(!g.length)return; g.sort(byPct);
+  secs.forEach(([k,label,color,sortFn])=>{
+    const g=b[k]; if(!g.length)return; g.sort(sortFn);
     html+=`<div style="display:flex;align-items:center;gap:8px;margin:16px 4px 10px;"><span style="width:8px;height:8px;border-radius:50%;background:${color};"></span><span style="color:#C7CCD8;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;">${label}</span><span style="color:#7A8090;font-size:12px;">${g.length}</span></div>`;
     html+=g.map(s=>renderCleanCard(s)).join('');
   });
