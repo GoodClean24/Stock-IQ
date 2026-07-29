@@ -87,7 +87,7 @@ input[type=number]{-moz-appearance:textfield;}
   <!-- Portfolio box -->
   <div id="portfolio-box"></div>
   <!-- Tonight's Best Opportunities — the ranking engine -->
-  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · overview</div>
+  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · scanbtn</div>
   <div id="tonights-opportunities"></div>
   <!-- Filter tags + sort -->
   <div id="filter-bar" style="background:#11141C;border-bottom:1px solid #1E2230;padding:9px 20px;"></div>
@@ -5796,6 +5796,8 @@ function previewScanCSV(input) {
           <span style="color:${pendingScanDate?'#8FE0B8':'#E8B45C'};font-size:12px;">${pendingScanDate?`Dated ${pendingScanDate} (read from filename)`:'No date in filename — using today. Add a date like 2026-07-28 to the filename to set it.'}</span>
         </div>
         <div style="display:flex;gap:10px;">
+          <button onclick="closeAllOverlays()" style="flex:1;padding:13px;border-radius:12px;border:1px solid ${C.border};background:none;color:${C.textSub};font-size:14px;font-weight:700;cursor:pointer;">Cancel</button>
+          <button onclick="doBulkImportScan()" style="flex:2;padding:13px;border-radius:12px;border:none;background:${C.teal};color:#000;font-size:14px;font-weight:900;cursor:pointer;" ${pendingScanNewCount===0?'disabled':''}>Import ${pendingScanNewCount} New ✓</button>
         </div>
       </div>`);
   };
