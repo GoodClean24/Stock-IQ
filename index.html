@@ -87,7 +87,7 @@ input[type=number]{-moz-appearance:textfield;}
   <!-- Portfolio box -->
   <div id="portfolio-box"></div>
   <!-- Tonight's Best Opportunities — the ranking engine -->
-  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · confirm</div>
+  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · loaded</div>
   <div id="tonights-opportunities"></div>
   <!-- Filter tags + sort -->
   <div id="filter-bar" style="background:#11141C;border-bottom:1px solid #1E2230;padding:9px 20px;"></div>
@@ -921,7 +921,9 @@ function computeSignalVerdict(s){
   else if(!uptrend) reason='Not in an uptrend yet — needs price above the 200 and the 50 above the 200. Stay out.';
   else if(!atrOk) reason = atrPct<4 ? 'Too quiet — under 4% daily range means little to swing. Skip.' : 'Too wild — over 8% daily range is hard to size and stop cleanly. Skip.';
   else if(!rsiOk) reason = s.rsi<45 ? 'RSI under 45 — still falling, not a clean pullback yet. Wait.' : 'RSI over 60 — already extended. Wait for it to cool into the 45–60 zone.';
-  else reason='Setup is here — uptrend, RSI and range all in the zone. Waiting on a MACD cross to trigger. Worth pulling 12-month history to watch it.';
+  else reason = haveHistory
+    ? 'Setup is here — uptrend, RSI and range all in the zone. Momentum hasn\u2019t crossed up yet, so it\u2019s waiting on the MACD trigger.'
+    : 'Setup is here — uptrend, RSI and range all in the zone. Pull 12-month history to confirm the MACD trigger.';
 
   return {buy, state, ready, reason, checks, atrPct};
 }
@@ -1230,12 +1232,23 @@ function renderCleanDetail(s){
   </button>`;
   const checks=v.checks||[];
   const cGet=(frag)=>checks.find(c=>c.label.toLowerCase().includes(frag));
+  const snaps=(s.snapshots||[]).filter(x=>x&&x.date);
+  const hasHist=snaps.length>=2;
+  const histFrom=hasHist?snaps[0].date:null, histTo=hasHist?snaps[snaps.length-1].date:null;
+  const macdGap=(s.signalLine!=null&&s.macdLine!=null)?(s.macdLine-s.signalLine):null;
+  const gapRow=(label,val,color)=>`<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid ${C.border};"><span style="color:#9AA0B0;font-size:13px;">${label}</span><span style="color:${color||C.text};font-size:13px;font-weight:600;">${val}</span></div>`;
+  const watchResult = hasHist ? `
+    <div style="color:#9FC0F5;font-size:12.5px;line-height:1.55;margin-bottom:10px;">Structure's ready. The only thing missing is the momentum trigger — here's the gap to a BUY:</div>
+    ${gapRow('MACD line', s.macdLine!=null?s.macdLine.toFixed(3):'—')}
+    ${gapRow('Signal line (MACD must cross above)', s.signalLine!=null?s.signalLine.toFixed(3):'—')}
+    ${gapRow('Gap left to close', macdGap!=null?(macdGap>=0?'crossed ✓':Math.abs(macdGap).toFixed(3)):'—', macdGap!=null&&macdGap>=0?C.green:C.yellow)}`
+   : `<div style="color:#9FC0F5;font-size:12.5px;padding:12px 2px;line-height:1.55;">This one has the setup. Load its 12-month history (the Python file with dates) to confirm the MACD trigger and get the full entry, stop, and size.</div>`;
   const planRows = isBuy ? `
     ${row('entry','Entry','Now, near '+fmtP(p.entry),null)}
     ${row('stop','Stop loss',p.stop!=null?fmtP(p.stop):'—',null)}
     ${row('exit','Trailing exit','3× ATR',null)}
     ${row('size','Size',p.shares!=null?p.shares.toFixed(1)+' sh':'set budget',null)}`
-   : isWatch ? `<div style="color:#9FC0F5;font-size:12.5px;padding:12px 2px;line-height:1.55;">This one has the setup. Load its 12-month history (the Python file with dates) to confirm the MACD trigger and get the full entry, stop, and size.</div>`
+   : isWatch ? `<div style="padding:6px 2px;">${watchResult}</div>`
    : `<div style="color:#C7CCD8;font-size:12.5px;padding:12px 2px;line-height:1.5;">Your trade plan appears here once this is a BUY. No setup yet means no trade to plan.</div>`;
 
   document.getElementById('detail-content').innerHTML=`
@@ -1255,6 +1268,11 @@ function renderCleanDetail(s){
       <div style="color:#E2E6EF;font-size:13.5px;line-height:1.6;margin-top:14px;">${v.reason||''}</div>
     </div>
 
+    <div style="padding:9px 20px;border-bottom:1px solid ${C.border};display:flex;align-items:center;justify-content:center;gap:8px;background:${hasHist?C.green+'12':'#E8A31712'};">
+      <span style="color:${hasHist?C.green:'#E8A317'};font-size:13px;">${hasHist?'✓':'○'}</span>
+      <span style="color:${hasHist?'#8FE0B8':'#E8B45C'};font-size:12px;">${hasHist?`${snaps.length} days of history loaded · ${histFrom} → ${histTo}`:'No history loaded yet — upload below to confirm'}</span>
+    </div>
+
     <div style="padding:14px 20px;border-bottom:1px solid ${C.border};">
       <div style="color:#AEB4C2;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">The setup <span style="text-transform:none;letter-spacing:0;color:#8A90A0;">· tap any row to learn</span></div>
       ${row('uptrend','Uptrend (price above 200, 50 above 200)',null,cGet('uptrend')?cGet('uptrend').pass:null)}
@@ -1269,7 +1287,7 @@ function renderCleanDetail(s){
     </div>
 
     <div style="padding:4px 20px 24px;display:flex;flex-direction:column;gap:10px;">
-      <button onclick="showImportFlow('${s.id}')" style="background:${isWatch?'#1D4ED8':C.cardHigh};color:${isWatch?'#fff':C.teal};border:1px solid ${isWatch?'#1D4ED8':C.teal+'55'};border-radius:12px;padding:12px;font-size:13px;font-weight:700;cursor:pointer;width:100%;">${isWatch?'Upload 12-month history to confirm':'Upload / update history'}</button>
+      <button onclick="showImportFlow('${s.id}')" style="background:${(isWatch&&!hasHist)?'#1D4ED8':C.cardHigh};color:${(isWatch&&!hasHist)?'#fff':C.teal};border:1px solid ${(isWatch&&!hasHist)?'#1D4ED8':C.teal+'55'};border-radius:12px;padding:12px;font-size:13px;font-weight:700;cursor:pointer;width:100%;">${hasHist?'↻ Update history':'Upload 12-month history to confirm'}</button>
       <button onclick="openMentor('${s.id}')" style="background:${C.cardHigh};color:${C.purple};border:1px solid ${C.purple}44;border-radius:12px;padding:11px;font-size:13px;font-weight:600;cursor:pointer;width:100%;">Mentor — walk me through this trade</button>
     </div>
    </div>`;
