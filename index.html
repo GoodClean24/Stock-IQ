@@ -87,7 +87,7 @@ input[type=number]{-moz-appearance:textfield;}
   <!-- Portfolio box -->
   <div id="portfolio-box"></div>
   <!-- Tonight's Best Opportunities — the ranking engine -->
-  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · csvfix</div>
+  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · postimport</div>
   <div id="tonights-opportunities"></div>
   <!-- Filter tags + sort -->
   <div id="filter-bar" style="background:#11141C;border-bottom:1px solid #1E2230;padding:9px 20px;"></div>
@@ -6071,10 +6071,12 @@ async function doImportCSV(stockId) {
   // Update in-memory array first
   stocks = stocks.map(x => String(x.id) === String(stockId) ? updated : x);
 
-  // Close overlay and re-render immediately so user sees result
+  // Close overlay, refresh home in the background, then land squarely on the
+  // updated analysis screen so the new verdict + plan are visible.
   closeAllOverlays();
-  renderDetail(updated);
   renderHome();
+  try { renderDetail(updated); } catch(e){ console.error('detail render failed', e); }
+  showScreen('detail');
 
   // Then save to Firebase in background
   showSaveStatus('saving');
