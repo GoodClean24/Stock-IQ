@@ -87,7 +87,7 @@ input[type=number]{-moz-appearance:textfield;}
   <!-- Portfolio box -->
   <div id="portfolio-box"></div>
   <!-- Tonight's Best Opportunities — the ranking engine -->
-  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · macd-fallback</div>
+  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · 3-state</div>
   <div id="tonights-opportunities"></div>
   <!-- Filter tags + sort -->
   <div id="filter-bar" style="background:#11141C;border-bottom:1px solid #1E2230;padding:9px 20px;"></div>
@@ -877,40 +877,51 @@ function computeSignalVerdict(s){
   if(!need.every(k=>s[k]!=null))
     return {buy:false, ready:false, reason:'Not enough data to read this setup yet.', checks:[]};
 
-  // prior-day MACD (for the cross) from the most recent earlier snapshot
+  // recent MACD cross: crossed up on any of the last ~3 bars (real-world cadence,
+  // not just the exact tick). Build points from snapshots, latest = current bar.
   const snaps=(s.snapshots||[]).filter(sn=>sn.date).sort((a,b)=>new Date(a.date)-new Date(b.date));
-  const prev=snaps.length>=2?snaps[snaps.length-2]:null;
-  const pLine=prev?prev.macdLine:null, pSig=prev?prev.signalLine:null;
+  const pts=snaps.map(sn=>({l:sn.macdLine,g:sn.signalLine}));
+  if(pts.length) pts[pts.length-1]={l:s.macdLine,g:s.signalLine}; else pts.push({l:s.macdLine,g:s.signalLine});
+  let recentCross=false;
+  for(let k=Math.max(1,pts.length-3);k<pts.length;k++){
+    const a=pts[k-1],b=pts[k];
+    if(a.l!=null&&a.g!=null&&b.l!=null&&b.g!=null&&a.l<=a.g&&b.l>b.g){recentCross=true;break;}
+  }
+  const haveHistory=pts.length>=2;
 
   const uptrend = s.price>s.ma200 && s.ma50>s.ma200;
   const atrPct  = (s.atr/s.price)*100;
   const atrOk   = atrPct>=4 && atrPct<=8;
   const rsiOk   = s.rsi>=45 && s.rsi<=60;
-  const macdCross = (pLine!=null && pSig!=null) ? (pLine<=pSig && s.macdLine>s.signalLine) : null;
-  const macdUp    = s.macdLine>s.signalLine;
+  const macdUp  = s.macdLine>s.signalLine;
+  const macdCross = recentCross;
 
   const checks=[
     {label:'Uptrend — price above 200, 50 above 200', pass:uptrend, required:true},
     {label:'RSI in the 45–60 entry band', pass:rsiOk, required:true},
     {label:'Daily range tradeable — ATR 4–8% of price', pass:atrOk, required:true},
-    {label:'MACD crossed up (momentum turning)', pass:macdCross===true, unknown:macdCross===null, required:true},
+    {label:'MACD crossed up recently (momentum turning)', pass:macdCross===true, required:true},
   ];
   const coreOk=uptrend && rsiOk && atrOk;
-  // With 2+ days we require a REAL cross. With only one day (macdCross unknown),
+  // BUY needs a recent cross. With only one day of data (no cross detectable),
   // fall back to "MACD above signal" so single-day scan data can still surface a
-  // BUY. Self-correcting: once real history is loaded, the strict cross applies.
-  const macdTrigger = (macdCross===null) ? macdUp : (macdCross===true);
-  const buy=coreOk && macdTrigger;
-  const ready=coreOk && (macdUp || macdCross!==false);
+  // BUY. Self-correcting once history is loaded.
+  const macdTrigger = haveHistory ? recentCross : macdUp;
+  const buy = coreOk && macdTrigger;
+  // WATCH = the setup is valid but no trigger yet. These are the "pull history" candidates.
+  const state = buy ? 'BUY' : (coreOk ? 'WATCH' : 'WAIT');
+  const ready = coreOk;
 
   let reason;
-  if(buy) reason='MACD is up in a healthy uptrend, with RSI and daily range both in the sweet spot. This is the setup.';
+  if(buy) reason = haveHistory
+    ? 'MACD crossed up recently in a healthy uptrend, with RSI and daily range in the sweet spot. This is the setup.'
+    : 'MACD is up in a healthy uptrend, with RSI and range in the zone. Load 12-month history to confirm the cross.';
   else if(!uptrend) reason='Not in an uptrend yet — needs price above the 200 and the 50 above the 200. Stay out.';
   else if(!atrOk) reason = atrPct<4 ? 'Too quiet — under 4% daily range means little to swing. Skip.' : 'Too wild — over 8% daily range is hard to size and stop cleanly. Skip.';
   else if(!rsiOk) reason = s.rsi<45 ? 'RSI under 45 — still falling, not a clean pullback yet. Wait.' : 'RSI over 60 — already extended. Wait for it to cool into the 45–60 zone.';
-  else reason='Setup is in place — waiting on MACD to turn up to trigger the entry.';
+  else reason='Setup is here — uptrend, RSI and range all in the zone. Waiting on a MACD cross to trigger. Worth pulling 12-month history to watch it.';
 
-  return {buy, ready, reason, checks, atrPct, macdCross};
+  return {buy, state, ready, reason, checks, atrPct};
 }
 
 function computeSimpleAction(s) {
@@ -930,9 +941,9 @@ function computeSimpleAction(s) {
   // ── Option 3: the validated engine is the brain for the BUY call. ──
   // Old market-state routing still handles holding/exit above; entry is ours.
   const v = computeSignalVerdict(s);
-  return {word: v.buy?'BUY':'WAIT', holding:false, reason: v.reason, warning:null};
+  return {word: v.state, holding:false, reason: v.reason, warning:null};
 }
-const SIMPLE_ACTION_META = {BUY:{color:C.green}, WAIT:{color:C.yellow}, HOLD:{color:C.teal}, EXIT:{color:C.red}};
+const SIMPLE_ACTION_META = {BUY:{color:C.green}, WATCH:{color:'#3B82F6'}, WAIT:{color:C.yellow}, HOLD:{color:C.teal}, EXIT:{color:C.red}};
 
 function renderCleanCard(s){
   const simple = computeSimpleAction(s);
@@ -971,10 +982,10 @@ function renderCleanCard(s){
 // Groups the list into Buys / Waits / Holds, each sorted by % change (favorites first).
 function groupedListHTML(list){
   const wordOf=s=>{const a=computeSimpleAction(s);return a.word||(s.type==='Long-Term Hold'?'HOLD':'—');};
-  const b={BUY:[],WAIT:[],HOLD:[]};
-  list.forEach(s=>{const w=wordOf(s); (w==='BUY'?b.BUY:w==='WAIT'?b.WAIT:b.HOLD).push(s);});
+  const b={BUY:[],WATCH:[],WAIT:[],HOLD:[]};
+  list.forEach(s=>{const w=wordOf(s); (b[w]||b.HOLD).push(s);});
   const byPct=(x,y)=>{if(x.starred&&!y.starred)return -1;if(!x.starred&&y.starred)return 1;return (y.pct||0)-(x.pct||0);};
-  const secs=[['BUY','Buys',C.green],['WAIT','Waits',C.yellow],['HOLD','Holds',C.teal]];
+  const secs=[['BUY','Buys',C.green],['WATCH','Watch — pull history','#3B82F6'],['WAIT','Waits',C.yellow],['HOLD','Holds',C.teal]];
   let html='';
   secs.forEach(([k,label,color])=>{
     const g=b[k]; if(!g.length)return; g.sort(byPct);
@@ -1206,10 +1217,11 @@ function showLearn(key, sid){
 function renderCleanDetail(s){
   const v=computeSignalVerdict(s);
   const p=planNumbers(s);
-  const isBuy=v.buy, C_=C;
-  const vColor=isBuy?'#0D0F16':(v.ready?'#0D0F16':'#0D0F16');
-  const vBg=isBuy?C.green:(v.ready?C.yellow:'#E8A317');
-  const vWord=isBuy?'BUY':'WAIT';
+  const state=v.state||(v.buy?'BUY':'WAIT');
+  const isBuy=state==='BUY', isWatch=state==='WATCH';
+  const vColor='#0D0F16';
+  const vBg=isBuy?C.green:(isWatch?'#3B82F6':'#E8A317');
+  const vWord=state;
   const row=(key,label,val,pass)=>`<button onclick="showLearn('${key}','${s.id}')" style="all:unset;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 2px;border-bottom:1px solid ${C.border};width:100%;box-sizing:border-box;">
     <span style="display:flex;align-items:center;gap:9px;">${pass!=null?`<span style="color:${pass?C.green:C.red};font-size:15px;">${pass?'✓':'✕'}</span>`:''}<span style="color:${C.text};font-size:13.5px;">${label}</span></span>
     <span style="display:flex;align-items:center;gap:8px;color:#CDD2DE;font-size:13px;">${val!=null?val:''}<span style="color:#8A90A0;font-size:14px;">›</span></span>
@@ -1221,6 +1233,7 @@ function renderCleanDetail(s){
     ${row('stop','Stop loss',p.stop!=null?fmtP(p.stop):'—',null)}
     ${row('exit','Trailing exit','3× ATR',null)}
     ${row('size','Size',p.shares!=null?p.shares.toFixed(1)+' sh':'set budget',null)}`
+   : isWatch ? `<div style="color:#9FC0F5;font-size:12.5px;padding:12px 2px;line-height:1.55;">This one has the setup. Load its 12-month history (the Python file with dates) to confirm the MACD trigger and get the full entry, stop, and size.</div>`
    : `<div style="color:#C7CCD8;font-size:12.5px;padding:12px 2px;line-height:1.5;">Your trade plan appears here once this is a BUY. No setup yet means no trade to plan.</div>`;
 
   document.getElementById('detail-content').innerHTML=`
