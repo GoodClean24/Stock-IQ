@@ -86,8 +86,9 @@ input[type=number]{-moz-appearance:textfield;}
   </div>
   <!-- Portfolio box -->
   <div id="portfolio-box"></div>
+  <div id="position-watch"></div>
   <!-- Tonight's Best Opportunities — the ranking engine -->
-  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · ranker</div>
+  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · poswatch</div>
   <div id="tonights-opportunities"></div>
   <!-- Filter tags + sort -->
   <div id="filter-bar" style="background:#11141C;border-bottom:1px solid #1E2230;padding:9px 20px;"></div>
@@ -634,6 +635,7 @@ function setSortMode(v) { sortMode = v; renderStockList(); }
 function renderHome() {
   renderMarket();
   renderPortfolioBox();
+  renderPositionWatch();
   renderTonightsOpportunities();
   renderFilterBar();
   renderListHeader();
@@ -1011,6 +1013,8 @@ function setupScore(s){
   const rvol = (s.avgvol&&s.vol)? s.vol/s.avgvol : null;
   if(rvol!=null){ score += Math.min(25, (rvol/1.3)*15); }                                              // volume confirmation (0-25)
   if(s.atr&&s.price){ const a=s.atr/s.price*100; score += Math.max(0, 20*(1 - Math.abs(a-6)/4)); }     // ATR near ideal ~6% (0-20)
+  const ed = earningsDaysAway(s);
+  if(ed!=null && ed>=0 && ed<=7) score -= 50;  // earnings imminent — push it down the list
   return score;
 }
 function groupedListHTML(list){
@@ -1278,6 +1282,63 @@ function doResetPaperPortfolio(){
   stocks.forEach(u=>scheduleSave(u));
   closeAllOverlays(); renderHome();
 }
+function earningsDaysAway(s){
+  if(!s.earningsDate) return null;
+  const d = new Date(s.earningsDate); if(isNaN(d)) return null;
+  return Math.round((d - Date.now())/86400000);
+}
+function fmtEarnDate(v){
+  const d = new Date(v); if(isNaN(d)) return v;
+  return d.toLocaleDateString(undefined,{month:'short',day:'numeric'});
+}
+function setEarningsDate(id){
+  const s = stocks.find(x=>String(x.id)===String(id)); if(!s) return;
+  showModal(`
+    <div style="background:${C.card};border-radius:20px;padding:22px;border:1px solid ${C.border};">
+      <div style="color:${C.text};font-size:18px;font-weight:800;text-align:center;margin-bottom:6px;">Earnings date · ${s.ticker}</div>
+      <div style="color:#AEB4C2;font-size:12.5px;line-height:1.55;text-align:center;margin-bottom:16px;">When does this company report? A swing trade held through earnings can gap right past your stop, so the app will warn you if it's close.</div>
+      <input id="earn-input" type="date" value="${s.earningsDate||''}" style="width:100%;background:${C.cardHigh};border:1px solid ${C.border};border-radius:10px;color:${C.text};font-size:16px;font-weight:700;padding:12px;outline:none;box-sizing:border-box;text-align:center;margin-bottom:16px;">
+      <div style="display:flex;gap:10px;">
+        ${s.earningsDate?`<button onclick="saveEarningsDate('${s.id}','')" style="flex:1;padding:13px;border-radius:12px;border:1px solid ${C.border};background:none;color:${C.textSub};font-size:14px;font-weight:700;cursor:pointer;">Clear</button>`:`<button onclick="closeAllOverlays()" style="flex:1;padding:13px;border-radius:12px;border:1px solid ${C.border};background:none;color:${C.textSub};font-size:14px;font-weight:700;cursor:pointer;">Cancel</button>`}
+        <button onclick="saveEarningsDate('${s.id}', document.getElementById('earn-input').value)" style="flex:1;padding:13px;border-radius:12px;border:none;background:${C.green};color:#000;font-size:14px;font-weight:900;cursor:pointer;">Save</button>
+      </div>
+    </div>`);
+}
+function saveEarningsDate(id, val){
+  const s = stocks.find(x=>String(x.id)===String(id)); if(!s) return;
+  const updated = {...s, earningsDate: val||null};
+  stocks = stocks.map(x=>String(x.id)===String(id)?updated:x);
+  scheduleSave(updated); closeAllOverlays(); renderDetail(updated); renderHome();
+}
+function positionAlert(s){
+  const ps = positionStats(s); if(!ps) return null;
+  const rsi = s.rsi;
+  if(!ps.macdUp) return {color:C.yellow, icon:'⚠️', tag:'Momentum fading', text:`The push that carried it is weakening. A pullback could be starting — watch your exit and think about locking in your ${ps.pl>=0?'+'+fmtP(ps.pl):fmtP(ps.pl)}.`};
+  if(ps.distPct!=null && ps.distPct<3) return {color:C.yellow, icon:'⚠️', tag:'Near your exit', text:`Only ${ps.distPct.toFixed(1)}% above your trailing exit. A dip from here sells you out — decide if you'd rather take profit now.`};
+  if(rsi!=null && rsi>72) return {color:'#E0A82E', icon:'🔥', tag:'Running hot', text:`RSI ${rsi.toFixed(0)}, up ${ps.plPct.toFixed(1)}%. Stretched and could snap back. Consider tightening your exit or trimming some.`};
+  if(ps.plPct>=12 && ps.lockedIn) return {color:C.green, icon:'📈', tag:'Taking off', text:`Up ${ps.plPct.toFixed(1)}% and your exit is locked into profit. Let it run — just keep an eye on it.`};
+  return null;
+}
+function renderPositionWatch(){
+  const el = document.getElementById('position-watch'); if(!el) return;
+  const held = (stocks||[]).filter(s=>s.position);
+  const alerts = held.map(s=>({s, a:positionAlert(s)})).filter(x=>x.a);
+  if(!alerts.length){ el.innerHTML=''; return; }
+  const order = {'⚠️':0,'🔥':1,'📈':2};
+  alerts.sort((x,y)=>(order[x.a.icon]??9)-(order[y.a.icon]??9));
+  el.innerHTML = `
+    <div style="margin:0 16px 14px;background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:16px;">
+      <div style="color:#AEB4C2;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">Watch your positions</div>
+      ${alerts.map((x,i)=>`
+        <div onclick="openDetail('${x.s.id}')" style="display:flex;gap:12px;align-items:flex-start;padding:11px 0;${i<alerts.length-1?`border-bottom:1px solid ${C.border};`:''}cursor:pointer;">
+          <span style="font-size:18px;flex-shrink:0;">${x.a.icon}</span>
+          <div style="min-width:0;flex:1;">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;"><span style="color:${C.text};font-size:14px;font-weight:700;">${x.s.ticker}</span><span style="background:${x.a.color};color:#0D0F16;font-size:10px;font-weight:700;padding:2px 8px;border-radius:6px;">${x.a.tag}</span></div>
+            <div style="color:#C7CCD8;font-size:12px;line-height:1.55;">${x.a.text}</div>
+          </div>
+        </div>`).join('')}
+    </div>`;
+}
 function positionStats(s){
   const pos = s.position; if(!pos) return null;
   const snaps = (s.snapshots||[]).filter(x=>x&&x.date);
@@ -1520,6 +1581,8 @@ function renderCleanDetail(s){
   const hasHist=snaps.length>=2;
   const histFrom=hasHist?snaps[0].date:null, histTo=hasHist?snaps[snaps.length-1].date:null;
   const macdGap=(s.signalLine!=null&&s.macdLine!=null)?(s.macdLine-s.signalLine):null;
+  const eDays = earningsDaysAway(s);
+  const eSoon = eDays!=null && eDays>=0 && eDays<=7;
   const gapRow=(label,val,color)=>`<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid ${C.border};"><span style="color:#9AA0B0;font-size:13px;">${label}</span><span style="color:${color||C.text};font-size:13px;font-weight:600;">${val}</span></div>`;
   const watchResult = hasHist ? `
     <div style="color:#9FC0F5;font-size:12.5px;line-height:1.55;margin-bottom:10px;">Structure's ready. The only thing missing is the momentum trigger — here's the gap to a BUY:</div>
@@ -1585,12 +1648,17 @@ function renderCleanDetail(s){
       <span style="color:${hasHist?'#8FE0B8':'#E8B45C'};font-size:12px;">${hasHist?`${snaps.length} days of history loaded · ${histFrom} → ${histTo}`:'No history loaded yet — upload below to confirm'}</span>
     </div>
 
+    ${eSoon && (isBuy||isWatch) ? `<div style="padding:11px 20px;background:${C.red}1A;border-bottom:1px solid ${C.border};color:#F5A3A3;font-size:12.5px;line-height:1.5;">⚠️ Earnings in ${eDays} day${eDays===1?'':'s'} — a swing trade held through earnings can gap right past your stop. Best to wait until after it reports.</div>` : ''}
     <div style="padding:14px 20px;border-bottom:1px solid ${C.border};">
       <div style="color:#AEB4C2;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">The setup <span style="text-transform:none;letter-spacing:0;color:#8A90A0;">· tap any row to learn</span></div>
       ${row('uptrend','Uptrend (price above 200, 50 above 200)',setupVals.uptrend,cGet('uptrend')?cGet('uptrend').pass:null)}
       ${row('rsi','RSI in the 45–60 band',setupVals.rsi,cGet('rsi')?cGet('rsi').pass:null)}
       ${row('atr','Daily range tradeable (ATR 4–8%)',setupVals.atr,cGet('range')?cGet('range').pass:null)}
       ${row('macd','MACD crossed up',setupVals.macd,cGet('macd')?cGet('macd').pass:null)}
+      <button onclick="setEarningsDate('${s.id}')" style="all:unset;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 2px;width:100%;box-sizing:border-box;">
+        <span style="color:${C.text};font-size:13.5px;">Earnings date</span>
+        <span style="display:flex;align-items:center;gap:8px;color:${eSoon?C.red:(s.earningsDate?C.textSub:C.green)};font-size:13px;font-weight:600;">${s.earningsDate?`${fmtEarnDate(s.earningsDate)}${eDays!=null?` · in ${eDays}d`:''}`:'set date'}<span style="color:${C.textMuted};font-size:14px;">›</span></span>
+      </button>
     </div>
 
     <div style="padding:14px 20px;">
