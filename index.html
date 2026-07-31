@@ -1356,6 +1356,8 @@ function saveEarningsDate(id, val){
 // Replays the validated strategy across this ticker's own history and reports
 // how it actually did. Honest about small samples — this shows whether the
 // strategy has WORKED on this name, never predicts the next trade.
+function _mean(a){ return a.length?a.reduce((x,y)=>x+y,0)/a.length:null; }
+function _std(a){ if(a.length<2) return null; const m=_mean(a); return Math.sqrt(a.reduce((s,v)=>s+(v-m)*(v-m),0)/a.length); }
 function tickerBacktest(s){
   const snaps=(s.snapshots||[]).filter(x=>x&&x.date&&x.price!=null).sort((a,b)=>new Date(a.date)-new Date(b.date));
   const trades=[]; let lastExit=-1;
@@ -1376,14 +1378,36 @@ function tickerBacktest(s){
       if(lo!=null && lo<=trail){ exitPrice=trail; exitIdx=j; break; }
     }
     if(exitPrice==null){ exitIdx=snaps.length-1; exitPrice=snaps[exitIdx].price; }
-    trades.push({entryDate:sn.date, entry, exitDate:snaps[exitIdx].date, exit:exitPrice, ret:(exitPrice/entry-1), held:exitIdx-i, open:exitPrice==null});
+    const entryDistMA50 = sn.ma50 ? ((sn.price/sn.ma50-1)*100) : null;
+    const entryRSI = sn.rsi!=null ? sn.rsi : null;
+    trades.push({entryDate:sn.date, entry, exitDate:snaps[exitIdx].date, exit:exitPrice, ret:(exitPrice/entry-1), held:exitIdx-i, open:exitPrice==null, entryDistMA50, entryRSI});
     lastExit=exitIdx;
   }
   const n=trades.length, wins=trades.filter(t=>t.ret>0).length;
   const avg=n?trades.reduce((a,t)=>a+t.ret,0)/n:0;
   const avgHeld=n?trades.reduce((a,t)=>a+t.held,0)/n:0;
   const best=n?Math.max(...trades.map(t=>t.ret)):0, worst=n?Math.min(...trades.map(t=>t.ret)):0;
-  return {trades, bars:snaps.length, months:Math.round(snaps.length/21), n, wins, winRate:n?wins/n:0, avg, avgHeld, best, worst, enough:n>=4};
+
+  // Which condition actually clustered across the WINS? Compares relative
+  // spread (std/|mean|, lower = tighter = more consistent) between two
+  // candidate "tells": distance to the 50-day, and RSI at entry. Only
+  // trusted with >=3 wins -- below that any clustering is noise, not signal.
+  const winTrades = trades.filter(t=>t.ret>0);
+  let tell = null, tellStats = null;
+  if(winTrades.length>=3){
+    const dists = winTrades.map(t=>t.entryDistMA50).filter(v=>v!=null);
+    const rsis  = winTrades.map(t=>t.entryRSI).filter(v=>v!=null);
+    const dMean=_mean(dists), dStd=_std(dists);
+    const rMean=_mean(rsis), rStd=_std(rsis);
+    const dSpread = (dMean!=null && dStd!=null && Math.abs(dMean)>0.01) ? dStd/Math.abs(dMean) : (dStd!=null?dStd:null);
+    const rSpread = (rMean!=null && rStd!=null && rMean>0) ? rStd/rMean : (rStd!=null?rStd:null);
+    if(dSpread!=null && (rSpread==null || dSpread<=rSpread)){
+      tell='ma50'; tellStats={mean:dMean, std:dStd, n:dists.length};
+    } else if(rSpread!=null){
+      tell='rsi'; tellStats={mean:rMean, std:rStd, n:rsis.length};
+    }
+  }
+  return {trades, bars:snaps.length, months:Math.round(snaps.length/21), n, wins, winRate:n?wins/n:0, avg, avgHeld, best, worst, enough:n>=4, tell, tellStats};
 }
 function openBacktest(id){
   const s=stocks.find(x=>String(x.id)===String(id)); if(!s) return;
@@ -1392,7 +1416,18 @@ function openBacktest(id){
   let verdict, vColor;
   if(bt.bars<60){ verdict=`There are only ${bt.bars} days of history loaded — not enough to backtest. Upload 2–3 years for ${s.ticker} to see how the strategy performs.`; vColor=C.textMuted; }
   else if(bt.n<4){ verdict=`The strategy only fired ${bt.n} time${bt.n===1?'':'s'} in this ${bt.months}-month window — too few to trust. Pull 2–3 years of history for a read you can lean on. What's here is a hint, not proof.`; vColor=C.yellow; }
-  else if(bt.winRate>=0.5 && bt.avg>0){ verdict=`The strategy has worked on ${s.ticker}: ${bt.wins} of ${bt.n} trades won, averaging ${pct(bt.avg)} and held about ${Math.round(bt.avgHeld)} days. This is a name the system tends to handle well. What to watch for: a pullback into the 50-day, RSI cooling into 45–60, then the MACD crossing up — that's the setup that has paid here.`; vColor=C.green; }
+  else if(bt.winRate>=0.5 && bt.avg>0){
+    let tellLine;
+    if(bt.tell==='ma50'){
+      const m=bt.tellStats.mean;
+      tellLine = `What to watch for: its winning entries have clustered around ${m>=0?'+':''}${m.toFixed(1)}% off the 50-day (based on ${bt.tellStats.n} win${bt.tellStats.n===1?'':'s'}) — that's the tell for this name, tighter than RSI was.`;
+    } else if(bt.tell==='rsi'){
+      const m=bt.tellStats.mean;
+      tellLine = `What to watch for: its winning entries have clustered around RSI ${m.toFixed(0)} (based on ${bt.tellStats.n} win${bt.tellStats.n===1?'':'s'}) — that's the tighter tell for this name, more consistent than 50-day distance.`;
+    } else {
+      tellLine = `Not enough wins yet (${bt.wins}) to say which condition matters most for this name — treat any "watch for X" as a guess until there are 3+.`;
+    }
+    verdict=`The strategy has worked on ${s.ticker}: ${bt.wins} of ${bt.n} trades won, averaging ${pct(bt.avg)} and held about ${Math.round(bt.avgHeld)} days. This is a name the system tends to handle well. ${tellLine}`; vColor=C.green; }
   else { verdict=`The strategy has struggled on ${s.ticker}: only ${bt.wins} of ${bt.n} trades won, averaging ${pct(bt.avg)}. This stock hasn't suited the system historically — be extra selective, or watch it rather than trade it. A choppy or news-driven name can look like a setup without following through.`; vColor='#E8A317'; }
 
   const stat=(label,val,color)=>`<div style="flex:1;background:${C.cardHigh};border-radius:12px;padding:14px 10px;text-align:center;"><div style="color:#8A90A0;font-size:9px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:5px;">${label}</div><div style="color:${color||C.text};font-size:18px;font-weight:800;">${val}</div></div>`;
@@ -1746,6 +1781,44 @@ function renderCleanDetail(s){
       <div style="display:inline-block;background:${vBg};color:${vColor};font-size:22px;font-weight:600;letter-spacing:0.03em;padding:8px 30px;border-radius:10px;">${vWord}</div>
       <div style="color:#E2E6EF;font-size:13.5px;line-height:1.6;margin-top:14px;">${v.reason||''}</div>
     </div>
+    ${(()=>{
+      // Live watch-condition badge — only surfaced once the backtest has
+      // enough WINS to trust a tell (see tickerBacktest). Thin or losing
+      // samples get no badge, deliberately, so this never trains the eye
+      // to trust a coin-flip sample.
+      if(!hasHist) return '';
+      const bt = tickerBacktest(s);
+      if(!(bt.n>=4 && bt.winRate>=0.5 && bt.tell)) return '';
+      let label, current, target, distText, closeness;
+      if(bt.tell==='ma50'){
+        current = (s.ma50 ? (s.price/s.ma50-1)*100 : null);
+        target = bt.tellStats.mean;
+        label = '50-day pullback zone';
+        if(current!=null){
+          const gap = current - target;
+          distText = `Now ${current>=0?'+':''}${current.toFixed(1)}% off the 50-day · target ~${target>=0?'+':''}${target.toFixed(1)}% (±${bt.tellStats.std.toFixed(1)}%) · gap ${Math.abs(gap).toFixed(1)}pt`;
+          closeness = Math.abs(gap) <= (bt.tellStats.std||1.5);
+        }
+      } else {
+        current = s.rsi;
+        target = bt.tellStats.mean;
+        label = `RSI ${target.toFixed(0)} zone`;
+        if(current!=null){
+          const gap = current - target;
+          distText = `RSI now ${current.toFixed(0)} · target ~${target.toFixed(0)} (±${bt.tellStats.std.toFixed(0)}) · gap ${Math.abs(gap).toFixed(1)}`;
+          closeness = Math.abs(gap) <= (bt.tellStats.std||5);
+        }
+      }
+      if(current==null) return '';
+      const gold='#E0A82E';
+      return `<button onclick="openBacktest('${s.id}')" style="all:unset;cursor:pointer;display:block;width:100%;box-sizing:border-box;margin-top:14px;padding:12px 16px;border-radius:12px;border:1.5px solid ${gold};background:${closeness?gold+'26':gold+'14'};text-align:left;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+          <span style="color:${gold};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;">${closeness?'🎯 Watch — close to zone':'📍 Watch condition'} · ${label}</span>
+          <span style="color:${gold};font-size:14px;">›</span>
+        </div>
+        <div style="color:#E8D9A8;font-size:12.5px;line-height:1.5;margin-top:5px;">${distText}</div>
+      </button>`;
+    })()}
 
     ${held ? (()=>{ const ps=positionStats(s);
       const bigBox=(label,val,sub,color)=>`<div style="flex:1;background:${C.cardHigh};border-radius:12px;padding:12px 8px;text-align:center;"><div style="color:#8A90A0;font-size:9px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">${label}</div><div style="color:${color||C.text};font-size:16px;font-weight:800;line-height:1.1;">${val}</div>${sub?`<div style="color:${color||'#9AA0B0'};font-size:10px;font-weight:600;margin-top:2px;">${sub}</div>`:''}</div>`;
