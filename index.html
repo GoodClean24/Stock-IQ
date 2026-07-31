@@ -1745,15 +1745,15 @@ function openSimpleMentor(id){
     const ps = positionStats(s);
     const box=(label,val,color,sub)=>`<div style="flex:1;background:${C.cardHigh};border-radius:10px;padding:10px 8px;text-align:center;"><div style="color:#8A90A0;font-size:9px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:3px;">${label}</div><div style="color:${color||C.text};font-size:14px;font-weight:800;">${val}</div>${sub?`<div style="color:${color||'#9AA0B0'};font-size:10px;font-weight:600;margin-top:2px;">${sub}</div>`:''}</div>`;
     dataPart = `
-      <div style="display:flex;gap:8px;margin-bottom:8px;">
+       <div style="display:flex;gap:8px;margin-bottom:8px;">
         ${box('P/L', (ps.pl>=0?'+':'')+fmtP(ps.pl), ps.pl>=0?C.green:C.red)}
-        ${box('Shares', pos.shares.toFixed(1))}
-        ${box('Bought at', fmtP(pos.entry))}
+        ${box('Stop loss', ps.trailExit!=null?fmtP(ps.trailExit):'—', C.red)}
+        ${box('Room to exit', ps.distToExit!=null?fmtP(ps.distToExit):'—', C.text, ps.distPct!=null?ps.distPct.toFixed(1)+'%':'')}
       </div>
       <div style="display:flex;gap:8px;">
-        ${box('Stop loss', ps.trailExit!=null?fmtP(ps.trailExit):'—', C.red)}
-       ${box('Room to exit', ps.distToExitTotal!=null?fmtP(ps.distToExitTotal):'—', C.text, (ps.distPct!=null&&ps.trailExit!=null)?`${ps.distPct.toFixed(1)}% · exits at ${fmtP(ps.trailExit)}`:'')}
-        ${box('Days held', ps.days)}
+        ${box('Locked profit', ps.lockedProfit!=null?(ps.lockedProfit>=0?'+':'')+fmtP(ps.lockedProfit):'—', ps.lockedProfit>=0?C.green:C.red)}
+        ${box('Shares', pos.shares.toFixed(1))}
+        ${box('Bought at', fmtP(pos.entry))}
       </div>`;
     tradePart = `<div style="color:#C7CCD8;font-size:12.5px;line-height:1.6;">${ps.status}</div>`;
   } else {
@@ -1905,10 +1905,11 @@ function renderCleanDetail(s){
     <div style="padding:14px 20px;border-bottom:1px solid ${C.border};">
       <div style="color:#AEB4C2;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">Your position${ps.days>0?` · day ${ps.days}`:''}</div>
       ${(state!=='BUY') ? `<div style="background:${C.yellow}1A;border-radius:10px;padding:10px 12px;margin-bottom:10px;color:#E8C766;font-size:12px;line-height:1.5;">⚠️ The setup that got you in has weakened (now reads ${state}). You still own it — this is a flag to watch it more closely, not an automatic sell.</div>` : ''}
-      <div style="display:flex;gap:8px;margin-bottom:8px;">
+       <div style="display:flex;gap:8px;margin-bottom:8px;">
         ${bigBox('Profit / Loss', (ps.pl>=0?'+':'')+fmtP(ps.pl), (ps.pl>=0?'+':'')+ps.plPct.toFixed(1)+'%', ps.pl>=0?C.green:C.red)}
-        ${bigBox('Value', fmtP(s.price*pos.shares), null, C.text)}
-        ${bigBox('Room to exit', ps.distToExitTotal!=null?fmtP(ps.distToExitTotal):'—', (ps.distPct!=null&&ps.trailExit!=null)?`${ps.distPct.toFixed(1)}% · exits at ${fmtP(ps.trailExit)}`:'', C.text)}
+        ${bigBox('Locked profit', ps.lockedProfit!=null?(ps.lockedProfit>=0?'+':'')+fmtP(ps.lockedProfit):'—', null, ps.lockedProfit>=0?C.green:C.red)}
+        ${bigBox('Room to exit', ps.distToExit!=null?fmtP(ps.distToExit):'—', ps.distPct!=null?ps.distPct.toFixed(1)+'%':'', C.text)}
+      </div>
       </div>
       <div style="display:flex;gap:8px;margin-bottom:12px;">
         ${smallBox('Cost', fmtP(pos.entry*pos.shares))}
