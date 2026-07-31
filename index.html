@@ -88,7 +88,7 @@ input[type=number]{-moz-appearance:textfield;}
   <div id="portfolio-box"></div>
   <div id="position-watch"></div>
   <!-- Tonight's Best Opportunities — the ranking engine -->
-  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · poswatch</div>
+  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · backtest</div>
   <div id="tonights-opportunities"></div>
   <!-- Filter tags + sort -->
   <div id="filter-bar" style="background:#11141C;border-bottom:1px solid #1E2230;padding:9px 20px;"></div>
@@ -106,6 +106,11 @@ input[type=number]{-moz-appearance:textfield;}
 <!-- DETAIL -->
 <div id="screen-detail" class="screen">
   <div id="detail-content"></div>
+</div>
+
+<!-- BACKTEST -->
+<div id="screen-backtest" class="screen">
+  <div id="backtest-content"></div>
 </div>
 
 <!-- MODAL OVERLAY -->
@@ -1310,6 +1315,90 @@ function saveEarningsDate(id, val){
   stocks = stocks.map(x=>String(x.id)===String(id)?updated:x);
   scheduleSave(updated); closeAllOverlays(); renderDetail(updated); renderHome();
 }
+// ── PER-TICKER BACKTEST ──────────────────────────────────────────────────────
+// Replays the validated strategy across this ticker's own history and reports
+// how it actually did. Honest about small samples — this shows whether the
+// strategy has WORKED on this name, never predicts the next trade.
+function tickerBacktest(s){
+  const snaps=(s.snapshots||[]).filter(x=>x&&x.date&&x.price!=null).sort((a,b)=>new Date(a.date)-new Date(b.date));
+  const trades=[]; let lastExit=-1;
+  for(let i=1;i<snaps.length;i++){
+    if(i<=lastExit) continue;
+    const sn=snaps[i];
+    if([sn.rsi,sn.atr,sn.ma50,sn.ma200,sn.macdLine,sn.signalLine].some(v=>v==null)) continue;
+    const asOf={...s, price:sn.price, rsi:sn.rsi, atr:sn.atr, ma20:sn.ma20, ma50:sn.ma50, ma200:sn.ma200, macdLine:sn.macdLine, signalLine:sn.signalLine, snapshots:snaps.slice(0,i+1)};
+    const v=computeSignalVerdict(asOf);
+    if(v.state!=='BUY') continue;
+    const entry=sn.price, atr=sn.atr; if(!atr||atr<=0) continue;
+    const initStop=entry-2*atr; let hh=(sn.high!=null?sn.high:entry);
+    let exitPrice=null, exitIdx=null;
+    for(let j=i+1;j<snaps.length;j++){
+      const b=snaps[j], hi=(b.high!=null?b.high:b.price), lo=(b.low!=null?b.low:b.price);
+      if(hi!=null) hh=Math.max(hh,hi);
+      const trail=Math.max(initStop, hh-3*atr);
+      if(lo!=null && lo<=trail){ exitPrice=trail; exitIdx=j; break; }
+    }
+    if(exitPrice==null){ exitIdx=snaps.length-1; exitPrice=snaps[exitIdx].price; }
+    trades.push({entryDate:sn.date, entry, exitDate:snaps[exitIdx].date, exit:exitPrice, ret:(exitPrice/entry-1), held:exitIdx-i, open:exitPrice==null});
+    lastExit=exitIdx;
+  }
+  const n=trades.length, wins=trades.filter(t=>t.ret>0).length;
+  const avg=n?trades.reduce((a,t)=>a+t.ret,0)/n:0;
+  const avgHeld=n?trades.reduce((a,t)=>a+t.held,0)/n:0;
+  const best=n?Math.max(...trades.map(t=>t.ret)):0, worst=n?Math.min(...trades.map(t=>t.ret)):0;
+  return {trades, bars:snaps.length, months:Math.round(snaps.length/21), n, wins, winRate:n?wins/n:0, avg, avgHeld, best, worst, enough:n>=4};
+}
+function openBacktest(id){
+  const s=stocks.find(x=>String(x.id)===String(id)); if(!s) return;
+  const bt=tickerBacktest(s);
+  const pct=v=>`${v>=0?'+':''}${(v*100).toFixed(1)}%`;
+  let verdict, vColor;
+  if(bt.bars<60){ verdict=`There are only ${bt.bars} days of history loaded — not enough to backtest. Upload 2–3 years for ${s.ticker} to see how the strategy performs.`; vColor=C.textMuted; }
+  else if(bt.n<4){ verdict=`The strategy only fired ${bt.n} time${bt.n===1?'':'s'} in this ${bt.months}-month window — too few to trust. Pull 2–3 years of history for a read you can lean on. What's here is a hint, not proof.`; vColor=C.yellow; }
+  else if(bt.winRate>=0.5 && bt.avg>0){ verdict=`The strategy has worked on ${s.ticker}: ${bt.wins} of ${bt.n} trades won, averaging ${pct(bt.avg)} and held about ${Math.round(bt.avgHeld)} days. This is a name the system tends to handle well. What to watch for: a pullback into the 50-day, RSI cooling into 45–60, then the MACD crossing up — that's the setup that has paid here.`; vColor=C.green; }
+  else { verdict=`The strategy has struggled on ${s.ticker}: only ${bt.wins} of ${bt.n} trades won, averaging ${pct(bt.avg)}. This stock hasn't suited the system historically — be extra selective, or watch it rather than trade it. A choppy or news-driven name can look like a setup without following through.`; vColor='#E8A317'; }
+
+  const stat=(label,val,color)=>`<div style="flex:1;background:${C.cardHigh};border-radius:12px;padding:14px 10px;text-align:center;"><div style="color:#8A90A0;font-size:9px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:5px;">${label}</div><div style="color:${color||C.text};font-size:18px;font-weight:800;">${val}</div></div>`;
+  const tradeRows = bt.trades.slice().reverse().map(t=>`
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid ${C.border};">
+      <div><div style="color:${C.text};font-size:12.5px;font-weight:600;">${fmtP(t.entry)} → ${fmtP(t.exit)}</div>
+      <div style="color:${C.textMuted};font-size:10px;">${t.entryDate} → ${t.exitDate} · ${t.held}d</div></div>
+      <span style="color:${t.ret>=0?C.green:C.red};font-size:14px;font-weight:800;">${pct(t.ret)}</span>
+    </div>`).join('');
+
+  document.getElementById('backtest-content').innerHTML=`
+   <div style="max-width:480px;margin:0 auto;">
+    <div style="background:${C.card};border-bottom:1px solid ${C.border};padding:16px 20px;display:flex;align-items:center;gap:12px;">
+      <button onclick="openDetail('${s.id}')" style="background:none;border:none;color:${C.textSub};font-size:24px;cursor:pointer;line-height:1;">←</button>
+      <div><div style="color:${C.text};font-size:18px;font-weight:700;">${s.ticker} · strategy backtest</div>
+      <div style="color:#AEB4C2;font-size:12px;">how our system did on this stock's own history</div></div>
+    </div>
+
+    <div style="padding:18px 20px;">
+      <div style="background:${vColor}1A;border-radius:14px;padding:16px;margin-bottom:16px;">
+        <div style="color:${vColor};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;">The read</div>
+        <div style="color:#D5DAE5;font-size:13px;line-height:1.65;">${verdict}</div>
+      </div>
+
+      ${bt.n>0?`
+      <div style="display:flex;gap:8px;margin-bottom:8px;">
+        ${stat('Trades', bt.n)}
+        ${stat('Win rate', Math.round(bt.winRate*100)+'%', bt.winRate>=0.5?C.green:C.yellow)}
+        ${stat('Avg result', pct(bt.avg), bt.avg>=0?C.green:C.red)}
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:18px;">
+        ${stat('Avg days held', Math.round(bt.avgHeld))}
+        ${stat('Best', pct(bt.best), C.green)}
+        ${stat('Worst', pct(bt.worst), C.red)}
+      </div>
+      <div style="color:#AEB4C2;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">Every trade the strategy took</div>
+      ${tradeRows}
+      <div style="color:#8A90A0;font-size:11px;line-height:1.5;margin-top:14px;">Past performance on one stock. It shows the strategy has worked here, not that the next trade wins. Small trade counts are suggestive, not proof.</div>
+      `:`<div style="color:#8A90A0;font-size:12.5px;line-height:1.6;">No completed trades to show yet. ${bt.bars<60?'Upload more history.':'The strategy simply has not fired a clean setup in this window.'}</div>`}
+    </div>
+   </div>`;
+  showScreen('backtest');
+}
 function positionAlert(s){
   const ps = positionStats(s); if(!ps) return null;
   const rsi = s.rsi;
@@ -1617,27 +1706,37 @@ function renderCleanDetail(s){
       <div style="color:#E2E6EF;font-size:13.5px;line-height:1.6;margin-top:14px;">${v.reason||''}</div>
     </div>
 
-    ${held ? (()=>{ const ps=positionStats(s); return `
+    ${held ? (()=>{ const ps=positionStats(s);
+      const bigBox=(label,val,sub,color)=>`<div style="flex:1;background:${C.cardHigh};border-radius:12px;padding:12px 8px;text-align:center;"><div style="color:#8A90A0;font-size:9px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">${label}</div><div style="color:${color||C.text};font-size:16px;font-weight:800;line-height:1.1;">${val}</div>${sub?`<div style="color:${color||'#9AA0B0'};font-size:10px;font-weight:600;margin-top:2px;">${sub}</div>`:''}</div>`;
+      const smallBox=(label,val)=>`<div style="flex:1;background:${C.cardHigh};border-radius:10px;padding:9px 6px;text-align:center;"><div style="color:#8A90A0;font-size:9px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:3px;">${label}</div><div style="color:${C.text};font-size:13px;font-weight:700;">${val}</div></div>`;
+      const whatNext = (!ps.macdUp || (ps.distPct!=null&&ps.distPct<3))
+        ? {t:'Watch closely — momentum is fading or you\u2019re near your exit. Think about locking in your result.', c:C.yellow}
+        : (ps.lockedIn && ps.plPct>=8) ? {t:'Let it run. Your exit is locked into profit — no action needed, just keep watching.', c:C.green}
+        : {t:'Hold and give it room. Still early — the setup is intact, let the trade work.', c:C.teal};
+      return `
     <div style="padding:14px 20px;border-bottom:1px solid ${C.border};">
-      <div style="color:#AEB4C2;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;">Your position${ps.days>0?` · day ${ps.days}`:''}</div>
-      <div style="background:${C.cardHigh};border-radius:12px;padding:14px;">
-        <div style="display:flex;justify-content:space-between;padding:5px 0;"><span style="color:#9AA0B0;font-size:12.5px;">Bought</span><span style="color:${C.text};font-size:12.5px;font-weight:600;">${pos.shares.toFixed(1)} sh @ ${fmtP(pos.entry)}</span></div>
-        <div style="display:flex;justify-content:space-between;padding:5px 0;"><span style="color:#9AA0B0;font-size:12.5px;">Now</span><span style="color:${C.text};font-size:12.5px;font-weight:600;">${fmtP(s.price)} · worth ${fmtP(s.price*pos.shares)}</span></div>
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0 2px;border-top:1px solid ${C.border};margin-top:4px;">
-          <span style="color:#9AA0B0;font-size:12.5px;">Profit / loss</span>
-          <span style="color:${ps.pl>=0?C.green:C.red};font-size:17px;font-weight:800;">${ps.pl>=0?'+':''}${fmtP(ps.pl)} <span style="font-size:12px;">(${ps.pl>=0?'+':''}${ps.plPct.toFixed(1)}%)</span></span>
-        </div>
+      <div style="color:#AEB4C2;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">Your position${ps.days>0?` · day ${ps.days}`:''}</div>
+      ${(state!=='BUY') ? `<div style="background:${C.yellow}1A;border-radius:10px;padding:10px 12px;margin-bottom:10px;color:#E8C766;font-size:12px;line-height:1.5;">⚠️ The setup that got you in has weakened (now reads ${state}). You still own it — this is a flag to watch it more closely, not an automatic sell.</div>` : ''}
+      <div style="display:flex;gap:8px;margin-bottom:8px;">
+        ${bigBox('Profit / Loss', (ps.pl>=0?'+':'')+fmtP(ps.pl), (ps.pl>=0?'+':'')+ps.plPct.toFixed(1)+'%', ps.pl>=0?C.green:C.red)}
+        ${bigBox('Value', fmtP(s.price*pos.shares), null, C.text)}
+        ${bigBox('Room to exit', ps.distToExit!=null?fmtP(ps.distToExit):'—', ps.distPct!=null?ps.distPct.toFixed(1)+'%':'', C.text)}
       </div>
-
-      <div style="background:${C.cardHigh};border-radius:12px;padding:14px;margin-top:10px;">
+      <div style="display:flex;gap:8px;margin-bottom:12px;">
+        ${smallBox('Cost', fmtP(pos.entry*pos.shares))}
+        ${smallBox('Exit', ps.trailExit!=null?fmtP(ps.trailExit):'—')}
+        ${smallBox('Days held', ps.days)}
+      </div>
+      <div style="background:${whatNext.c}1A;border-radius:12px;padding:12px 14px;margin-bottom:10px;">
+        <div style="color:${whatNext.c};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">What to do next</div>
+        <div style="color:#D5DAE5;font-size:12.5px;line-height:1.55;">${whatNext.t}</div>
+      </div>
+      <div style="background:${C.cardHigh};border-radius:12px;padding:14px;">
         <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px;">Managing the trade</div>
-        <div style="display:flex;justify-content:space-between;padding:5px 0;"><span style="color:#9AA0B0;font-size:12.5px;">Trailing exit now</span><span style="color:${C.text};font-size:12.5px;font-weight:600;">${ps.trailExit!=null?fmtP(ps.trailExit):'—'}</span></div>
+        <div style="display:flex;justify-content:space-between;padding:5px 0;"><span style="color:#9AA0B0;font-size:12.5px;">Bought</span><span style="color:${C.text};font-size:12.5px;font-weight:600;">${pos.shares.toFixed(1)} sh @ ${fmtP(pos.entry)}</span></div>
         <div style="display:flex;justify-content:space-between;padding:5px 0;"><span style="color:#9AA0B0;font-size:12.5px;">If stopped now, you'd ${ps.lockedProfit>=0?'keep':'lose'}</span><span style="color:${ps.lockedProfit>=0?C.green:C.red};font-size:12.5px;font-weight:700;">${ps.lockedProfit>=0?'+':''}${ps.lockedProfit!=null?fmtP(ps.lockedProfit):'—'}</span></div>
-        <div style="display:flex;justify-content:space-between;padding:5px 0;"><span style="color:#9AA0B0;font-size:12.5px;">Room to your exit</span><span style="color:${C.text};font-size:12.5px;font-weight:600;">${ps.distToExit!=null?fmtP(ps.distToExit)+(ps.distPct!=null?' ('+ps.distPct.toFixed(1)+'%)':''):'—'}</span></div>
-        <div style="display:flex;justify-content:space-between;padding:5px 0;"><span style="color:#9AA0B0;font-size:12.5px;">Momentum</span><span style="color:${ps.macdUp?C.green:C.yellow};font-size:12.5px;font-weight:700;">${ps.macdUp?'still up':'fading'}</span></div>
         <div style="border-top:1px solid ${C.border};margin-top:6px;padding-top:8px;color:${ps.statusColor};font-size:12.5px;line-height:1.55;">${ps.status}</div>
       </div>
-
       <div style="display:flex;gap:10px;margin-top:10px;">
         <button onclick="sellStock('${s.id}')" style="flex:2;padding:12px;border-radius:12px;border:none;background:${C.green};color:#000;font-size:13px;font-weight:800;cursor:pointer;">Sell — lock in ${ps.pl>=0?'profit':'loss'}</button>
         <button onclick="cancelBuy('${s.id}')" style="flex:1;padding:12px;border-radius:12px;border:1px solid ${C.border};background:none;color:${C.textSub};font-size:13px;font-weight:700;cursor:pointer;">Delete</button>
@@ -1662,8 +1761,7 @@ function renderCleanDetail(s){
     </div>
 
     <div style="padding:14px 20px;">
-      <div style="color:#AEB4C2;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">Your plan</div>
-      ${planRows}
+      ${held ? '' : `<div style="color:#AEB4C2;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">Your plan</div>${planRows}`}
       ${(isBuy||held)?riskRewardHTML(s):''}
     </div>
 
@@ -1682,6 +1780,7 @@ function renderCleanDetail(s){
       ${(isBuy && !held) ? `<button onclick="openBuyScreen('${s.id}')" style="background:${C.green};color:#000;border:none;border-radius:12px;padding:13px;font-size:14px;font-weight:800;cursor:pointer;width:100%;">Buy ${s.ticker}</button>` : ''}
       <button onclick="showImportFlow('${s.id}')" style="background:${(isWatch&&!hasHist)?'#1D4ED8':C.cardHigh};color:${(isWatch&&!hasHist)?'#fff':C.teal};border:1px solid ${(isWatch&&!hasHist)?'#1D4ED8':C.teal+'55'};border-radius:12px;padding:12px;font-size:13px;font-weight:700;cursor:pointer;width:100%;">${hasHist?'↻ Update history':'Upload 12-month history to confirm'}</button>
       <button onclick="openSimpleMentor('${s.id}')" style="background:${C.cardHigh};color:${C.purple};border:1px solid ${C.purple}44;border-radius:12px;padding:11px;font-size:13px;font-weight:600;cursor:pointer;width:100%;">Mentor — walk me through this trade</button>
+      ${hasHist?`<button onclick="openBacktest('${s.id}')" style="background:${C.cardHigh};color:${C.teal};border:1px solid ${C.teal}44;border-radius:12px;padding:11px;font-size:13px;font-weight:600;cursor:pointer;width:100%;">📊 How this strategy has done on ${s.ticker}</button>`:''}
     </div>
    </div>`;
 }
