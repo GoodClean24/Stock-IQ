@@ -1752,7 +1752,7 @@ function openSimpleMentor(id){
       </div>
       <div style="display:flex;gap:8px;">
         ${box('Stop loss', ps.trailExit!=null?fmtP(ps.trailExit):'—', C.red)}
-        ${box('Room to exit', ps.distToExitTotal!=null?fmtP(ps.distToExitTotal):'—', C.text, ps.distPct!=null?ps.distPct.toFixed(1)+'%':'')}
+       ${box('Room to exit', ps.distToExitTotal!=null?fmtP(ps.distToExitTotal):'—', C.text, (ps.distPct!=null&&ps.trailExit!=null)?`${ps.distPct.toFixed(1)}% · exits at ${fmtP(ps.trailExit)}`:'')}
         ${box('Days held', ps.days)}
       </div>`;
     tradePart = `<div style="color:#C7CCD8;font-size:12.5px;line-height:1.6;">${ps.status}</div>`;
@@ -1908,7 +1908,7 @@ function renderCleanDetail(s){
       <div style="display:flex;gap:8px;margin-bottom:8px;">
         ${bigBox('Profit / Loss', (ps.pl>=0?'+':'')+fmtP(ps.pl), (ps.pl>=0?'+':'')+ps.plPct.toFixed(1)+'%', ps.pl>=0?C.green:C.red)}
         ${bigBox('Value', fmtP(s.price*pos.shares), null, C.text)}
-        ${bigBox('Room to exit', ps.distToExitTotal!=null?fmtP(ps.distToExitTotal):'—', ps.distPct!=null?ps.distPct.toFixed(1)+'%':'', C.text)}
+        ${bigBox('Room to exit', ps.distToExitTotal!=null?fmtP(ps.distToExitTotal):'—', (ps.distPct!=null&&ps.trailExit!=null)?`${ps.distPct.toFixed(1)}% · exits at ${fmtP(ps.trailExit)}`:'', C.text)}
       </div>
       <div style="display:flex;gap:8px;margin-bottom:12px;">
         ${smallBox('Cost', fmtP(pos.entry*pos.shares))}
