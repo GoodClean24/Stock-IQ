@@ -88,7 +88,7 @@ input[type=number]{-moz-appearance:textfield;}
   <div id="portfolio-box"></div>
   <div id="position-watch"></div>
   <!-- Tonight's Best Opportunities — the ranking engine -->
-  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · proven</div>
+  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · stars</div>
   <div id="tonights-opportunities"></div>
   <!-- Filter tags + sort -->
   <div id="filter-bar" style="background:#11141C;border-bottom:1px solid #1E2230;padding:9px 20px;"></div>
@@ -609,7 +609,7 @@ function closeAllOverlays() {
 // ═══════════════════════════════════════════════════════════════════════════════
 // HOME RENDER
 // ═══════════════════════════════════════════════════════════════════════════════
-const TAGS = ['All','★ Favorites','Buys','Watch','Waits','Archived'];
+const TAGS = ['All','♥ Favorites','Buys','Watch','Waits','Archived'];
 const TAG_COLORS = {'Buys':C.green,'Watch':'#3B82F6','Waits':C.yellow};
 
 // Generic "not built yet" notice — used for nav items / tiles that are visual
@@ -805,7 +805,7 @@ function renderStockList() {
     if(activeTag==='Archived') return !!s.archived;
     if(s.archived) return false; // archived stocks never appear outside the Archived tag
     if(activeTag==='All') return true;
-    if(activeTag==='★ Favorites') return s.starred;
+    if(activeTag==='♥ Favorites') return s.starred;
     if(activeTag==='Buys') return computeSimpleAction(s).word==='BUY';
     if(activeTag==='Watch') return computeSimpleAction(s).word==='WATCH';
     if(activeTag==='Waits') return computeSimpleAction(s).word==='WAIT';
@@ -984,7 +984,7 @@ function renderCleanCard(s){
        <div style="display:flex;gap:10px;align-items:center;min-width:0;">
          <div style="width:36px;height:36px;border-radius:50%;background:hsl(${hue},45%,22%);border:1px solid hsl(${hue},45%,38%);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><span style="color:hsl(${hue},70%,78%);font-size:12px;font-weight:700;">${initials}</span></div>
          <div style="min-width:0;">
-           <div style="display:flex;align-items:center;gap:6px;"><span style="color:${C.text};font-size:16px;font-weight:700;">${s.ticker}</span>${(isProven(s)&&(word==='BUY'||word==='WATCH'))?`<span title="Proven with the strategy" style="background:${C.teal}22;color:${C.teal};font-size:9px;font-weight:800;padding:2px 6px;border-radius:5px;letter-spacing:0.03em;">✓ PROVEN</span>`:''}<button onclick="event.stopPropagation();toggleStar('${s.id}')" style="background:none;border:none;cursor:pointer;font-size:13px;color:${s.starred?C.yellow:'#6B7180'};padding:0;">${s.starred?'★':'☆'}</button></div>
+           <div style="display:flex;align-items:center;gap:6px;"><span style="color:${C.text};font-size:16px;font-weight:700;">${s.ticker}</span>${(provenStars(s)>0&&(word==='BUY'||word==='WATCH'))?`<span title="Track record: ${provenStars(s)} of 5">${goldStars(provenStars(s))}</span>`:''}<button onclick="event.stopPropagation();toggleStar('${s.id}')" style="background:none;border:none;cursor:pointer;font-size:14px;color:${s.starred?'#E0556E':'#6B7180'};padding:0;">${s.starred?'♥':'♡'}</button></div>
            <div style="color:#9AA0B0;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px;">${s.name||''}</div>
          </div>
        </div>
@@ -1011,10 +1011,20 @@ function renderCleanCard(s){
 // Setup-quality score (higher = better-looking setup). Uses the ranker signals
 // the backtest surfaced: clean pullback near the 50-day, RSI in the sweet-spot
 // middle, volume confirmation (RVOL), and ATR in the ideal part of the band.
-// "Proven" = this stock has a track record with the strategy, either auto
-// (its backtest cleared the bar) or manually pinned. It NEVER changes the
-// verdict — it only nudges ranking on a stock that already has a live setup.
-function isProven(s){ return !!(s.provenManual || s.provenAuto); }
+// Proven = a 1–5 gold-star rating earned from the stock's own backtest
+// (auto). More stars = stronger track record. A manual pin locks 5 stars.
+function starRating(bt){
+  if(!bt || bt.n < 4) return 0;                       // too few trades to rate
+  if(bt.avg <= 0) return bt.winRate>=0.5 ? 2 : 1;     // won often but net flat = weak
+  if(bt.winRate>=0.70 && bt.n>=5) return 5;
+  if(bt.winRate>=0.60) return 4;
+  if(bt.winRate>=0.50) return 3;
+  if(bt.winRate>=0.40) return 2;
+  return 1;
+}
+function provenStars(s){ return s.provenManual ? 5 : (s.provenStars || 0); }
+function isProven(s){ return provenStars(s) > 0; }
+function goldStars(n){ return `<span style="color:#E0A82E;font-size:11px;letter-spacing:-0.5px;">${'★'.repeat(n)}</span><span style="color:#3A3F4C;font-size:11px;letter-spacing:-0.5px;">${'★'.repeat(5-n)}</span>`; }
 function toggleProven(id){
   const s = stocks.find(x=>String(x.id)===String(id)); if(!s) return;
   const updated = {...s, provenManual: !s.provenManual};
@@ -1402,7 +1412,7 @@ function openBacktest(id){
     </div>
 
     <div style="padding:12px 20px 0;">
-      <button onclick="toggleProven('${s.id}')" style="width:100%;padding:11px;border-radius:12px;border:1px solid ${isProven(s)?C.teal:C.border};background:${isProven(s)?C.teal+'1A':'none'};color:${isProven(s)?C.teal:C.textSub};font-size:13px;font-weight:700;cursor:pointer;">${s.provenManual?'✓ Pinned as proven — tap to unpin':(s.provenAuto?'✓ Proven by its backtest — tap to pin permanently':'📌 Pin as proven')}</button>
+      <button onclick="toggleProven('${s.id}')" style="width:100%;padding:11px;border-radius:12px;border:1px solid ${isProven(s)?'#E0A82E':C.border};background:${isProven(s)?'#E0A82E1A':'none'};color:${isProven(s)?'#E0A82E':C.textSub};font-size:13px;font-weight:700;cursor:pointer;">${s.provenManual?'★★★★★ Pinned — tap to unpin':(s.provenStars>0?`${goldStars(s.provenStars)} Rated by its backtest — tap to lock 5★`:'📌 Pin as proven (5★)')}</button>
     </div>
 
     <div style="padding:18px 20px;">
@@ -6670,7 +6680,7 @@ async function doImportCSV(stockId) {
     earningsDate: (latest.earnOffset!=null ? earnDateFromOffset(latest.earnOffset, latest.date) : s.earningsDate) ?? null,
     snapshots:  cleanRows,
   };
-  try { const _bt = tickerBacktest(updated); updated.provenAuto = !!(_bt.enough && _bt.winRate>=0.5 && _bt.avg>0); } catch(e){ updated.provenAuto = false; }
+  try { const _bt = tickerBacktest(updated); updated.provenStars = starRating(_bt); } catch(e){ updated.provenStars = 0; }
 
   // Update in-memory array first
   stocks = stocks.map(x => String(x.id) === String(stockId) ? updated : x);
