@@ -88,7 +88,7 @@ input[type=number]{-moz-appearance:textfield;}
   <div id="portfolio-box"></div>
   <div id="position-watch"></div>
   <!-- Tonight's Best Opportunities — the ranking engine -->
-  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · earnauto</div>
+  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · proven</div>
   <div id="tonights-opportunities"></div>
   <!-- Filter tags + sort -->
   <div id="filter-bar" style="background:#11141C;border-bottom:1px solid #1E2230;padding:9px 20px;"></div>
@@ -984,7 +984,7 @@ function renderCleanCard(s){
        <div style="display:flex;gap:10px;align-items:center;min-width:0;">
          <div style="width:36px;height:36px;border-radius:50%;background:hsl(${hue},45%,22%);border:1px solid hsl(${hue},45%,38%);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><span style="color:hsl(${hue},70%,78%);font-size:12px;font-weight:700;">${initials}</span></div>
          <div style="min-width:0;">
-           <div style="display:flex;align-items:center;gap:6px;"><span style="color:${C.text};font-size:16px;font-weight:700;">${s.ticker}</span><button onclick="event.stopPropagation();toggleStar('${s.id}')" style="background:none;border:none;cursor:pointer;font-size:13px;color:${s.starred?C.yellow:'#6B7180'};padding:0;">${s.starred?'★':'☆'}</button></div>
+           <div style="display:flex;align-items:center;gap:6px;"><span style="color:${C.text};font-size:16px;font-weight:700;">${s.ticker}</span>${(isProven(s)&&(word==='BUY'||word==='WATCH'))?`<span title="Proven with the strategy" style="background:${C.teal}22;color:${C.teal};font-size:9px;font-weight:800;padding:2px 6px;border-radius:5px;letter-spacing:0.03em;">✓ PROVEN</span>`:''}<button onclick="event.stopPropagation();toggleStar('${s.id}')" style="background:none;border:none;cursor:pointer;font-size:13px;color:${s.starred?C.yellow:'#6B7180'};padding:0;">${s.starred?'★':'☆'}</button></div>
            <div style="color:#9AA0B0;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px;">${s.name||''}</div>
          </div>
        </div>
@@ -1011,6 +1011,18 @@ function renderCleanCard(s){
 // Setup-quality score (higher = better-looking setup). Uses the ranker signals
 // the backtest surfaced: clean pullback near the 50-day, RSI in the sweet-spot
 // middle, volume confirmation (RVOL), and ATR in the ideal part of the band.
+// "Proven" = this stock has a track record with the strategy, either auto
+// (its backtest cleared the bar) or manually pinned. It NEVER changes the
+// verdict — it only nudges ranking on a stock that already has a live setup.
+function isProven(s){ return !!(s.provenManual || s.provenAuto); }
+function toggleProven(id){
+  const s = stocks.find(x=>String(x.id)===String(id)); if(!s) return;
+  const updated = {...s, provenManual: !s.provenManual};
+  stocks = stocks.map(x=>String(x.id)===String(id)?updated:x);
+  scheduleSave(updated);
+  if(String(detailStockId)===String(id)) renderDetail(updated);
+  renderHome();
+}
 function setupScore(s){
   let score=0;
   if(s.ma50 && s.price){ const d=Math.abs(s.price/s.ma50-1); score += Math.max(0, 30*(1 - d/0.06)); } // clean pullback (0-30)
@@ -1020,6 +1032,7 @@ function setupScore(s){
   if(s.atr&&s.price){ const a=s.atr/s.price*100; score += Math.max(0, 20*(1 - Math.abs(a-6)/4)); }     // ATR near ideal ~6% (0-20)
   const ed = earningsDaysAway(s);
   if(ed!=null && ed>=0 && ed<=7) score -= 50;  // earnings imminent — push it down the list
+  if(isProven(s)) score += 15;                 // proven track record — nudge (only sorts BUY/WATCH)
   return score;
 }
 function groupedListHTML(list){
@@ -1386,6 +1399,10 @@ function openBacktest(id){
       <button onclick="openDetail('${s.id}')" style="background:none;border:none;color:${C.textSub};font-size:24px;cursor:pointer;line-height:1;">←</button>
       <div><div style="color:${C.text};font-size:18px;font-weight:700;">${s.ticker} · strategy backtest</div>
       <div style="color:#AEB4C2;font-size:12px;">how our system did on this stock's own history</div></div>
+    </div>
+
+    <div style="padding:12px 20px 0;">
+      <button onclick="toggleProven('${s.id}')" style="width:100%;padding:11px;border-radius:12px;border:1px solid ${isProven(s)?C.teal:C.border};background:${isProven(s)?C.teal+'1A':'none'};color:${isProven(s)?C.teal:C.textSub};font-size:13px;font-weight:700;cursor:pointer;">${s.provenManual?'✓ Pinned as proven — tap to unpin':(s.provenAuto?'✓ Proven by its backtest — tap to pin permanently':'📌 Pin as proven')}</button>
     </div>
 
     <div style="padding:18px 20px;">
@@ -6653,6 +6670,7 @@ async function doImportCSV(stockId) {
     earningsDate: (latest.earnOffset!=null ? earnDateFromOffset(latest.earnOffset, latest.date) : s.earningsDate) ?? null,
     snapshots:  cleanRows,
   };
+  try { const _bt = tickerBacktest(updated); updated.provenAuto = !!(_bt.enough && _bt.winRate>=0.5 && _bt.avg>0); } catch(e){ updated.provenAuto = false; }
 
   // Update in-memory array first
   stocks = stocks.map(x => String(x.id) === String(stockId) ? updated : x);
