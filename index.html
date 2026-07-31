@@ -88,7 +88,7 @@ input[type=number]{-moz-appearance:textfield;}
   <div id="portfolio-box"></div>
   <div id="position-watch"></div>
   <!-- Tonight's Best Opportunities — the ranking engine -->
-  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · backtest</div>
+  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · earnauto</div>
   <div id="tonights-opportunities"></div>
   <!-- Filter tags + sort -->
   <div id="filter-bar" style="background:#11141C;border-bottom:1px solid #1E2230;padding:9px 20px;"></div>
@@ -1286,6 +1286,20 @@ function doResetPaperPortfolio(){
   stocks = stocks.map(s=>{ const u={...s}; delete u.position; delete u.realized; delete u.tranche; delete u.invested; delete u.plannedInvest; return u; });
   stocks.forEach(u=>scheduleSave(u));
   closeAllOverlays(); renderHome();
+}
+// Parse a TOS "Days To Earnings" value like "-19 Days" or "5" into a signed int.
+function parseEarnOffset(v){
+  if(v==null || v==='') return null;
+  const m = String(v).match(/-?\d+/);
+  return m ? parseInt(m[0]) : null;
+}
+// Turn a days-offset (relative to a base date) into a fixed ISO earnings date.
+function earnDateFromOffset(offset, baseDateStr){
+  if(offset==null) return null;
+  const base = baseDateStr ? new Date(baseDateStr) : new Date();
+  if(isNaN(base)) return null;
+  const d = new Date(base.getTime() + offset*86400000);
+  return d.toISOString().slice(0,10);
 }
 function earningsDaysAway(s){
   if(!s.earningsDate) return null;
@@ -6184,6 +6198,7 @@ function parseScanCSV(text) {
     signalLine: ['MACDSignal','macdsignal','MACDs','MACD_Signal'],
     atr:        ['ATR14','atr14','ATR_14','ATR'],
     atrPct:     ['ATRPercentage','atrpercentage','ATR%','ATRpct','ATR_Percentage','AtrPercentage'],
+    earn:       ['Days To Earnings','DaysToEarnings','daystoearnings','days to earnings','EarningsOffset','earnings','DaysToEarn'],
     hi52:       ['High52W','high52w','52WHigh','Hi52'],
     lo52:       ['Low52W','low52w','52WLow','Lo52'],
   };
@@ -6219,6 +6234,7 @@ function parseScanCSV(text) {
       ma20: num('ma20'), ma50: num('ma50'), ma200: num('ma200'),
       rsi: num('rsi'), macdLine: num('macdLine'), signalLine: num('signalLine'),
       atr: _atr, hi52: num('hi52'), lo52: num('lo52'),
+      earnOffset: parseEarnOffset(str('earn')),
     });
   }
   return rows;
@@ -6325,6 +6341,7 @@ async function doBulkImportScan() {
       ma20: r.ma20, ma50: r.ma50, ma200: r.ma200,
       rsi: r.rsi, vol: r.vol, avgvol: r.avgvol, atr: r.atr,
       macdLine: r.macdLine, signalLine: r.signalLine,
+      earningsDate: r.earnOffset!=null ? earnDateFromOffset(r.earnOffset, todayStr) : null,
       profit:'—', stopRule:'Define after full analysis.',
       summary:'Imported from scan.', watchOuts:['Complete full analysis to populate watch-outs.'],
       expiry:'90 days from today', starred:false, notes:'', research:'',
@@ -6406,6 +6423,7 @@ function parseCSV(text) {
     ma50:      ['SMA_50','sma_50','SMA50','MA50'],
     ma200:     ['SMA_200','sma_200','SMA200','MA200'],
     ma20:      ['EMA_20','ema_20','EMA20','MA20'],
+    earn:      ['Days To Earnings','DaysToEarnings','daystoearnings','days to earnings','EarningsOffset','DaysToEarn'],
   };
 
   Object.keys(colMap).forEach(key => {
@@ -6459,6 +6477,7 @@ function parseCSV(text) {
       ma50:       pf('ma50'),
       ma200:      pf('ma200'),
       ma20:       pf('ma20'),
+      earnOffset: (idx.earn!==undefined && idx.earn>=0) ? parseEarnOffset(cols[idx.earn]) : null,
     });
   }
 
@@ -6599,6 +6618,7 @@ async function doImportCSV(stockId) {
     ma50:       r2(row.ma50),
     ma200:      r2(row.ma200),
     ma20:       r2(row.ma20),
+    earnOffset: row.earnOffset ?? null,
   }));
 
   // ThinkorSwim's export gives raw daily volume, not a pre-computed average —
@@ -6630,6 +6650,7 @@ async function doImportCSV(stockId) {
     signalLine: latest.signalLine ?? s.signalLine,
     atr:        latest.atr        ?? s.atr,
     analyzed:   latest.date       || s.analyzed,
+    earningsDate: (latest.earnOffset!=null ? earnDateFromOffset(latest.earnOffset, latest.date) : s.earningsDate) ?? null,
     snapshots:  cleanRows,
   };
 
