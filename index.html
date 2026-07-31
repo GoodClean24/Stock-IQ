@@ -88,7 +88,7 @@ input[type=number]{-moz-appearance:textfield;}
   <div id="portfolio-box"></div>
   <div id="position-watch"></div>
   <!-- Tonight's Best Opportunities — the ranking engine -->
-  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · stars</div>
+  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">engine v5 · heldstop</div>
   <div id="tonights-opportunities"></div>
   <!-- Filter tags + sort -->
   <div id="filter-bar" style="background:#11141C;border-bottom:1px solid #1E2230;padding:9px 20px;"></div>
@@ -1765,7 +1765,7 @@ function renderCleanDetail(s){
       </div>
       <div style="display:flex;gap:8px;margin-bottom:12px;">
         ${smallBox('Cost', fmtP(pos.entry*pos.shares))}
-        ${smallBox('Exit', ps.trailExit!=null?fmtP(ps.trailExit):'—')}
+        ${smallBox('Stop loss', ps.trailExit!=null?fmtP(ps.trailExit):'—')}
         ${smallBox('Days held', ps.days)}
       </div>
       <div style="background:${whatNext.c}1A;border-radius:12px;padding:12px 14px;margin-bottom:10px;">
@@ -1774,7 +1774,8 @@ function renderCleanDetail(s){
       </div>
       <div style="background:${C.cardHigh};border-radius:12px;padding:14px;">
         <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px;">Managing the trade</div>
-        <div style="display:flex;justify-content:space-between;padding:5px 0;"><span style="color:#9AA0B0;font-size:12.5px;">Bought</span><span style="color:${C.text};font-size:12.5px;font-weight:600;">${pos.shares.toFixed(1)} sh @ ${fmtP(pos.entry)}</span></div>
+        <div style="display:flex;justify-content:space-between;padding:5px 0;"><span style="color:#9AA0B0;font-size:12.5px;">Sell if it drops to (stop)</span><span style="color:${C.red};font-size:12.5px;font-weight:700;">${ps.trailExit!=null?fmtP(ps.trailExit):'—'}</span></div>
+        <div style="display:flex;justify-content:space-between;padding:5px 0;"><span style="color:#9AA0B0;font-size:12.5px;">Profit right now</span><span style="color:${ps.pl>=0?C.green:C.red};font-size:12.5px;font-weight:700;">${ps.pl>=0?'+':''}${fmtP(ps.pl)}</span></div>
         <div style="display:flex;justify-content:space-between;padding:5px 0;"><span style="color:#9AA0B0;font-size:12.5px;">If stopped now, you'd ${ps.lockedProfit>=0?'keep':'lose'}</span><span style="color:${ps.lockedProfit>=0?C.green:C.red};font-size:12.5px;font-weight:700;">${ps.lockedProfit>=0?'+':''}${ps.lockedProfit!=null?fmtP(ps.lockedProfit):'—'}</span></div>
         <div style="border-top:1px solid ${C.border};margin-top:6px;padding-top:8px;color:${ps.statusColor};font-size:12.5px;line-height:1.55;">${ps.status}</div>
       </div>
