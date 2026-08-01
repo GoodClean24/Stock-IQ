@@ -1391,16 +1391,28 @@ function saveEarningsDate(id, val){
 // strategy has WORKED on this name, never predicts the next trade.
 function _mean(a){ return a.length?a.reduce((x,y)=>x+y,0)/a.length:null; }
 function _std(a){ if(a.length<2) return null; const m=_mean(a); return Math.sqrt(a.reduce((s,v)=>s+(v-m)*(v-m),0)/a.length); }
-function tickerBacktest(s){
+function tickerBacktest(s, strategyOverride){
+  const strategy = strategyOverride || getStrategyFor(s);
   const snaps=(s.snapshots||[]).filter(x=>x&&x.date&&x.price!=null).sort((a,b)=>new Date(a.date)-new Date(b.date));
   const trades=[]; let lastExit=-1;
   for(let i=1;i<snaps.length;i++){
     if(i<=lastExit) continue;
     const sn=snaps[i];
-    if([sn.rsi,sn.atr,sn.ma50,sn.ma200,sn.macdLine,sn.signalLine].some(v=>v==null)) continue;
-    const asOf={...s, price:sn.price, rsi:sn.rsi, atr:sn.atr, ma20:sn.ma20, ma50:sn.ma50, ma200:sn.ma200, macdLine:sn.macdLine, signalLine:sn.signalLine, snapshots:snaps.slice(0,i+1)};
-    const v=computeSignalVerdict(asOf);
-    if(v.state!=='BUY') continue;
+    let isBuy=false;
+    if(strategy==='Contrarian'){
+      if([sn.rsi,sn.atr,sn.ma200,sn.hi52,sn.vol,sn.avgvol].some(v=>v==null) || !sn.avgvol) continue;
+      const distHigh=(sn.price/sn.hi52-1)*100;
+      const atrPct=(sn.atr/sn.price)*100;
+      const volRatio=sn.vol/sn.avgvol;
+      const distMA200=(sn.price/sn.ma200-1)*100;
+      isBuy = distMA200>0 && distHigh<=-17.9 && atrPct>=3.3 && volRatio>=0.98 && sn.rsi<=55;
+    } else {
+      if([sn.rsi,sn.atr,sn.ma50,sn.ma200,sn.macdLine,sn.signalLine].some(v=>v==null)) continue;
+      const asOf={...s, price:sn.price, rsi:sn.rsi, atr:sn.atr, ma20:sn.ma20, ma50:sn.ma50, ma200:sn.ma200, macdLine:sn.macdLine, signalLine:sn.signalLine, snapshots:snaps.slice(0,i+1)};
+      const v=computeSignalVerdict(asOf);
+      isBuy = v.state==='BUY';
+    }
+    if(!isBuy) continue;
     const entry=sn.price, atr=sn.atr; if(!atr||atr<=0) continue;
     const initStop=entry-2*atr; let hh=(sn.high!=null?sn.high:entry);
     let exitPrice=null, exitIdx=null;
