@@ -6641,6 +6641,8 @@ function parseCSV(text) {
     ma200:     ['SMA_200','sma_200','SMA200','MA200'],
     ma20:      ['EMA_20','ema_20','EMA20','MA20'],
     earn:      ['Days To Earnings','DaysToEarnings','daystoearnings','days to earnings','EarningsOffset','DaysToEarn'],
+    hi52:      ['High52W','high52w','52WHigh','Hi52'],
+    avgvol:    ['AvgVol20','avgvol20','AvgVolume20','AverageVolume20'],
   };
 
   Object.keys(colMap).forEach(key => {
@@ -6695,6 +6697,8 @@ function parseCSV(text) {
       ma200:      pf('ma200'),
       ma20:       pf('ma20'),
       earnOffset: (idx.earn!==undefined && idx.earn>=0) ? parseEarnOffset(cols[idx.earn]) : null,
+      hi52:       pf('hi52'),
+      avgvol:     pf('avgvol'),
     });
   }
 
@@ -6836,6 +6840,7 @@ async function doImportCSV(stockId) {
     ma200:      r2(row.ma200),
     ma20:       r2(row.ma20),
     earnOffset: row.earnOffset ?? null,
+    hi52:       row.hi52,
   }));
 
   // ThinkorSwim's export gives raw daily volume, not a pre-computed average —
@@ -6866,6 +6871,7 @@ async function doImportCSV(stockId) {
     macdLine:   latest.macdLine   ?? s.macdLine,
     signalLine: latest.signalLine ?? s.signalLine,
     atr:        latest.atr        ?? s.atr,
+    hi52:       latest.hi52       ?? s.hi52,
     analyzed:   latest.date       || s.analyzed,
     earningsDate: (latest.earnOffset!=null ? earnDateFromOffset(latest.earnOffset, latest.date) : s.earningsDate) ?? null,
     snapshots:  cleanRows,
