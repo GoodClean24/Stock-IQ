@@ -902,14 +902,17 @@ const snaps=(s.snapshots||[]).filter(sn=>sn.date).sort((a,b)=>new Date(a.date)-n
   // noise the instant the two lines are basically tied (e.g. -0.04 vs -0.04).
   // Same fix already used in the held-position health check; entry needed it too.
   const deadband = (s.atr!=null) ? s.atr*0.05 : 0.03;
-  let recentCross=false;
-  for(let k=Math.max(1,pts.length-3);k<pts.length;k++){
+ let recentCross=false;
+  for(let k=Math.max(1,pts.length-3);k<pts.length-1;k++){
     const a=pts[k-1],b=pts[k];
     if(a.l!=null&&a.g!=null&&b.l!=null&&b.g!=null){
       const gapA=a.l-a.g, gapB=b.l-b.g;
       if(gapA<=-deadband && gapB>-deadband){recentCross=true;break;}
     }
   }
+  const latest = pts[pts.length-1];
+  const stillUp = (latest.l!=null && latest.g!=null) ? (latest.l-latest.g) > -deadband : false;
+  recentCross = recentCross && stillUp;
   const haveHistory=pts.length>=2;
 
   const uptrend = s.price>s.ma200 && s.ma50>s.ma200;
