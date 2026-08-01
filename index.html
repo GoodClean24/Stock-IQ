@@ -974,6 +974,11 @@ function computeVerdictForTicker(s){
   return {...computeContrarianVerdict(s), strategy:'Contrarian'};
 }
 
+function getStrategyFor(s){
+  if(s.position && s.position.strategy) return s.position.strategy;
+  return s.sector==='Industrials' ? 'Trend' : 'Contrarian';
+}
+
 function computeSimpleAction(s) {
   const type = s.type;
   if(type==='Long-Term Hold') {
@@ -1817,7 +1822,16 @@ function renderCleanDetail(s){
   const p=planNumbers(s);
   const atrPctNow = (s.atr&&s.price)?(s.atr/s.price*100):null;
   const upPct = (s.price&&s.ma200)?((s.price/s.ma200-1)*100):null;
-  const setupVals = {
+  const strategy = v.strategy || getStrategyFor(s);
+  const distHighPct = (s.price!=null&&s.hi52) ? (s.price/s.hi52-1)*100 : null;
+  const volRatioNow = (s.vol!=null&&s.avgvol) ? s.vol/s.avgvol : null;
+  const setupVals = strategy==='Contrarian' ? {
+    pullback: distHighPct!=null ? `${distHighPct.toFixed(0)}% off high` : '',
+    atr: atrPctNow!=null ? atrPctNow.toFixed(1)+'%' : '',
+    vol: volRatioNow!=null ? volRatioNow.toFixed(2)+'x avg' : '',
+    rsi: s.rsi!=null ? s.rsi.toFixed(0) : '',
+    uptrend: upPct!=null ? `${upPct>=0?'+':''}${upPct.toFixed(0)}% vs 200d` : '',
+  } : {
     uptrend: upPct!=null ? `${upPct>=0?'+':''}${upPct.toFixed(0)}% vs 200d` : '',
     rsi: s.rsi!=null ? s.rsi.toFixed(0) : '',
     atr: atrPctNow!=null ? atrPctNow.toFixed(1)+'%' : '',
@@ -1963,11 +1977,19 @@ function renderCleanDetail(s){
 
     ${eSoon && (isBuy||isWatch) ? `<div style="padding:11px 20px;background:${C.red}1A;border-bottom:1px solid ${C.border};color:#F5A3A3;font-size:12.5px;line-height:1.5;">⚠️ Earnings in ${eDays} day${eDays===1?'':'s'} — a swing trade held through earnings can gap right past your stop. Best to wait until after it reports.</div>` : ''}
     <div style="padding:14px 20px;border-bottom:1px solid ${C.border};">
-      <div style="color:#AEB4C2;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">The setup <span style="text-transform:none;letter-spacing:0;color:#8A90A0;">· tap any row to learn</span></div>
+      <div style="color:#AEB4C2;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">The setup <span style="text-transform:none;letter-spacing:0;color:#8A90A0;">· ${strategy} · tap any row to learn</span></div>
+      ${strategy==='Contrarian' ? `
+      ${row('pullback','18%+ below 52-week high',setupVals.pullback,distHighPct!=null?distHighPct<=-17.9:null)}
+      ${row('atr','High volatility (ATR 3.3%+)',setupVals.atr,atrPctNow!=null?atrPctNow>=3.3:null)}
+      ${row('vol','Volume at/above 20-day avg',setupVals.vol,volRatioNow!=null?volRatioNow>=0.98:null)}
+      ${row('rsi','RSI 55 or under (not overbought)',setupVals.rsi,s.rsi!=null?s.rsi<=55:null)}
+      ${row('uptrend','Still above 200-day (uptrend intact)',setupVals.uptrend,upPct!=null?upPct>0:null)}
+      ` : `
       ${row('uptrend','Uptrend (price above 200, 50 above 200)',setupVals.uptrend,cGet('uptrend')?cGet('uptrend').pass:null)}
       ${row('rsi','RSI in the 45–60 band',setupVals.rsi,cGet('rsi')?cGet('rsi').pass:null)}
       ${row('atr','Daily range tradeable (ATR 4–8%)',setupVals.atr,cGet('range')?cGet('range').pass:null)}
       ${row('macd','MACD crossed up',setupVals.macd,cGet('macd')?cGet('macd').pass:null)}
+      `}
       <button onclick="setEarningsDate('${s.id}')" style="all:unset;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 2px;width:100%;box-sizing:border-box;">
         <span style="color:${C.text};font-size:13.5px;">Earnings date</span>
         <span style="display:flex;align-items:center;gap:8px;color:${eSoon?C.red:(s.earningsDate?C.textSub:C.green)};font-size:13px;font-weight:600;">${s.earningsDate?`${fmtEarnDate(s.earningsDate)}${eDays!=null?` · in ${eDays}d`:''}`:'set date'}<span style="color:${C.textMuted};font-size:14px;">›</span></span>
