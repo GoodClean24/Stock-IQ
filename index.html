@@ -953,6 +953,27 @@ const snaps=(s.snapshots||[]).filter(sn=>sn.date).sort((a,b)=>new Date(a.date)-n
   return {buy, state, ready, reason, checks, atrPct};
 }
 
+function computeContrarianVerdict(s){
+  const need=[s.price,s.rsi,s.atr,s.ma200,s.hi52,s.vol,s.avgvol];
+  if(need.some(v=>v==null)) return {state:'WAIT', reason:'Missing data'};
+  const distHigh = (s.price/s.hi52-1)*100;
+  const atrPct = (s.atr/s.price)*100;
+  const volRatio = s.avgvol>0 ? s.vol/s.avgvol : null;
+  const distMA200 = (s.price/s.ma200-1)*100;
+  const uptrendIntact = distMA200>0;
+  const deepPullback = distHigh<=-17.9;
+  const highVol = atrPct>=3.3;
+  const risingVolume = volRatio!=null && volRatio>=0.98;
+  const notOverbought = s.rsi<=55;
+  const buy = uptrendIntact && deepPullback && highVol && risingVolume && notOverbought;
+  return {state: buy?'BUY':'WAIT', distHigh, atrPct, volRatio, distMA200};
+}
+
+function computeVerdictForTicker(s){
+  if(s.sector==='Industrials') return {...computeSignalVerdict(s), strategy:'Trend'};
+  return {...computeContrarianVerdict(s), strategy:'Contrarian'};
+}
+
 function computeSimpleAction(s) {
   const type = s.type;
   if(type==='Long-Term Hold') {
@@ -969,7 +990,7 @@ function computeSimpleAction(s) {
 
   // ── Option 3: the validated engine is the brain for the BUY call. ──
   // Old market-state routing still handles holding/exit above; entry is ours.
-  const v = computeSignalVerdict(s);
+  const v = computeVerdictForTicker(s);
   return {word: v.state, holding:false, reason: v.reason, warning:null};
 }
 const SIMPLE_ACTION_META = {BUY:{color:C.green}, WATCH:{color:'#3B82F6'}, WAIT:{color:C.yellow}, HOLD:{color:C.teal}, EXIT:{color:C.red}};
@@ -1720,7 +1741,7 @@ function saveStockName(id, val){
 }
 function openSimpleMentor(id){
   const s = stocks.find(x=>String(x.id)===String(id)); if(!s) return;
-  const v = computeSignalVerdict(s);
+  const v = computeVerdictForTicker(s);
   const p = planNumbers(s);
   const state = v.state || 'WAIT';
   const vc = state==='BUY'?C.green:(state==='WATCH'?'#3B82F6':'#E8A317');
@@ -1792,7 +1813,7 @@ function openSimpleMentor(id){
 }
 function renderCleanDetail(s){
   detailStockId = s.id;
-  const v=computeSignalVerdict(s);
+  const v=computeVerdictForTicker(s);
   const p=planNumbers(s);
   const atrPctNow = (s.atr&&s.price)?(s.atr/s.price*100):null;
   const upPct = (s.price&&s.ma200)?((s.price/s.ma200-1)*100):null;
@@ -6755,7 +6776,7 @@ function previewCSV(stockId, input) {
 }
 
 function showImportSuccess(s){
-  const v = computeSignalVerdict(s);
+  const v = computeVerdictForTicker(s);
   const p = planNumbers(s);
   const snaps = s.snapshots||[];
   const from = snaps[0]?.date||''; const to = snaps[snaps.length-1]?.date||'';
