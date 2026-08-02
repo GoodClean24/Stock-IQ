@@ -1069,13 +1069,12 @@ function isProven(s){ return provenStars(s) > 0; }
 function goldStars(n){ return `<span style="color:#E0A82E;font-size:11px;letter-spacing:-0.5px;">${'★'.repeat(n)}</span><span style="color:#3A3F4C;font-size:11px;letter-spacing:-0.5px;">${'★'.repeat(5-n)}</span>`; }
 function setProven(id, n){
   const s = stocks.find(x=>String(x.id)===String(id)); if(!s) return;
-  // tapping the star that's already selected clears the manual override,
-  // falling back to the backtest-computed rating
   const newVal = (s.provenManual===n) ? null : n;
   const updated = {...s, provenManual: newVal};
   stocks = stocks.map(x=>String(x.id)===String(id)?updated:x);
   scheduleSave(updated);
   if(String(detailStockId)===String(id)) renderDetail(updated);
+  openBacktest(id);
   renderHome();
 }
 function setupScore(s){
