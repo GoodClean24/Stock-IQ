@@ -1652,8 +1652,21 @@ function positionStats(s){
   else if(distPct!=null && distPct<3){ status='Price is close to your exit. A pullback from here would sell you out — that\u2019s fine, it means the run may be ending.'; statusColor=C.yellow; }
   else if(lockedIn){ status='Trending up, and your exit has climbed above your entry — you\u2019re locked into a profit now no matter what. Let it run.'; statusColor=C.green; }
   else { status='Trending up, still early. Your exit is below your entry, so give it room to work.'; statusColor=C.teal; }
-  return {hi, trailExit, lockedProfit, distToExit, distToExitTotal, distPct, pl, plPct, days, macdUp, macdFading, macdFlat, aboveMAs, lockedIn, status, statusColor, momentumCall, momentumNote, momentumAccuracy, momentumEvaluable};
-}
+  // Exit-reversal check: only meaningful once a position has real gains.
+  // All three conditions together — not any one alone — is what real
+  // reversals have looked like historically.
+  let reversalWarning = false, reversalNote = '';
+  if(pl>0 && s.price!=null && s.ema20!=null && s.rsi!=null && macdGap!=null){
+    const belowEMA20 = s.price < s.ema20;
+    const rsiWeak = s.rsi <= 35;
+    const macdNegative = macdGap < -deadband;
+    if(belowEMA20 && rsiWeak && macdNegative){
+      reversalWarning = true;
+      reversalNote = `Price below its 20-day average, RSI at ${s.rsi.toFixed(0)}, MACD turning negative — this combination has usually meant a real reversal, not just noise.`;
+    }
+  }
+
+  return {hi, trailExit, lockedProfit, distToExit, distToExitTotal, distPct, pl, plPct, days, macdUp, macdFading, macdFlat, aboveMAs, lockedIn, status, statusColor, momentumCall, momentumNote, momentumAccuracy, momentumEvaluable, reversalWarning, reversalNote};
 // ── Paper-trade tracking ──────────────────────────────────────────────────
 function openBuyScreen(id){
   const s = stocks.find(x=>String(x.id)===String(id)); if(!s) return;
@@ -2055,6 +2068,10 @@ function renderCleanDetail(s){
         ${ps.momentumCall!=='n/a' ? `<div style="border-top:1px solid ${C.border};margin-top:6px;padding-top:8px;">
           <div style="color:${ps.momentumCall==='warning'?C.red:(ps.momentumCall==='onTrack'?C.green:C.yellow)};font-size:12.5px;line-height:1.55;">${ps.momentumNote}</div>
           ${ps.momentumAccuracy!=null ? `<div style="color:${C.textMuted};font-size:11px;margin-top:4px;">This check has been right ${(ps.momentumAccuracy*100).toFixed(0)}% of the time on ${s.ticker} (${ps.momentumEvaluable} past trades)</div>` : ''}
+        </div>` : ''}
+        ${ps.reversalWarning ? `<div style="border-top:1px solid ${C.border};margin-top:6px;padding-top:8px;">
+          <div style="color:${C.red};font-size:12.5px;font-weight:700;">⚠ Reversal signs</div>
+          <div style="color:${C.red};font-size:12.5px;line-height:1.55;margin-top:2px;">${ps.reversalNote}</div>
         </div>` : ''}
       </div>
       <div style="display:flex;gap:10px;margin-top:10px;">
@@ -6756,6 +6773,7 @@ function parseCSV(text) {
     ma20:      ['EMA_20','ema_20','EMA20','MA20'],
     earn:      ['Days To Earnings','DaysToEarnings','daystoearnings','days to earnings','EarningsOffset','DaysToEarn'],
     hi52:      ['High52W','high52w','52WHigh','Hi52'],
+    ema20:     ['EMA20','ema20','EMA_20'],
     avgvol:    ['AvgVol20','avgvol20','AvgVolume20','AverageVolume20'],
     sector:    ['Sector','sector'],
     industry:  ['Industry','industry'],
@@ -6814,6 +6832,7 @@ function parseCSV(text) {
       ma20:       pf('ma20'),
       earnOffset: (idx.earn!==undefined && idx.earn>=0) ? parseEarnOffset(cols[idx.earn]) : null,
       hi52:       pf('hi52'),
+      ema20:      pf('ema20'),
       avgvol:     pf('avgvol'),
     });
   }
@@ -6957,6 +6976,7 @@ async function doImportCSV(stockId) {
     ma20:       r2(row.ma20),
     earnOffset: row.earnOffset ?? null,
     hi52:       row.hi52,
+    ema20:      row.ema20,
   }));
 
   // ThinkorSwim's export gives raw daily volume, not a pre-computed average —
@@ -6988,6 +7008,7 @@ async function doImportCSV(stockId) {
     signalLine: latest.signalLine ?? s.signalLine,
     atr:        latest.atr        ?? s.atr,
     hi52:       latest.hi52       ?? s.hi52,
+    ema20:      latest.ema20      ?? s.ema20,
     analyzed:   latest.date       || s.analyzed,
     earningsDate: (latest.earnOffset!=null ? earnDateFromOffset(latest.earnOffset, latest.date) : s.earningsDate) ?? null,
     snapshots:  cleanRows,
