@@ -1463,7 +1463,7 @@ function tickerBacktest(s, strategyOverride){
       tell='rsi'; tellStats={mean:rMean, std:rStd, n:rsis.length};
     }
   }
-  return {trades, bars:snaps.length, months:Math.round(snaps.length/21), from:snaps[0]?.date||null, to:snaps[snaps.length-1]?.date||null, n, wins, winRate:n?wins/n:0, avg, avgHeld, best, worst, enough:n>=4, tell, tellStats};
+  return {trades, bars:snaps.length, months:Math.round(snaps.length/21), from:snaps[0]?.date||null, to:snaps[snaps.length-1]?.date||null, n, wins, winRate:n?wins/n:0, avg, avgHeld, best, worst, enough:n>=4, tell, tellStats, strategy};
 }
 function openBacktest(id){
   const s=stocks.find(x=>String(x.id)===String(id)); if(!s) return;
@@ -1504,7 +1504,7 @@ function openBacktest(id){
     <div style="background:${C.card};border-bottom:1px solid ${C.border};padding:16px 20px;display:flex;align-items:center;gap:12px;">
       <button onclick="openDetail('${s.id}')" style="background:none;border:none;color:${C.textSub};font-size:24px;cursor:pointer;line-height:1;">←</button>
       <div><div style="color:${C.text};font-size:18px;font-weight:700;">${s.ticker} · strategy backtest</div>
-      <div style="color:#AEB4C2;font-size:12px;">how our system did on this stock's own history</div></div>
+      <div style="color:#AEB4C2;font-size:12px;">${bt.strategy||getStrategyFor(s)} · how our system did on this stock's own history</div></div>
     </div>
 
     <div style="padding:12px 20px 0;">
