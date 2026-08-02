@@ -1293,10 +1293,19 @@ function planNumbers(s){
 // Live-number explainer text. Each returns a short, plain paragraph.
 const LEARN = {
   uptrend:(s)=>`We only buy with the longer trend, never against it. This checks price is above its 200-day and 50-day averages, and the 50 sits above the 200. Right now price is ${fmtP(s.price)} and the 200-day is ${s.ma200!=null?fmtP(s.ma200):'—'}. ${(s.price>s.ma200&&s.ma50>s.ma200)?'Trend is up — good.':'Not lined up yet — that\u2019s why this one is a wait.'}`,
-  rsi:(s)=>`RSI measures momentum from 0 to 100. The 45–60 pocket is where a stock has cooled off enough to be a good entry but isn\u2019t still falling. Under 45 it\u2019s dropping, over 60 it\u2019s already extended. Yours is ${s.rsi!=null?s.rsi.toFixed(1):'—'}.`,
-  atr:(s)=>{const p=(s.atr&&s.price)?(s.atr/s.price*100):null; return `ATR is how much this stock moves on an average day. We want 4–8% of price: enough room to swing for real gains, not so wild you can\u2019t manage the risk. Yours is ${p!=null?p.toFixed(1)+'%':'—'} (about ${s.atr!=null?fmtP(s.atr):'—'} a day).`;},
+  rsi:(s)=>{
+    if(getStrategyFor(s)==='Dip Buy') return `RSI measures momentum from 0 to 100. For a dip entry we want it at 55 or under — a sign the stock has cooled off and isn\u2019t still being chased at the top. Yours is ${s.rsi!=null?s.rsi.toFixed(1):'—'}.`;
+    return `RSI measures momentum from 0 to 100. The 45–60 pocket is where a stock has cooled off enough to be a good entry but isn\u2019t still falling. Under 45 it\u2019s dropping, over 60 it\u2019s already extended. Yours is ${s.rsi!=null?s.rsi.toFixed(1):'—'}.`;
+  },
+  atr:(s)=>{
+    const p=(s.atr&&s.price)?(s.atr/s.price*100):null;
+    if(getStrategyFor(s)==='Dip Buy') return `ATR is how much this stock moves on an average day. For a dip entry we want at least 3.3% — real volatility helps confirm this is a genuine dislocation, not a quiet drift. Yours is ${p!=null?p.toFixed(1)+'%':'—'}.`;
+    return `ATR is how much this stock moves on an average day. We want 4–8% of price: enough room to swing for real gains, not so wild you can\u2019t manage the risk. Yours is ${p!=null?p.toFixed(1)+'%':'—'} (about ${s.atr!=null?fmtP(s.atr):'—'} a day).`;
+  },
+  pullback:(s)=>{const d=(s.price!=null&&s.hi52)?(s.price/s.hi52-1)*100:null; return `We want the stock at least 18% below its 52-week high — a real dislocation, not a normal wiggle. Yours is ${d!=null?d.toFixed(0)+'%':'—'} off its high.`;},
+  vol:(s)=>{const r=(s.vol!=null&&s.avgvol)?s.vol/s.avgvol:null; return `Volume at or above the 20-day average tells you people are actually stepping back in, not just watching it fall on thin trading. Yours is ${r!=null?r.toFixed(2)+'x':'—'} the 20-day average.`;},
   macd:(s)=>{const up=(s.macdLine!=null&&s.signalLine!=null)?s.macdLine>s.signalLine:null; return `MACD crossing up means short-term momentum just turned positive — the trigger that says \u201cnow,\u201d not \u201csomeday.\u201d Right now MACD is ${up===null?'unknown':(up?'above':'below')} its signal line.`;},
-  entry:(s)=>{const p=planNumbers(s); return `Buy at or near the current price, ${fmtP(p.entry)}. We don\u2019t wait for a lower price — the backtests showed waiting for a dip missed the best trades and kept the weak ones.`;},
+  entry:(s)=>{const p=planNumbers(s); if(getStrategyFor(s)==='Dip Buy') return `Buy at or near the current price, ${fmtP(p.entry)}. This strategy is built to catch the pullback itself — the dip is the entry, not a reason to wait for more.`; return `Buy at or near the current price, ${fmtP(p.entry)}. We don\u2019t wait for a lower price — the backtests showed waiting for a dip missed the best trades and kept the weak ones.`;},
   stop:(s)=>{const p=planNumbers(s); return `Your bail-out price. If it falls to ${p.stop!=null?fmtP(p.stop):'—'} you sell, no debating it. It sits 2 ATR (about ${p.riskPerShare!=null?fmtP(p.riskPerShare):'—'} a share) below entry — far enough that normal daily wiggle won\u2019t hit it, close enough that a real breakdown does.`;},
   exit:(s)=>{const p=planNumbers(s); const d=p.trailDist; return `How you leave a winner. No fixed target — as the stock climbs, this trails ${d!=null?fmtP(d):'—'} (3× ATR) below its highest point, and never drops. Example: buy at ${fmtP(s.price)}; if it runs to ${d!=null?fmtP(s.price+8* (d/3)):'—'}, your exit has ridden up to ${d!=null?fmtP(s.price+8*(d/3)-d):'—'}. You only sell when it falls ${d!=null?fmtP(d):'that much'} from its peak — so a winner runs instead of getting capped.`;},
   size:(s)=>{const p=planNumbers(s); return accountSize>0
@@ -1305,7 +1314,7 @@ const LEARN = {
 };
 function showLearn(key, sid){
   const s=(stocks||[]).find(x=>String(x.id)===String(sid)); if(!s||!LEARN[key])return;
-  const titles={uptrend:'Uptrend',rsi:'RSI 45–60',atr:'Daily range (ATR)',macd:'MACD cross',entry:'Entry',stop:'Stop loss',exit:'Trailing exit',size:'Position size'};
+  const titles={uptrend:'Uptrend',rsi:'RSI',atr:'Daily range (ATR)',macd:'MACD cross',pullback:'Pullback from high',vol:'Volume',entry:'Entry',stop:'Stop loss',exit:'Trailing exit',size:'Position size'};
   const ov=document.createElement('div');
   ov.id='learn-overlay';
   ov.style.cssText='position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.55);display:flex;align-items:flex-end;justify-content:center;';
@@ -1770,6 +1779,13 @@ function openSimpleMentor(id){
   const atrOk = atrPct!=null && atrPct>=4 && atrPct<=8;
   const macdUp = s.macdLine>s.signalLine;
   const mk=(c)=>c?C.green:C.red, yn=(c)=>c?'yes':'not yet';
+  const strategy = v.strategy || getStrategyFor(s);
+  const distHighPct = (s.price!=null&&s.hi52) ? (s.price/s.hi52-1)*100 : null;
+  const volRatioNow = (s.vol!=null&&s.avgvol) ? s.vol/s.avgvol : null;
+  const pullbackOk = distHighPct!=null && distHighPct<=-17.9;
+  const atrFloorOk = atrPct!=null && atrPct>=3.3;
+  const volOk = volRatioNow!=null && volRatioNow>=0.98;
+  const rsiCeilOk = s.rsi!=null && s.rsi<=55;
   const pos = s.position || null;
   const held = !!pos;
 
@@ -1804,7 +1820,7 @@ function openSimpleMentor(id){
     tradePart = state==='WAIT' ? `<div style="color:#C7CCD8;font-size:12.5px;line-height:1.6;">This isn\u2019t a trade yet — one of the checks below is failing. Nothing to do but skip it or watch.</div>`
       : state==='WATCH' ? `<div style="color:#C7CCD8;font-size:12.5px;line-height:1.6;">The setup is here, but it\u2019s waiting on the momentum trigger. <b>Watch the MACD panel.</b> The moment the faster line crosses above the slower line, this becomes a buy. Until then, don\u2019t enter — just keep it on watch.</div>`
       : `<div style="color:#C7CCD8;font-size:12.5px;line-height:1.75;">
-          <b style="color:${C.text};">1. Get in.</b> Buy near ${fmtP(p.entry)}, at market. Don\u2019t wait for a dip — the good ones don\u2019t come back.<br>
+          <b style="color:${C.text};">1. Get in.</b> ${strategy==='Dip Buy' ? `Buy near ${fmtP(p.entry)}, at market. This is the pullback itself — that's the entry, not a reason to wait for more.` : `Buy near ${fmtP(p.entry)}, at market. Don\u2019t wait for a dip — the good ones don\u2019t come back.`}<br>
           <b style="color:${C.text};">2. Set your stop.</b> ${p.stop!=null?fmtP(p.stop):'—'}. If it falls here, you\u2019re out, no debate. That\u2019s ${p.riskPerShare!=null?fmtP(p.riskPerShare):'—'} of risk per share.<br>
           <b style="color:${C.text};">3. Size it.</b> ${accountSize>0?`About ${p.shares!=null?p.shares.toFixed(1):'—'} shares — that keeps risk to 1%.`:'Set your risk size and the app gives you the exact share count (1% risk).'}<br>
           <b style="color:${C.text};">4. Let it run.</b> Use a trailing exit ${p.trailDist!=null?fmtP(p.trailDist):'—'} (3× ATR) below the highest price it reaches. As it climbs, that exit climbs with it and never drops. You only sell when it falls ${p.trailDist!=null?fmtP(p.trailDist):'that much'} from its peak — so a winner runs instead of getting capped.
@@ -1822,7 +1838,13 @@ function openSimpleMentor(id){
       ${held?dataPart:''}
       ${sect('What to do', tradePart)}
 
-      ${sect('What the app sees, and how to spot it yourself', `
+      ${sect('What the app sees, and how to spot it yourself', strategy==='Dip Buy' ? `
+        ${teach(mk(pullbackOk),'18%+ below 52-week high', `Price is ${distHighPct!=null?distHighPct.toFixed(0)+'%':'—'} off its 52-week high (${s.hi52!=null?fmtP(s.hi52):'—'}). We want a real dislocation, not a normal wiggle.`, `Add a High52W study or check the 1-year high on the chart. Yours: ${yn(pullbackOk)}.`)}
+        ${teach(mk(atrFloorOk),'High volatility (ATR 3.3%+)', `Daily range is ${atrPct!=null?atrPct.toFixed(1)+'%':'—'} of price — real volatility helps confirm this is a genuine dislocation, not a quiet drift.`, `Add an ATR or ATRPercentage study. You want 3.3% or higher. Yours: ${atrPct!=null?atrPct.toFixed(1)+'%':'—'}.`)}
+        ${teach(mk(volOk),'Volume at/above 20-day avg', `Volume is ${volRatioNow!=null?volRatioNow.toFixed(2)+'x':'—'} the 20-day average — confirms people are stepping back in, not just watching it fall.`, `Compare today's volume to the 20-day average volume study. Yours: ${yn(volOk)}.`)}
+        ${teach(mk(rsiCeilOk),'RSI 55 or under', `RSI is ${s.rsi!=null?s.rsi.toFixed(0):'—'}. At or under 55 means it's not overbought — there's still room for this to be an entry, not a chase.`, `The RSI panel under the chart. You want 55 or under. Yours: ${s.rsi!=null?s.rsi.toFixed(0):'—'}.`)}
+        ${teach(mk(upOk),'Still above 200-day (uptrend intact)', `Price ${fmtP(s.price)} is ${upOk?'above':'not above'} its 200-day (${s.ma200!=null?fmtP(s.ma200):'—'}) — the pullback hasn\u2019t broken the longer trend.`, `On the main chart, is price above the 200-day line? Yours: ${yn(upOk)}.`)}
+      ` : `
         ${teach(mk(upOk),'Uptrend', `Price ${fmtP(s.price)} is ${upOk?'above':'not above'} its 200-day (${s.ma200!=null?fmtP(s.ma200):'—'}), and the 50-day is ${s.ma50>s.ma200?'above':'below'} the 200. We only trade with the trend.`, `On the main chart, look at the two moving-average lines. Is price above the orange (200-day) and blue (50-day), with blue above orange? Yours: ${yn(upOk)}.`)}
         ${teach(mk(rsiOk),'RSI 45–60', `RSI is ${s.rsi!=null?s.rsi.toFixed(0):'—'}. In the 45–60 pocket means it pulled back but isn\u2019t falling or overheated.`, `The RSI panel under the chart. You want the reading between 45 and 60. Yours: ${s.rsi!=null?s.rsi.toFixed(0):'—'}.`)}
         ${teach(mk(atrOk),'Daily range (ATR 4–8%)', `Its daily range is ${atrPct!=null?atrPct.toFixed(1)+'%':'—'} of price — ${atrOk?'enough to swing, not too wild':'outside the tradeable band'}.`, `Add an ATR or ATRPercentage study. You want 4–8%. Yours: ${atrPct!=null?atrPct.toFixed(1)+'%':'—'}.`)}
