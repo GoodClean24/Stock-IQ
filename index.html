@@ -1558,6 +1558,7 @@ function openBacktest(id){
       ${bt.n>0?`
       <div style="display:flex;gap:8px;margin-bottom:8px;">
         ${stat('Trades', bt.n)}
+${stat('Day-5 Accuracy', bt.momentumAccuracy!=null?(bt.momentumAccuracy*100).toFixed(0)+'%':'—')}
         ${stat('Win rate', Math.round(bt.winRate*100)+'%', bt.winRate>=0.5?C.green:C.yellow)}
         ${stat('Avg result', pct(bt.avg), bt.avg>=0?C.green:C.red)}
       </div>
