@@ -7008,7 +7008,6 @@ async function doImportCSV(stockId) {
     signalLine: latest.signalLine ?? s.signalLine,
     atr:        latest.atr        ?? s.atr,
     hi52:       latest.hi52       ?? s.hi52,
-    ema20:      latest.ema20      ?? s.ema20,
     analyzed:   latest.date       || s.analyzed,
     earningsDate: (latest.earnOffset!=null ? earnDateFromOffset(latest.earnOffset, latest.date) : s.earningsDate) ?? null,
     snapshots:  cleanRows,
