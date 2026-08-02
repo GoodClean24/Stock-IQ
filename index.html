@@ -21,6 +21,10 @@ input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;}
 input[type=number]{-moz-appearance:textfield;}
 ::-webkit-scrollbar{display:none;}
 .screen{display:none;max-width:680px;margin:0 auto;}
+@media (min-width: 900px) {
+  .screen { max-width: 900px; }
+  #bottom-nav { max-width: 900px; }
+}
 .screen.active{display:block;}
 /* Animations */
 @keyframes fadeIn{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
