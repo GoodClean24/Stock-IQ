@@ -1631,13 +1631,28 @@ function positionStats(s){
   const macdFlat = macdGap!=null && !macdFading && macdGap<=0;
   const aboveMAs = s.price>s.ma50 && s.ma50>s.ma200;
   const lockedIn = trailExit!=null && trailExit>pos.entry;
+
+  // Day-5 / Day-10 momentum check for this specific open position
+  const entrySnap = snaps.find(sn=>sn.date===pos.date);
+  const entryRSI = entrySnap ? entrySnap.rsi : null;
+  const rsiChange = (entryRSI!=null && s.rsi!=null) ? (s.rsi-entryRSI) : null;
+  let momentumCall = 'n/a', momentumNote = '';
+  if(rsiChange!=null){
+    if(days<5){ momentumCall='tooEarly'; momentumNote='Too early to check yet — comes in on day 5.'; }
+    else if(rsiChange>=3){ momentumCall='onTrack'; momentumNote=`RSI +${rsiChange.toFixed(1)} since entry — developing like a winner usually does.`; }
+    else if(days<10){ momentumCall='caution'; momentumNote=`RSI ${rsiChange>=0?'+':''}${rsiChange.toFixed(1)} since entry — hasn't confirmed yet. Recheck at day 10.`; }
+    else { momentumCall='warning'; momentumNote=`RSI ${rsiChange>=0?'+':''}${rsiChange.toFixed(1)} since entry, still flat at day ${days} — this pattern has usually meant a real loss.`; }
+  }
+  let momentumAccuracy=null, momentumEvaluable=0;
+  try { const _bt = tickerBacktest(s); momentumAccuracy=_bt.momentumAccuracy; momentumEvaluable=_bt.momentumEvaluable; } catch(e){}
+
   let status, statusColor;
   if(macdFading){ status='Momentum is fading — MACD has rolled over. The push that got you in is weakening. Keep a close eye on your exit.'; statusColor=C.yellow; }
   else if(macdFlat){ status='MACD is sitting right at the pivot — essentially tied with its signal line. Could break either way; not decisive yet, just watch it.'; statusColor=C.teal; }
   else if(distPct!=null && distPct<3){ status='Price is close to your exit. A pullback from here would sell you out — that\u2019s fine, it means the run may be ending.'; statusColor=C.yellow; }
   else if(lockedIn){ status='Trending up, and your exit has climbed above your entry — you\u2019re locked into a profit now no matter what. Let it run.'; statusColor=C.green; }
   else { status='Trending up, still early. Your exit is below your entry, so give it room to work.'; statusColor=C.teal; }
-  return {hi, trailExit, lockedProfit, distToExit, distToExitTotal, distPct, pl, plPct, days, macdUp, macdFading, macdFlat, aboveMAs, lockedIn, status, statusColor};
+  return {hi, trailExit, lockedProfit, distToExit, distToExitTotal, distPct, pl, plPct, days, macdUp, macdFading, macdFlat, aboveMAs, lockedIn, status, statusColor, momentumCall, momentumNote, momentumAccuracy, momentumEvaluable};
 }
 // ── Paper-trade tracking ──────────────────────────────────────────────────
 function openBuyScreen(id){
@@ -2037,6 +2052,10 @@ function renderCleanDetail(s){
         <div style="display:flex;justify-content:space-between;padding:5px 0;"><span style="color:#9AA0B0;font-size:12.5px;">Profit right now</span><span style="color:${ps.pl>=0?C.green:C.red};font-size:12.5px;font-weight:700;">${ps.pl>=0?'+':''}${fmtP(ps.pl)}</span></div>
         <div style="display:flex;justify-content:space-between;padding:5px 0;"><span style="color:#9AA0B0;font-size:12.5px;">If stopped now, you'd ${ps.lockedProfit>=0?'keep':'lose'}</span><span style="color:${ps.lockedProfit>=0?C.green:C.red};font-size:12.5px;font-weight:700;">${ps.lockedProfit>=0?'+':''}${ps.lockedProfit!=null?fmtP(ps.lockedProfit):'—'}</span></div>
         <div style="border-top:1px solid ${C.border};margin-top:6px;padding-top:8px;color:${ps.statusColor};font-size:12.5px;line-height:1.55;">${ps.status}</div>
+        ${ps.momentumCall!=='n/a' ? `<div style="border-top:1px solid ${C.border};margin-top:6px;padding-top:8px;">
+          <div style="color:${ps.momentumCall==='warning'?C.red:(ps.momentumCall==='onTrack'?C.green:C.yellow)};font-size:12.5px;line-height:1.55;">${ps.momentumNote}</div>
+          ${ps.momentumAccuracy!=null ? `<div style="color:${C.textMuted};font-size:11px;margin-top:4px;">This check has been right ${(ps.momentumAccuracy*100).toFixed(0)}% of the time on ${s.ticker} (${ps.momentumEvaluable} past trades)</div>` : ''}
+        </div>` : ''}
       </div>
       <div style="display:flex;gap:10px;margin-top:10px;">
         <button onclick="sellStock('${s.id}')" style="flex:2;padding:12px;border-radius:12px;border:none;background:${C.green};color:#000;font-size:13px;font-weight:800;cursor:pointer;">Sell — lock in ${ps.pl>=0?'profit':'loss'}</button>
