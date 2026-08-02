@@ -1020,7 +1020,7 @@ function renderCleanCard(s){
          <div style="min-width:0;">
            <div style="display:flex;align-items:center;gap:6px;"><span style="color:${C.text};font-size:16px;font-weight:700;">${s.ticker}</span>${(provenStars(s)>0&&(word==='BUY'||word==='WATCH'))?`<span title="Track record: ${provenStars(s)} of 5">${goldStars(provenStars(s))}</span>`:''}<button onclick="event.stopPropagation();toggleStar('${s.id}')" style="background:none;border:none;cursor:pointer;font-size:14px;color:${s.starred?'#E0556E':'#6B7180'};padding:0;">${s.starred?'♥':'♡'}</button></div>
           <div style="color:#9AA0B0;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px;">${s.name||''}${s.sector?` · ${s.sector}`:''}</div>
-           <div style="margin-top:2px;"><span style="color:${strategy==='Contrarian'?'#C77DFF':'#5FB4E8'};font-size:10px;font-weight:700;">${strategy}</span></div>
+           <div style="margin-top:2px;"><span style="color:${strategy==='Dip Buy'?'#C77DFF':'#5FB4E8'};font-size:10px;font-weight:700;">${strategy}</span></div>
          </div>
        </div>
        <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
@@ -1839,7 +1839,7 @@ function renderCleanDetail(s){
   const strategy = v.strategy || getStrategyFor(s);
   const distHighPct = (s.price!=null&&s.hi52) ? (s.price/s.hi52-1)*100 : null;
   const volRatioNow = (s.vol!=null&&s.avgvol) ? s.vol/s.avgvol : null;
-  const setupVals = strategy==='Contrarian' ? {
+  const setupVals = strategy==='Dip Buy' ? {
     pullback: distHighPct!=null ? `${distHighPct.toFixed(0)}% off high` : '',
     atr: atrPctNow!=null ? atrPctNow.toFixed(1)+'%' : '',
     vol: volRatioNow!=null ? volRatioNow.toFixed(2)+'x avg' : '',
@@ -1992,7 +1992,7 @@ function renderCleanDetail(s){
     ${eSoon && (isBuy||isWatch) ? `<div style="padding:11px 20px;background:${C.red}1A;border-bottom:1px solid ${C.border};color:#F5A3A3;font-size:12.5px;line-height:1.5;">⚠️ Earnings in ${eDays} day${eDays===1?'':'s'} — a swing trade held through earnings can gap right past your stop. Best to wait until after it reports.</div>` : ''}
     <div style="padding:14px 20px;border-bottom:1px solid ${C.border};">
       <div style="color:#AEB4C2;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">The setup <span style="text-transform:none;letter-spacing:0;color:#8A90A0;">· ${strategy} · tap any row to learn</span></div>
-      ${strategy==='Contrarian' ? `
+      ${strategy==='Dip Buy' ? `
       ${row('pullback','18%+ below 52-week high',setupVals.pullback,distHighPct!=null?distHighPct<=-17.9:null)}
       ${row('atr','High volatility (ATR 3.3%+)',setupVals.atr,atrPctNow!=null?atrPctNow>=3.3:null)}
       ${row('vol','Volume at/above 20-day avg',setupVals.vol,volRatioNow!=null?volRatioNow>=0.98:null)}
