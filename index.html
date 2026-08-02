@@ -1435,8 +1435,12 @@ function tickerBacktest(s, strategyOverride){
     if(!isBuy) continue;
     const entry=sn.price, atr=sn.atr; if(!atr||atr<=0) continue;
     const initStop=entry-2*atr; let hh=(sn.high!=null?sn.high:entry);
+    const entryRSI = sn.rsi;
+    let rsiDay5=null, rsiDay10=null;
     let exitPrice=null, exitIdx=null;
     for(let j=i+1;j<snaps.length;j++){
+      if(j-i===5) rsiDay5 = snaps[j].rsi;
+      if(j-i===10) rsiDay10 = snaps[j].rsi;
       const b=snaps[j], hi=(b.high!=null?b.high:b.price), lo=(b.low!=null?b.low:b.price);
       if(hi!=null) hh=Math.max(hh,hi);
       const trail=Math.max(initStop, hh-3*atr);
@@ -1444,14 +1448,30 @@ function tickerBacktest(s, strategyOverride){
     }
     if(exitPrice==null){ exitIdx=snaps.length-1; exitPrice=snaps[exitIdx].price; }
     const entryDistMA50 = sn.ma50 ? ((sn.price/sn.ma50-1)*100) : null;
-    const entryRSI = sn.rsi!=null ? sn.rsi : null;
-    trades.push({entryDate:sn.date, entry, exitDate:snaps[exitIdx].date, exit:exitPrice, ret:(exitPrice/entry-1), held:exitIdx-i, open:exitPrice==null, entryDistMA50, entryRSI});
+    const rsiChange5 = (rsiDay5!=null && entryRSI!=null) ? (rsiDay5-entryRSI) : null;
+    const rsiChange10 = (rsiDay10!=null && entryRSI!=null) ? (rsiDay10-entryRSI) : null;
+    trades.push({entryDate:sn.date, entry, exitDate:snaps[exitIdx].date, exit:exitPrice, ret:(exitPrice/entry-1), held:exitIdx-i, open:exitPrice==null, entryDistMA50, entryRSI, rsiDay5, rsiDay10, rsiChange5, rsiChange10});
     lastExit=exitIdx;
   }
   const n=trades.length, wins=trades.filter(t=>t.ret>0).length;
   const avg=n?trades.reduce((a,t)=>a+t.ret,0)/n:0;
   const avgHeld=n?trades.reduce((a,t)=>a+t.held,0)/n:0;
   const best=n?Math.max(...trades.map(t=>t.ret)):0, worst=n?Math.min(...trades.map(t=>t.ret)):0;
+
+  // Day-5 / Day-10 momentum check accuracy for this ticker
+  const evaluable = trades.filter(t=>t.rsiChange5!=null);
+  const momentumMatches = evaluable.filter(t=>{
+    const signalBullish = t.rsiChange5>=3;
+    const outcomeWin = t.ret>=0;
+    return signalBullish===outcomeWin;
+  }).length;
+  const momentumAccuracy = evaluable.length ? momentumMatches/evaluable.length : null;
+  trades.forEach(t=>{
+    if(t.rsiChange5==null){ t.day5Call='n/a'; return; }
+    if(t.rsiChange5>=3){ t.day5Call='stayIn'; }
+    else if(t.rsiChange10!=null && t.rsiChange10>=3){ t.day5Call='recovered'; }
+    else { t.day5Call='warning'; }
+  });
 
   // Which condition actually clustered across the WINS? Compares relative
   // spread (std/|mean|, lower = tighter = more consistent) between two
@@ -1472,7 +1492,7 @@ function tickerBacktest(s, strategyOverride){
       tell='rsi'; tellStats={mean:rMean, std:rStd, n:rsis.length};
     }
   }
-  return {trades, bars:snaps.length, months:Math.round(snaps.length/21), from:snaps[0]?.date||null, to:snaps[snaps.length-1]?.date||null, n, wins, winRate:n?wins/n:0, avg, avgHeld, best, worst, enough:n>=4, tell, tellStats, strategy};
+  return {trades, bars:snaps.length, months:Math.round(snaps.length/21), from:snaps[0]?.date||null, to:snaps[snaps.length-1]?.date||null, n, wins, winRate:n?wins/n:0, avg, avgHeld, best, worst, enough:n>=4, tell, tellStats, strategy, momentumAccuracy, momentumEvaluable:evaluable.length};
 }
 function openBacktest(id){
   const s=stocks.find(x=>String(x.id)===String(id)); if(!s) return;
