@@ -1521,12 +1521,24 @@ function openBacktest(id){
   else { verdict=`The strategy has struggled on ${s.ticker}: only ${bt.wins} of ${bt.n} trades won, averaging ${pct(bt.avg)}. This stock hasn't suited the system historically — be extra selective, or watch it rather than trade it. A choppy or news-driven name can look like a setup without following through.`; vColor='#E8A317'; }
 
   const stat=(label,val,color)=>`<div style="flex:1;background:${C.cardHigh};border-radius:12px;padding:14px 10px;text-align:center;"><div style="color:#8A90A0;font-size:9px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:5px;">${label}</div><div style="color:${color||C.text};font-size:18px;font-weight:800;">${val}</div></div>`;
-  const tradeRows = bt.trades.slice().reverse().map(t=>`
+  const day5Label = (t)=>{
+    if(t.day5Call==='stayIn') return {text:'Day 5: on track', color:C.green};
+    if(t.day5Call==='warning') return {text:'Day 5: warning', color:C.red};
+    if(t.day5Call==='recovered') return {text:'Day 5: warning → recovered by day 10', color:C.yellow};
+    return null;
+  };
+  const tradeRows = bt.trades.slice().reverse().map(t=>{
+    const d5 = day5Label(t);
+    const matched = d5 ? ((t.day5Call==='stayIn'||t.day5Call==='recovered') === (t.ret>=0)) : null;
+    return `
     <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid ${C.border};">
       <div><div style="color:${C.text};font-size:12.5px;font-weight:600;">${fmtP(t.entry)} → ${fmtP(t.exit)}</div>
-      <div style="color:${C.textMuted};font-size:10px;">${t.entryDate} → ${t.exitDate} · ${t.held}d</div></div>
+      <div style="color:${C.textMuted};font-size:10px;">${t.entryDate} → ${t.exitDate} · ${t.held}d</div>
+      ${d5?`<div style="color:${d5.color};font-size:10px;margin-top:2px;">${d5.text}${matched!=null?(matched?' ✓':' ✗'):''}</div>`:''}
+      </div>
       <span style="color:${t.ret>=0?C.green:C.red};font-size:14px;font-weight:800;">${pct(t.ret)}</span>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 
   document.getElementById('backtest-content').innerHTML=`
    <div class="wide-content">
