@@ -1521,12 +1521,24 @@ function openBacktest(id){
   else { verdict=`The strategy has struggled on ${s.ticker}: only ${bt.wins} of ${bt.n} trades won, averaging ${pct(bt.avg)}. This stock hasn't suited the system historically — be extra selective, or watch it rather than trade it. A choppy or news-driven name can look like a setup without following through.`; vColor='#E8A317'; }
 
   const stat=(label,val,color)=>`<div style="flex:1;background:${C.cardHigh};border-radius:12px;padding:14px 10px;text-align:center;"><div style="color:#8A90A0;font-size:9px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:5px;">${label}</div><div style="color:${color||C.text};font-size:18px;font-weight:800;">${val}</div></div>`;
-  const tradeRows = bt.trades.slice().reverse().map(t=>`
+  const day5Label = (t)=>{
+    if(t.day5Call==='stayIn') return {text:'Day 5: on track', color:C.green};
+    if(t.day5Call==='warning') return {text:'Day 5: warning', color:C.red};
+    if(t.day5Call==='recovered') return {text:'Day 5: warning → recovered by day 10', color:C.yellow};
+    return null;
+  };
+  const tradeRows = bt.trades.slice().reverse().map(t=>{
+    const d5 = day5Label(t);
+    const matched = d5 ? ((t.day5Call==='stayIn'||t.day5Call==='recovered') === (t.ret>=0)) : null;
+    return `
     <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid ${C.border};">
       <div><div style="color:${C.text};font-size:12.5px;font-weight:600;">${fmtP(t.entry)} → ${fmtP(t.exit)}</div>
-      <div style="color:${C.textMuted};font-size:10px;">${t.entryDate} → ${t.exitDate} · ${t.held}d</div></div>
+      <div style="color:${C.textMuted};font-size:10px;">${t.entryDate} → ${t.exitDate} · ${t.held}d</div>
+      ${d5?`<div style="color:${d5.color};font-size:10px;margin-top:2px;">${d5.text}${matched!=null?(matched?' ✓':' ✗'):''}</div>`:''}
+      </div>
       <span style="color:${t.ret>=0?C.green:C.red};font-size:14px;font-weight:800;">${pct(t.ret)}</span>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 
   document.getElementById('backtest-content').innerHTML=`
    <div class="wide-content">
@@ -2069,6 +2081,10 @@ function renderCleanDetail(s){
         ${ps.momentumCall!=='n/a' ? `<div style="border-top:1px solid ${C.border};margin-top:6px;padding-top:8px;">
           <div style="color:${ps.momentumCall==='warning'?C.red:(ps.momentumCall==='onTrack'?C.green:C.yellow)};font-size:12.5px;line-height:1.55;">${ps.momentumNote}</div>
           ${ps.momentumAccuracy!=null ? `<div style="color:${C.textMuted};font-size:11px;margin-top:4px;">This check has been right ${(ps.momentumAccuracy*100).toFixed(0)}% of the time on ${s.ticker} (${ps.momentumEvaluable} past trades)</div>` : ''}
+        </div>` : ''}
+        ${ps.reversalWarning ? `<div style="border-top:1px solid ${C.border};margin-top:6px;padding-top:8px;">
+          <div style="color:${C.red};font-size:12.5px;font-weight:700;">⚠ Reversal signs</div>
+          <div style="color:${C.red};font-size:12.5px;line-height:1.55;margin-top:2px;">${ps.reversalNote}</div>
         </div>` : ''}
         ${ps.reversalWarning ? `<div style="border-top:1px solid ${C.border};margin-top:6px;padding-top:8px;">
           <div style="color:${C.red};font-size:12.5px;font-weight:700;">⚠ Reversal signs</div>
@@ -6774,6 +6790,7 @@ function parseCSV(text) {
     ma20:      ['EMA_20','ema_20','EMA20','MA20'],
     earn:      ['Days To Earnings','DaysToEarnings','daystoearnings','days to earnings','EarningsOffset','DaysToEarn'],
     hi52:      ['High52W','high52w','52WHigh','Hi52'],
+    ema20:     ['EMA20','ema20','EMA_20'],
     avgvol:    ['AvgVol20','avgvol20','AvgVolume20','AverageVolume20'],
     sector:    ['Sector','sector'],
     industry:  ['Industry','industry'],
@@ -6832,6 +6849,7 @@ function parseCSV(text) {
       ma20:       pf('ma20'),
       earnOffset: (idx.earn!==undefined && idx.earn>=0) ? parseEarnOffset(cols[idx.earn]) : null,
       hi52:       pf('hi52'),
+      ema20:      pf('ema20'),
       avgvol:     pf('avgvol'),
     });
   }
@@ -6975,6 +6993,7 @@ async function doImportCSV(stockId) {
     ma20:       r2(row.ma20),
     earnOffset: row.earnOffset ?? null,
     hi52:       row.hi52,
+    ema20:      row.ema20,
   }));
 
   // ThinkorSwim's export gives raw daily volume, not a pre-computed average —
@@ -7006,6 +7025,7 @@ async function doImportCSV(stockId) {
     signalLine: latest.signalLine ?? s.signalLine,
     atr:        latest.atr        ?? s.atr,
     hi52:       latest.hi52       ?? s.hi52,
+    ema20:      latest.ema20      ?? s.ema20,
     analyzed:   latest.date       || s.analyzed,
     earningsDate: (latest.earnOffset!=null ? earnDateFromOffset(latest.earnOffset, latest.date) : s.earningsDate) ?? null,
     snapshots:  cleanRows,
