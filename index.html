@@ -2007,7 +2007,10 @@ function renderCleanDetail(s){
       </div>
       <div style="text-align:right;"><div style="color:${C.text};font-size:18px;font-weight:600;">${fmtP(s.price)}</div>
       <div style="color:${(s.pct||0)>=0?C.green:C.red};font-size:12px;margin-bottom:4px;">${(s.pct||0)>=0?'▲':'▼'} ${Math.abs(s.pct||0).toFixed(2)}%</div>
-      <button onclick="openSimpleMentor('${s.id}')" style="background:${C.cardHigh};color:${C.purple};border:1px solid ${C.purple}44;border-radius:8px;padding:4px 9px;font-size:11px;font-weight:700;cursor:pointer;">Mentor</button></div>
+      <div style="display:flex;gap:6px;justify-content:flex-end;">
+        ${((s.snapshots||[]).filter(x=>x&&x.date).length>=2) ? `<button onclick="openBacktest('${s.id}')" style="background:${C.cardHigh};color:${C.teal};border:1px solid ${C.teal}44;border-radius:8px;padding:4px 9px;font-size:11px;font-weight:700;cursor:pointer;">📊 Backtest</button>` : ''}
+        <button onclick="openSimpleMentor('${s.id}')" style="background:${C.cardHigh};color:${C.purple};border:1px solid ${C.purple}44;border-radius:8px;padding:4px 9px;font-size:11px;font-weight:700;cursor:pointer;">Mentor</button>
+      </div>
     </div>
 
     <div style="padding:18px 20px 22px;text-align:center;border-bottom:1px solid ${C.border};">
@@ -2080,6 +2083,10 @@ function renderCleanDetail(s){
         <div style="color:${whatNext.c};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">What to do next</div>
         <div style="color:#D5DAE5;font-size:12.5px;line-height:1.55;">${whatNext.t}</div>
       </div>
+      ${ps.reversalStatus!=='n/a' ? `<div style="background:${(ps.reversalStatus==='warning'?C.red:(ps.reversalStatus==='caution'?C.yellow:C.green))}1A;border-radius:12px;padding:12px 14px;margin-bottom:10px;">
+        <div style="color:${ps.reversalStatus==='warning'?C.red:(ps.reversalStatus==='caution'?C.yellow:C.green)};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">${ps.reversalStatus==='warning'?'⚠ Reversal signs':(ps.reversalStatus==='caution'?'◐ Watching for reversal':'✓ No reversal signs')}</div>
+        <div style="color:#D5DAE5;font-size:12.5px;line-height:1.55;">${ps.reversalNote}</div>
+      </div>` : ''}
       <div style="background:${C.cardHigh};border-radius:12px;padding:14px;">
         <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px;">Managing the trade</div>
         <div style="display:flex;justify-content:space-between;padding:5px 0;"><span style="color:#9AA0B0;font-size:12.5px;">Sell if it drops to (stop)</span><span style="color:${C.red};font-size:12.5px;font-weight:700;">${ps.trailExit!=null?fmtP(ps.trailExit):'—'}</span></div>
@@ -2090,10 +2097,7 @@ function renderCleanDetail(s){
           <div style="color:${ps.momentumCall==='warning'?C.red:(ps.momentumCall==='onTrack'?C.green:C.yellow)};font-size:12.5px;line-height:1.55;">${ps.momentumNote}</div>
           ${ps.momentumAccuracy!=null ? `<div style="color:${C.textMuted};font-size:11px;margin-top:4px;">This check has been right ${(ps.momentumAccuracy*100).toFixed(0)}% of the time on ${s.ticker} (${ps.momentumEvaluable} past trades)</div>` : ''}
         </div>` : ''}
-        ${ps.reversalStatus!=='n/a' ? `<div style="border-top:1px solid ${C.border};margin-top:6px;padding-top:8px;">
-          <div style="color:${ps.reversalStatus==='warning'?C.red:(ps.reversalStatus==='caution'?C.yellow:C.green)};font-size:12.5px;font-weight:700;">${ps.reversalStatus==='warning'?'⚠ Reversal signs':(ps.reversalStatus==='caution'?'◐ Watching for reversal':'✓ No reversal signs')}</div>
-          <div style="color:${ps.reversalStatus==='warning'?C.red:C.textSub};font-size:12.5px;line-height:1.55;margin-top:2px;">${ps.reversalNote}</div>
-        </div>` : ''}
+       
         ${ps.reversalWarning ? `<div style="border-top:1px solid ${C.border};margin-top:6px;padding-top:8px;">
           <div style="color:${C.red};font-size:12.5px;font-weight:700;">⚠ Reversal signs</div>
           <div style="color:${C.red};font-size:12.5px;line-height:1.55;margin-top:2px;">${ps.reversalNote}</div>
