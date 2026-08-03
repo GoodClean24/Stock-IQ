@@ -2007,10 +2007,7 @@ function renderCleanDetail(s){
       </div>
       <div style="text-align:right;"><div style="color:${C.text};font-size:18px;font-weight:600;">${fmtP(s.price)}</div>
       <div style="color:${(s.pct||0)>=0?C.green:C.red};font-size:12px;margin-bottom:4px;">${(s.pct||0)>=0?'▲':'▼'} ${Math.abs(s.pct||0).toFixed(2)}%</div>
-      <div style="display:flex;gap:6px;justify-content:flex-end;">
-        ${((s.snapshots||[]).filter(x=>x&&x.date).length>=2) ? `<button onclick="openBacktest('${s.id}')" style="background:${C.cardHigh};color:${C.teal};border:1px solid ${C.teal}44;border-radius:8px;padding:4px 9px;font-size:11px;font-weight:700;cursor:pointer;">📊 Backtest</button>` : ''}
-        <button onclick="openSimpleMentor('${s.id}')" style="background:${C.cardHigh};color:${C.purple};border:1px solid ${C.purple}44;border-radius:8px;padding:4px 9px;font-size:11px;font-weight:700;cursor:pointer;">Mentor</button>
-      </div>
+      <button onclick="openSimpleMentor('${s.id}')" style="background:${C.cardHigh};color:${C.purple};border:1px solid ${C.purple}44;border-radius:8px;padding:4px 9px;font-size:11px;font-weight:700;cursor:pointer;">Mentor</button></div>
     </div>
 
     <div style="padding:18px 20px 22px;text-align:center;border-bottom:1px solid ${C.border};">
