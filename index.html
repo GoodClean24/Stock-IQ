@@ -6678,14 +6678,14 @@ function previewScanCSV(input) {
         <div style="background:${C.cardHigh};border-radius:10px;padding:12px;margin-bottom:16px;max-height:260px;overflow-y:auto;">
           ${preview}${withDupFlag.length>8?`<div style="color:${C.textMuted};font-size:11px;padding-top:8px;">+ ${withDupFlag.length-8} more</div>`:''}
         </div>
-        ${withDupFlag.length-pendingScanNewCount>0?`<div style="background:${C.yellowDim};border-radius:10px;padding:12px;margin-bottom:16px;border:1px solid ${C.yellow}33;"><span style="color:${C.textSub};font-size:12px;line-height:1.5;">${withDupFlag.length-pendingScanNewCount} ticker${withDupFlag.length-pendingScanNewCount===1?'':'s'} already on your list — skipped, not duplicated.</span></div>`:''}
+        ${withDupFlag.length-pendingScanNewCount>0?`<div style="background:${C.tealDim};border-radius:10px;padding:12px;margin-bottom:16px;border:1px solid ${C.teal}33;"><span style="color:${C.text};font-size:12px;line-height:1.5;">${withDupFlag.length-pendingScanNewCount} ticker${withDupFlag.length-pendingScanNewCount===1?'':'s'} already on your list — today's numbers will update them, not duplicate.</span></div>`:''}
         <div style="display:flex;align-items:center;gap:8px;background:${pendingScanDate?C.green+'12':'#E8A31712'};border-radius:10px;padding:10px 12px;margin-bottom:16px;">
           <span style="color:${pendingScanDate?C.green:'#E8A317'};font-size:13px;">${pendingScanDate?'✓':'○'}</span>
           <span style="color:${pendingScanDate?'#8FE0B8':'#E8B45C'};font-size:12px;">${pendingScanDate?`Dated ${pendingScanDate} (read from filename)`:'No date in filename — using today. Add a date like 2026-07-28 to the filename to set it.'}</span>
         </div>
         <div style="display:flex;gap:10px;">
           <button onclick="closeAllOverlays()" style="flex:1;padding:13px;border-radius:12px;border:1px solid ${C.border};background:none;color:${C.textSub};font-size:14px;font-weight:700;cursor:pointer;">Cancel</button>
-          <button onclick="doBulkImportScan()" style="flex:2;padding:13px;border-radius:12px;border:none;background:${C.teal};color:#000;font-size:14px;font-weight:900;cursor:pointer;" ${pendingScanNewCount===0?'disabled':''}>Import ${pendingScanNewCount} New ✓</button>
+          <button onclick="doBulkImportScan()" style="flex:2;padding:13px;border-radius:12px;border:none;background:${C.teal};color:#000;font-size:14px;font-weight:900;cursor:pointer;" ${pendingScanRows.length===0?'disabled':''}>Import ${pendingScanNewCount} New, Update ${pendingScanRows.length-pendingScanNewCount} ✓</button>
         </div>
       </div>`);
   };
@@ -6695,7 +6695,10 @@ async function doBulkImportScan() {
   closeAllOverlays();
   const todayStr = pendingScanDate || today();
   const toCreate = pendingScanRows.filter(r=>!r.isDup && r.ticker);
+  const toUpdate = pendingScanRows.filter(r=>r.isDup && r.ticker);
   const created = [];
+  const updatedList = [];
+
   for(const r of toCreate) {
     const vals = {price:String(r.price||''), ma50:String(r.ma50||''), ma200:String(r.ma200||''), atr:String(r.atr||''), hi52:String(r.hi52||'')};
     const fit = suggestHoldType(vals);
@@ -6722,10 +6725,51 @@ async function doBulkImportScan() {
     };
     created.push(newStock);
   }
+
+  for(const r of toUpdate) {
+    const s = stocks.find(x=>String(x.ticker).toUpperCase()===r.ticker);
+    if(!s) continue;
+    const prevPrice = s.price;
+    const snap = {date:todayStr, price:r.price, rsi:r.rsi, vol:r.vol, avgvol:r.avgvol, ma20:r.ma20, ma50:r.ma50, ma200:r.ma200, macdLine:r.macdLine, signalLine:r.signalLine, atr:r.atr};
+    const existingSnaps = (s.snapshots||[]).filter(sn=>sn.date!==todayStr); // replace same-day, don't duplicate
+    const updated = {
+      ...s,
+      price: r.price ?? s.price,
+      change: (r.price!=null && prevPrice) ? r.price-prevPrice : s.change,
+      pct: (r.price!=null && prevPrice) ? ((r.price/prevPrice-1)*100) : s.pct,
+      rsi: r.rsi ?? s.rsi,
+      vol: r.vol ?? s.vol,
+      avgvol: r.avgvol ?? s.avgvol,
+      ma20: r.ma20 ?? s.ma20,
+      ma50: r.ma50 ?? s.ma50,
+      ma200: r.ma200 ?? s.ma200,
+      macdLine: r.macdLine ?? s.macdLine,
+      signalLine: r.signalLine ?? s.signalLine,
+      atr: r.atr ?? s.atr,
+      hi52: r.hi52 ?? s.hi52,
+      lo52: r.lo52 ?? s.lo52,
+      ema20: r.ma20 ?? s.ema20,
+      sector: r.sector ?? s.sector,
+      industry: r.industry ?? s.industry,
+      earningsDate: r.earnOffset!=null ? earnDateFromOffset(r.earnOffset, todayStr) : s.earningsDate,
+      analyzed: todayStr,
+      snapshots: [...existingSnaps, snap],
+    };
+    updatedList.push(updated);
+  }
+
+  stocks = stocks.map(s=>{
+    const match = updatedList.find(u=>u.id===s.id);
+    return match || s;
+  });
   stocks = [...created, ...stocks];
+
   pendingScanRows = []; pendingScanSources = []; pendingScanNewCount = 0; pendingScanDate = null;
   renderHome();
   for(const s of created) {
+    try { await fbSaveStock(s); } catch(e) { console.error(e); }
+  }
+  for(const s of updatedList) {
     try { await fbSaveStock(s); } catch(e) { console.error(e); }
   }
   showSaveStatus('saved');
