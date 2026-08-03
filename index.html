@@ -1667,6 +1667,7 @@ function positionStats(s){
   }
 
   return {hi, trailExit, lockedProfit, distToExit, distToExitTotal, distPct, pl, plPct, days, macdUp, macdFading, macdFlat, aboveMAs, lockedIn, status, statusColor, momentumCall, momentumNote, momentumAccuracy, momentumEvaluable, reversalWarning, reversalNote};
+}
 // ── Paper-trade tracking ──────────────────────────────────────────────────
 function openBuyScreen(id){
   const s = stocks.find(x=>String(x.id)===String(id)); if(!s) return;
