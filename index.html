@@ -976,14 +976,15 @@ function computeContrarianVerdict(s){
   return {state: buy?'BUY':'WAIT', distHigh, atrPct, volRatio, distMA200};
 }
 
+const TREND_SECTORS = ['Industrials', 'Consumer Cyclical', 'Consumer Discretionary'];
 function computeVerdictForTicker(s){
-  if(s.sector==='Industrials') return {...computeSignalVerdict(s), strategy:'Trend'};
+  if(TREND_SECTORS.includes(s.sector)) return {...computeSignalVerdict(s), strategy:'Trend'};
   return {...computeContrarianVerdict(s), strategy:'Dip Buy'};
 }
 
 function getStrategyFor(s){
   if(s.position && s.position.strategy) return s.position.strategy;
-  return s.sector==='Industrials' ? 'Trend' : 'Dip Buy';
+  return TREND_SECTORS.includes(s.sector) ? 'Trend' : 'Dip Buy';
 }
 
 function computeSimpleAction(s) {
