@@ -6790,6 +6790,7 @@ function parseCSV(text) {
     ma20:      ['EMA_20','ema_20','EMA20','MA20'],
     earn:      ['Days To Earnings','DaysToEarnings','daystoearnings','days to earnings','EarningsOffset','DaysToEarn'],
     hi52:      ['High52W','high52w','52WHigh','Hi52'],
+    ema20live: ['EMA20','ema20','EMA_20'],
     ema20:     ['EMA20','ema20','EMA_20'],
     avgvol:    ['AvgVol20','avgvol20','AvgVolume20','AverageVolume20'],
     sector:    ['Sector','sector'],
@@ -6849,6 +6850,7 @@ function parseCSV(text) {
       ma20:       pf('ma20'),
       earnOffset: (idx.earn!==undefined && idx.earn>=0) ? parseEarnOffset(cols[idx.earn]) : null,
       hi52:       pf('hi52'),
+      ema20live:  pf('ema20live'),
       ema20:      pf('ema20'),
       avgvol:     pf('avgvol'),
     });
@@ -6993,6 +6995,7 @@ async function doImportCSV(stockId) {
     ma20:       r2(row.ma20),
     earnOffset: row.earnOffset ?? null,
     hi52:       row.hi52,
+    ema20live:  row.ema20live,
     ema20:      row.ema20,
   }));
 
@@ -7025,6 +7028,7 @@ async function doImportCSV(stockId) {
     signalLine: latest.signalLine ?? s.signalLine,
     atr:        latest.atr        ?? s.atr,
     hi52:       latest.hi52       ?? s.hi52,
+    ema20:      latest.ema20live  ?? s.ema20,
     ema20:      latest.ema20      ?? s.ema20,
     analyzed:   latest.date       || s.analyzed,
     earningsDate: (latest.earnOffset!=null ? earnDateFromOffset(latest.earnOffset, latest.date) : s.earningsDate) ?? null,
