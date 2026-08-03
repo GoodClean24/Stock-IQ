@@ -1667,18 +1667,25 @@ function positionStats(s){
   // Exit-reversal check: only meaningful once a position has real gains.
   // All three conditions together — not any one alone — is what real
   // reversals have looked like historically.
-  let reversalWarning = false, reversalNote = '';
+  let reversalWarning = false, reversalNote = '', reversalStatus = 'n/a';
   if(pl>0 && s.price!=null && s.ema20!=null && s.rsi!=null && macdGap!=null){
     const belowEMA20 = s.price < s.ema20;
     const rsiWeak = s.rsi <= 35;
     const macdNegative = macdGap < -deadband;
+    const signsCount = [belowEMA20, rsiWeak, macdNegative].filter(Boolean).length;
     if(belowEMA20 && rsiWeak && macdNegative){
-      reversalWarning = true;
+      reversalWarning = true; reversalStatus = 'warning';
       reversalNote = `Price below its 20-day average, RSI at ${s.rsi.toFixed(0)}, MACD turning negative — this combination has usually meant a real reversal, not just noise.`;
+    } else if(signsCount>=1){
+      reversalStatus = 'caution';
+      reversalNote = `${signsCount} of 3 reversal signs present (price vs 20-day: ${belowEMA20?'below':'above'}, RSI ${s.rsi.toFixed(0)}, MACD ${macdNegative?'negative':'positive'}) — not a full warning yet.`;
+    } else {
+      reversalStatus = 'clear';
+      reversalNote = `No reversal signs — price above its 20-day average, RSI ${s.rsi.toFixed(0)}, MACD still positive.`;
     }
   }
 
-  return {hi, trailExit, lockedProfit, distToExit, distToExitTotal, distPct, pl, plPct, days, macdUp, macdFading, macdFlat, aboveMAs, lockedIn, status, statusColor, momentumCall, momentumNote, momentumAccuracy, momentumEvaluable, reversalWarning, reversalNote};
+  return {hi, trailExit, lockedProfit, distToExit, distToExitTotal, distPct, pl, plPct, days, macdUp, macdFading, macdFlat, aboveMAs, lockedIn, status, statusColor, momentumCall, momentumNote, momentumAccuracy, momentumEvaluable, reversalWarning, reversalNote, reversalStatus};
 }
 // ── Paper-trade tracking ──────────────────────────────────────────────────
 function openBuyScreen(id){
@@ -2082,9 +2089,9 @@ function renderCleanDetail(s){
           <div style="color:${ps.momentumCall==='warning'?C.red:(ps.momentumCall==='onTrack'?C.green:C.yellow)};font-size:12.5px;line-height:1.55;">${ps.momentumNote}</div>
           ${ps.momentumAccuracy!=null ? `<div style="color:${C.textMuted};font-size:11px;margin-top:4px;">This check has been right ${(ps.momentumAccuracy*100).toFixed(0)}% of the time on ${s.ticker} (${ps.momentumEvaluable} past trades)</div>` : ''}
         </div>` : ''}
-        ${ps.reversalWarning ? `<div style="border-top:1px solid ${C.border};margin-top:6px;padding-top:8px;">
-          <div style="color:${C.red};font-size:12.5px;font-weight:700;">⚠ Reversal signs</div>
-          <div style="color:${C.red};font-size:12.5px;line-height:1.55;margin-top:2px;">${ps.reversalNote}</div>
+        ${ps.reversalStatus!=='n/a' ? `<div style="border-top:1px solid ${C.border};margin-top:6px;padding-top:8px;">
+          <div style="color:${ps.reversalStatus==='warning'?C.red:(ps.reversalStatus==='caution'?C.yellow:C.green)};font-size:12.5px;font-weight:700;">${ps.reversalStatus==='warning'?'⚠ Reversal signs':(ps.reversalStatus==='caution'?'◐ Watching for reversal':'✓ No reversal signs')}</div>
+          <div style="color:${ps.reversalStatus==='warning'?C.red:C.textSub};font-size:12.5px;line-height:1.55;margin-top:2px;">${ps.reversalNote}</div>
         </div>` : ''}
         ${ps.reversalWarning ? `<div style="border-top:1px solid ${C.border};margin-top:6px;padding-top:8px;">
           <div style="color:${C.red};font-size:12.5px;font-weight:700;">⚠ Reversal signs</div>
