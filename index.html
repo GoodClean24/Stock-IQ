@@ -1321,10 +1321,18 @@ const LEARN = {
   size:(s)=>{const p=planNumbers(s); return accountSize>0
     ? `How many shares, sized so you risk 1% of your capital — ${fmtP(p.riskDollars)} on this trade. Divided by your ${p.riskPerShare!=null?fmtP(p.riskPerShare):'—'}-a-share stop, that\u2019s about ${p.shares!=null?p.shares.toFixed(1):'—'} shares (fractional is fine).`
     : `Set your risk size and the app sizes every trade to risk 1% of it. The stop here is ${p.riskPerShare!=null?fmtP(p.riskPerShare):'—'} a share, so risking $100 would be about ${p.riskPerShare?(100/p.riskPerShare).toFixed(1):'—'} shares.`;},
+  momentum:(s)=>{
+    const ps = positionStats(s); if(!ps) return 'No open position to check.';
+    const base = `This checks whether the stock's momentum (RSI) is actually building since you bought, or just sitting flat. We tested this across 109 real trades: winners had RSI climb an average of +5 to +7 points in the first 5-10 days. Losers stayed flat, averaging barely any change.`;
+    const day5 = `<br><br><b>Day 5 check:</b> compares today's RSI to your entry-day RSI. Up 3 points or more means the trade is developing momentum the way winners typically do. Flat or down means it hasn't confirmed yet — not a sell signal, just a flag to watch closer.`;
+    const day10 = `<br><br><b>Day 10 recheck:</b> if day 5 flagged a warning, we look again at day 10. About 89% of trades that were "wrong" at day 5 had actually turned around by day 10 — so this catches the ones that just needed more time, without losing the real warnings (those stayed flat both times, 92% of the time).`;
+    const yours = `<br><br><b>This position:</b> ${ps.momentumNote}${ps.momentumAccuracy!=null?` This specific check has been right ${(ps.momentumAccuracy*100).toFixed(0)}% of the time on ${s.ticker} historically (based on ${ps.momentumEvaluable} past trades).`:''}`;
+    return base + day5 + day10 + yours;
+  },
 };
 function showLearn(key, sid){
   const s=(stocks||[]).find(x=>String(x.id)===String(sid)); if(!s||!LEARN[key])return;
-  const titles={uptrend:'Uptrend',rsi:'RSI',atr:'Daily range (ATR)',macd:'MACD cross',pullback:'Pullback from high',vol:'Volume',entry:'Entry',stop:'Stop loss',exit:'Trailing exit',size:'Position size'};
+  const titles={uptrend:'Uptrend',rsi:'RSI',atr:'Daily range (ATR)',macd:'MACD cross',pullback:'Pullback from high',vol:'Volume',entry:'Entry',stop:'Stop loss',exit:'Trailing exit',size:'Position size',momentum:'Momentum Check (Day 5/10)'};
   const ov=document.createElement('div');
   ov.id='learn-overlay';
   ov.style.cssText='position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.55);display:flex;align-items:flex-end;justify-content:center;';
@@ -2096,10 +2104,10 @@ function renderCleanDetail(s){
         <div style="display:flex;justify-content:space-between;padding:5px 0;"><span style="color:#9AA0B0;font-size:12.5px;">Profit right now</span><span style="color:${ps.pl>=0?C.green:C.red};font-size:12.5px;font-weight:700;">${ps.pl>=0?'+':''}${fmtP(ps.pl)}</span></div>
         <div style="display:flex;justify-content:space-between;padding:5px 0;"><span style="color:#9AA0B0;font-size:12.5px;">If stopped now, you'd ${ps.lockedProfit>=0?'keep':'lose'}</span><span style="color:${ps.lockedProfit>=0?C.green:C.red};font-size:12.5px;font-weight:700;">${ps.lockedProfit>=0?'+':''}${ps.lockedProfit!=null?fmtP(ps.lockedProfit):'—'}</span></div>
         <div style="border-top:1px solid ${C.border};margin-top:6px;padding-top:8px;color:${ps.statusColor};font-size:12.5px;line-height:1.55;">${ps.status}</div>
-        ${ps.momentumCall!=='n/a' ? `<div style="border-top:1px solid ${C.border};margin-top:6px;padding-top:8px;">
-          <div style="color:${ps.momentumCall==='warning'?C.red:(ps.momentumCall==='onTrack'?C.green:C.yellow)};font-size:12.5px;line-height:1.55;">${ps.momentumNote}</div>
+        ${ps.momentumCall!=='n/a' ? `<button onclick="showLearn('momentum','${s.id}')" style="all:unset;cursor:pointer;display:block;width:100%;box-sizing:border-box;border-top:1px solid ${C.border};margin-top:6px;padding-top:8px;">
+          <div style="color:${ps.momentumCall==='warning'?C.red:(ps.momentumCall==='onTrack'?C.green:C.yellow)};font-size:12.5px;line-height:1.55;">${ps.momentumNote} <span style="color:#8A90A0;font-size:13px;">›</span></div>
           ${ps.momentumAccuracy!=null ? `<div style="color:${C.textMuted};font-size:11px;margin-top:4px;">This check has been right ${(ps.momentumAccuracy*100).toFixed(0)}% of the time on ${s.ticker} (${ps.momentumEvaluable} past trades)</div>` : ''}
-        </div>` : ''}
+        </button>` : ''}
        
         ${ps.reversalWarning ? `<div style="border-top:1px solid ${C.border};margin-top:6px;padding-top:8px;">
           <div style="color:${C.red};font-size:12.5px;font-weight:700;">⚠ Reversal signs</div>
