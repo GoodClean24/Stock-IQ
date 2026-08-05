@@ -1372,7 +1372,10 @@ function showTradeDay5Detail(ticker, entryDate, entryRSI, rsiDay5, rsiDay10, ret
         <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid ${C.border};"><span style="color:#9AA0B0;font-size:12.5px;">Entry RSI</span><span style="color:${C.text};font-size:12.5px;font-weight:700;">${entryRSI!=null?entryRSI.toFixed(1):'\u2014'}</span></div>
         <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid ${C.border};"><span style="color:#9AA0B0;font-size:12.5px;">Day 5 RSI</span><span style="color:${C.text};font-size:12.5px;font-weight:700;">${rsiDay5!=null?rsiDay5.toFixed(1)+' ('+(change5>=0?'+':'')+change5.toFixed(1)+')':'\u2014'}</span></div>
         ${rsiDay10!=null?`<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid ${C.border};"><span style="color:#9AA0B0;font-size:12.5px;">Day 10 RSI</span><span style="color:${C.text};font-size:12.5px;font-weight:700;">${rsiDay10.toFixed(1)} (${change10>=0?'+':''}${change10.toFixed(1)})</span></div>`:''}
-        <div style="display:flex;justi
+        <div style="display:flex;justify-content:space-between;padding:6px 0;"><span style="color:#9AA0B0;font-size:12.5px;">Actual result</span><span style="color:${won?C.green:C.red};font-size:12.5px;font-weight:700;">${won?'+':''}${(ret*100).toFixed(1)}%</span></div>
+      </div>
+    </div>`);
+}
 function setPlannedInvest(id, val){
   const n = parseFloat(String(val).replace(/[^0-9.]/g,''));
   const s = stocks.find(x=>String(x.id)===String(id)); if(!s) return;
@@ -1964,12 +1967,7 @@ function openSimpleMentor(id){
 
       ${sect('What the app sees, and how to spot it yourself', strategy==='Dip Buy' ? `
         ${teach(mk(pullbackOk),'18%+ below 52-week high', `Price is ${distHighPct!=null?distHighPct.toFixed(0)+'%':'—'} off its 52-week high (${s.hi52!=null?fmtP(s.hi52):'—'}). We want a real dislocation, not a normal wiggle.`, `Add a High52W study or check the 1-year high on the chart. Yours: ${yn(pullbackOk)}.`)}
-        ${teach(mk(atrFloorOk),'High volatility (ATR 3.3%+)', `Daily range is ${atrPct!=null?atrPct.toFixed(1)+'%':'—'} of price — real volatility helps confirm this is a genuine dislocation, not a quiet drift.`, `Add an ATR or ATRPercentage study. You want 3.3% or higher. Yours: ${atrPct!=null?atrPct.toFixed(1)+'%':'—'}.`)}
-        ${teach(mk(volOk),'Volume at/above 20-day avg', `Volume is ${volRatioNow!=null?volRatioNow.toFixed(2)+'x':'—'} the 20-day average — confirms people are stepping back in, not just watching it fall.`, `Compare today's volume to the 20-day average volume study. Yours: ${yn(volOk)}.`)}
-        ${teach(mk(rsiCeilOk),'RSI 55 or under', `RSI is ${s.rsi!=null?s.rsi.toFixed(0):'—'}. At or under 55 means it's not overbought — there's still room for this to be an entry, not a chase.`, `The RSI panel under the chart. You want 55 or under. Yours: ${s.rsi!=null?s.rsi.toFixed(0):'—'}.`)}
-        ${teach(mk(upOk),'Still above 200-day (uptrend intact)', `Price ${fmtP(s.price)} is ${upOk?'above':'not above'} its 200-day (${s.ma200!=null?fmtP(s.ma200):'—'}) — the pullback hasn\u2019t broken the longer trend.`, `On the main chart, is price above the 200-day line? Yours: ${yn(upOk)}.`)}
-      ` : `
-        ${teach(mk(upOk),'Uptrend', `Price ${fmtP(s.price)} is ${upOk?'above':'not above'} its 200-day (${s.ma200!=null?fmtP(s.ma200):'—'}), and the 50-day is ${s.ma50>s.ma200?'above':'below'} the 200. We only trade with the trend.`, `On the main chart, look at the two moving-average lines. Is price above the orange (200-day) and blue (50-day), with blue above orange? Yours: ${yn(upOk)}.`)}
+a50>s.ma200?'above':'below'} the 200. We only trade with the trend.`, `On the main chart, look at the two moving-average lines. Is price above the orange (200-day) and blue (50-day), with blue above orange? Yours: ${yn(upOk)}.`)}
         ${teach(mk(rsiOk),'RSI 45–60', `RSI is ${s.rsi!=null?s.rsi.toFixed(0):'—'}. In the 45–60 pocket means it pulled back but isn\u2019t falling or overheated.`, `The RSI panel under the chart. You want the reading between 45 and 60. Yours: ${s.rsi!=null?s.rsi.toFixed(0):'—'}.`)}
         ${teach(mk(atrOk),'Daily range (ATR 4–8%)', `Its daily range is ${atrPct!=null?atrPct.toFixed(1)+'%':'—'} of price — ${atrOk?'enough to swing, not too wild':'outside the tradeable band'}.`, `Add an ATR or ATRPercentage study. You want 4–8%. Yours: ${atrPct!=null?atrPct.toFixed(1)+'%':'—'}.`)}
         ${teach(mk(macdUp),'MACD cross (the trigger)', `MACD is ${macdUp?'above':'below'} its signal line (${s.macdLine!=null?s.macdLine.toFixed(2):'—'} vs ${s.signalLine!=null?s.signalLine.toFixed(2):'—'}). The cross up is the \u201cgo.\u201d`, `The MACD panel at the very bottom, two lines. You want the faster line to cross ABOVE the slower one. Yours: ${yn(macdUp)}.`)}
