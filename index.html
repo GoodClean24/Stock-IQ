@@ -1473,15 +1473,15 @@ function tickerBacktest(s, strategyOverride){
     }
     if(!isBuy) continue;
     const entry=sn.price, atr=sn.atr; if(!atr||atr<=0) continue;
-    const initStop=entry-2*atr; let hh=(sn.price!=null?sn.price:entry);
+    const initStop=entry-2*atr; let hh=(sn.high!=null?sn.high:entry);
     const entryRSI = sn.rsi;
     let rsiDay5=null, rsiDay10=null;
     let exitPrice=null, exitIdx=null;
     for(let j=i+1;j<snaps.length;j++){
       if(j-i===5) rsiDay5 = snaps[j].rsi;
       if(j-i===10) rsiDay10 = snaps[j].rsi;
-      const b=snaps[j], lo=(b.low!=null?b.low:b.price);
-      if(b.price!=null) hh=Math.max(hh,b.price);
+      const b=snaps[j], hi=(b.high!=null?b.high:b.price), lo=(b.low!=null?b.low:b.price);
+      if(hi!=null) hh=Math.max(hh,hi);
       const trail=Math.max(initStop, hh-3*atr);
       if(lo!=null && lo<=trail){ exitPrice=trail; exitIdx=j; break; }
     }
@@ -1660,7 +1660,7 @@ function positionStats(s){
   const snaps = (s.snapshots||[]).filter(x=>x&&x.date);
   const entryDate = new Date(pos.date);
   let hi = pos.entry;
-  snaps.forEach(sn=>{ if(new Date(sn.date)>=entryDate && sn.price!=null){ hi=Math.max(hi,sn.price); } });
+  snaps.forEach(sn=>{ if(new Date(sn.date)>=entryDate){ const h = sn.high!=null?sn.high:sn.price; if(h!=null) hi=Math.max(hi,h); } });
   hi = Math.max(hi, s.price);
   const atr = s.atr;
   const trailExit = atr!=null ? hi - 3*atr : null;
