@@ -1568,7 +1568,7 @@ function openBacktest(id){
     <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid ${C.border};">
       <div><div style="color:${C.text};font-size:12.5px;font-weight:600;">${fmtP(t.entry)} → ${fmtP(t.exit)}</div>
       <div style="color:${C.textMuted};font-size:10px;">${t.entryDate} → ${t.exitDate} · ${t.held}d</div>
-      ${d5?`<div style="color:${d5.color};font-size:10px;margin-top:2px;">${d5.text}${matched!=null?(matched?' ✓':' ✗'):''}</div>`:''}
+      ${d5?`<div onclick="event.stopPropagation();showTradeDay5Detail('${s.ticker}','${t.entryDate}',${t.entryRSI!=null?t.entryRSI:'null'},${t.rsiDay5!=null?t.rsiDay5:'null'},${t.rsiDay10!=null?t.rsiDay10:'null'},${t.ret},'${t.day5Call}')" style="color:${d5.color};font-size:10px;margin-top:2px;cursor:pointer;text-decoration:underline;text-underline-offset:2px;">${d5.text}${matched!=null?(matched?' ✓':' ✗'):''}</div>`:''}
       </div>
       <span style="color:${t.ret>=0?C.green:C.red};font-size:14px;font-weight:800;">${pct(t.ret)}</span>
     </div>`;
