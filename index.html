@@ -1338,6 +1338,36 @@ function showLearn(key, sid){
   </div>`;
   document.body.appendChild(ov);
 }
+function showTradeDay5Detail(ticker, entryDate, entryRSI, rsiDay5, rsiDay10, ret, day5Call){
+  const change5 = (rsiDay5!=null && entryRSI!=null) ? (rsiDay5-entryRSI) : null;
+  const change10 = (rsiDay10!=null && entryRSI!=null) ? (rsiDay10-entryRSI) : null;
+  const won = ret>=0;
+  let callLabel, callColor, callExplain;
+  if(day5Call==='stayIn'){ callLabel='On track'; callColor=C.green; callExplain='RSI climbed 3+ points by day 5 — the momentum winners typically show.'; }
+  else if(day5Call==='warning'){ callLabel='Warning'; callColor=C.red; callExplain='RSI stayed flat or fell by day 5 (and, if checked, still hadn\u2019t recovered by day 10) — the pattern losers typically show.'; }
+  else if(day5Call==='recovered'){ callLabel='Warning \u2192 Recovered'; callColor=C.yellow; callExplain='RSI was flat at day 5 (a warning), but climbed 3+ points by day 10 — it just needed more time before confirming.'; }
+  else { callLabel='n/a'; callColor=C.textMuted; callExplain='This trade closed before day 5, so there wasn\u2019t enough time for the check to apply.'; }
+  const matched = (day5Call==='stayIn'||day5Call==='recovered') ? won : (day5Call==='warning' ? !won : null);
+
+  showModal(`
+    <div style="background:${C.card};border-radius:20px;padding:22px;border:1px solid ${C.border};">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+        <div style="color:${C.text};font-size:16px;font-weight:800;">${ticker} \u2014 ${entryDate}</div>
+        <button onclick="closeAllOverlays()" style="background:none;border:none;color:${C.textSub};font-size:22px;cursor:pointer;line-height:1;">\u00d7</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+        <span style="background:${callColor};color:#0D0F16;font-size:12px;font-weight:800;padding:4px 12px;border-radius:8px;">${callLabel}</span>
+        ${matched!=null?`<span style="color:${matched?C.green:C.red};font-size:12px;font-weight:700;">${matched?'\u2713 Called it right':'\u2717 Missed'}</span>`:''}
+      </div>
+      <div style="color:#D5DAE5;font-size:13px;line-height:1.6;margin-bottom:14px;">${callExplain}</div>
+      <div style="background:${C.cardHigh};border-radius:12px;padding:14px;">
+        <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid ${C.border};"><span style="color:#9AA0B0;font-size:12.5px;">Entry RSI</span><span style="color:${C.text};font-size:12.5px;font-weight:700;">${entryRSI!=null?entryRSI.toFixed(1):'\u2014'}</span></div>
+        <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid ${C.border};"><span style="color:#9AA0B0;font-size:12.5px;">Day 5 RSI</span><span style="color:${C.text};font-size:12.5px;font-weight:700;">${rsiDay5!=null?rsiDay5.toFixed(1)+' ('+(change5>=0?'+':'')+change5.toFixed(1)+')':'\u2014'}</span></div>
+        ${rsiDay10!=null?`<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid ${C.border};"><span style="color:#9AA0B0;font-size:12.5px;">Day 10 RSI</span><span style="color:${C.text};font-size:12.5px;font-weight:700;">${rsiDay10.toFixed(1)} (${change10>=0?'+':''}${change10.toFixed(1)})</span></div>`:''}
+        <div style="display:flex;justify-content:space-between;padding:6px 0;"><span style="color:#9AA0B0;font-size:12.5px;">Actual result</span><span style="color:${won?C.green:C.red};font-size:12.5px;font-weight:700;">${won?'+':''}${(ret*100).toFixed(1)}%</span></div>
+      </div>
+    </div>`);
+}
 function setPlannedInvest(id, val){
   const n = parseFloat(String(val).replace(/[^0-9.]/g,''));
   const s = stocks.find(x=>String(x.id)===String(id)); if(!s) return;
