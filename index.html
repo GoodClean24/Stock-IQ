@@ -2225,6 +2225,11 @@ function renderCleanDetail(s){
         <div style="color:${whatNext.c};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">What to do next</div>
         <div style="color:#D5DAE5;font-size:12.5px;line-height:1.55;">${whatNext.t}</div>
       </div>
+      ${ps.momentumCall!=='n/a' ? `<div style="background:${(ps.momentumCall==='warning'?C.red:(ps.momentumCall==='onTrack'?C.green:C.yellow))}1A;border-radius:12px;padding:12px 14px;margin-bottom:10px;">
+        <div style="color:${ps.momentumCall==='warning'?C.red:(ps.momentumCall==='onTrack'?C.green:C.yellow)};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">Momentum Check</div>
+        <div style="color:#D5DAE5;font-size:12.5px;line-height:1.55;">${ps.momentumNote}</div>
+        ${ps.momentumAccuracy!=null ? `<div style="color:${C.textMuted};font-size:11px;margin-top:4px;">This check has been right ${(ps.momentumAccuracy*100).toFixed(0)}% of the time on ${s.ticker} (${ps.momentumEvaluable} past trades)</div>` : ''}
+      </div>` : ''}
       ${ps.reversalStatus!=='n/a' ? `<div style="background:${(ps.reversalStatus==='warning'?C.red:(ps.reversalStatus==='caution'?C.yellow:C.green))}1A;border-radius:12px;padding:12px 14px;margin-bottom:10px;">
         <div style="color:${ps.reversalStatus==='warning'?C.red:(ps.reversalStatus==='caution'?C.yellow:C.green)};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">${ps.reversalStatus==='warning'?'⚠ Reversal signs':(ps.reversalStatus==='caution'?'◐ Watching for reversal':'✓ No reversal signs')}</div>
         <div style="color:#D5DAE5;font-size:12.5px;line-height:1.55;">${ps.reversalNote}</div>
@@ -2236,10 +2241,6 @@ function renderCleanDetail(s){
         <div style="display:flex;justify-content:space-between;padding:5px 0;"><span style="color:#9AA0B0;font-size:12.5px;">Profit right now</span><span style="color:${ps.pl>=0?C.green:C.red};font-size:12.5px;font-weight:700;">${ps.pl>=0?'+':''}${fmtP(ps.pl)}</span></div>
         <div style="display:flex;justify-content:space-between;padding:5px 0;"><span style="color:#9AA0B0;font-size:12.5px;">If stopped now, you'd ${ps.lockedProfit>=0?'keep':'lose'}</span><span style="color:${ps.lockedProfit>=0?C.green:C.red};font-size:12.5px;font-weight:700;">${ps.lockedProfit>=0?'+':''}${ps.lockedProfit!=null?fmtP(ps.lockedProfit):'—'}</span></div>
         <div style="border-top:1px solid ${C.border};margin-top:6px;padding-top:8px;color:${ps.statusColor};font-size:12.5px;line-height:1.55;">${ps.status}</div>
-        ${ps.momentumCall!=='n/a' ? `<div style="border-top:1px solid ${C.border};margin-top:6px;padding-top:8px;">
-          <div style="color:${ps.momentumCall==='warning'?C.red:(ps.momentumCall==='onTrack'?C.green:C.yellow)};font-size:12.5px;line-height:1.55;">${ps.momentumNote}</div>
-          ${ps.momentumAccuracy!=null ? `<div style="color:${C.textMuted};font-size:11px;margin-top:4px;">This check has been right ${(ps.momentumAccuracy*100).toFixed(0)}% of the time on ${s.ticker} (${ps.momentumEvaluable} past trades)</div>` : ''}
-        </div>` : ''}
         ${ps.reversalStatus!=='n/a' ? `<div style="border-top:1px solid ${C.border};margin-top:6px;padding-top:8px;">
           <div style="color:${ps.reversalStatus==='warning'?C.red:(ps.reversalStatus==='caution'?C.yellow:C.green)};font-size:12.5px;font-weight:700;">${ps.reversalStatus==='warning'?'⚠ Reversal signs':(ps.reversalStatus==='caution'?'◐ Watching for reversal':'✓ No reversal signs')}</div>
           <div style="color:${ps.reversalStatus==='warning'?C.red:C.textSub};font-size:12.5px;line-height:1.55;margin-top:2px;">${ps.reversalNote}</div>
