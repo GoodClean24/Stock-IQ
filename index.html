@@ -1649,10 +1649,15 @@ ${stat('Day-5 Accuracy', bt.momentumAccuracy!=null?(bt.momentumAccuracy*100).toF
         ${stat('Win rate', Math.round(bt.winRate*100)+'%', bt.winRate>=0.5?C.green:C.yellow)}
         ${stat('Avg result', pct(bt.avg), bt.avg>=0?C.green:C.red)}
       </div>
-      <div style="display:flex;gap:8px;margin-bottom:18px;">
+      <div style="display:flex;gap:8px;margin-bottom:8px;">
         ${stat('Avg days held', Math.round(bt.avgHeld))}
         ${stat('Best', pct(bt.best), C.green)}
         ${stat('Worst', pct(bt.worst), C.red)}
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:18px;">
+        ${stat('Regression Trades', bt.sweetSpotN)}
+        ${stat('Sweet-Spot Win %', bt.sweetSpotN?Math.round(bt.sweetSpotWins/bt.sweetSpotN*100)+'%':'—', bt.sweetSpotN&&(bt.sweetSpotWins/bt.sweetSpotN)>=0.5?C.green:C.yellow)}
+        ${stat('Sweet-Spot Avg', bt.sweetSpotAvg!=null?pct(bt.sweetSpotAvg):'—', bt.sweetSpotAvg!=null&&bt.sweetSpotAvg>=0?C.green:C.red)}
       </div>
       <div style="color:#AEB4C2;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">Every trade the strategy took</div>
       ${tradeRows}
