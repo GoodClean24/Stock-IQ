@@ -2201,11 +2201,13 @@ function renderCleanDetail(s){
       ${row('vol','Volume at/above 20-day avg',setupVals.vol,volRatioNow!=null?volRatioNow>=0.98:null)}
       ${row('rsi','RSI 55 or under (not overbought)',setupVals.rsi,s.rsi!=null?s.rsi<=55:null)}
       ${row('uptrend','Still above 200-day (uptrend intact)',setupVals.uptrend,upPct!=null?upPct>0:null)}
+      ${row('regression','Regression zone (sweet spot)',(()=>{const rd=getRegDistPct(s); return rd!=null?rd.toFixed(2)+' std':'need 1yr+ history';})(),(()=>{const rd=getRegDistPct(s); return rd!=null?(rd>-1&&rd<=0):null;})())}
       ` : `
       ${row('uptrend','Uptrend (price above 200, 50 above 200)',setupVals.uptrend,cGet('uptrend')?cGet('uptrend').pass:null)}
       ${row('rsi','RSI in the 45–60 band',setupVals.rsi,cGet('rsi')?cGet('rsi').pass:null)}
       ${row('atr','Daily range tradeable (ATR 4–8%)',setupVals.atr,cGet('range')?cGet('range').pass:null)}
       ${row('macd','MACD crossed up',setupVals.macd,cGet('macd')?cGet('macd').pass:null)}
+      ${row('regression','Regression zone (sweet spot)',(()=>{const rd=getRegDistPct(s); return rd!=null?rd.toFixed(2)+' std':'need 1yr+ history';})(),(()=>{const rd=getRegDistPct(s); return rd!=null?(rd>-1&&rd<=0):null;})())}
       `}
       <button onclick="setEarningsDate('${s.id}')" style="all:unset;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 2px;width:100%;box-sizing:border-box;">
         <span style="color:${C.text};font-size:13.5px;">Earnings date</span>
