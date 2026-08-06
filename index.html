@@ -1088,10 +1088,12 @@ function setupScore(s){
   const ed = earningsDaysAway(s);
   if(ed!=null && ed>=0 && ed<=7) score -= 50;  // earnings imminent — push it down the list
   if(isProven(s)) score += 15;                 // proven track record — nudge (only sorts BUY/WATCH)
+  const regDist = s.regDistPct!=null ? s.regDistPct : null;
+  if(regDist!=null && regDist>-1 && regDist<=0) score += 15;  // sweet-spot zone — same weight as isProven
   return score;
 }
 function groupedListHTML(list){
-  const wordOf=s=>{const a=computeSimpleAction(s);return a.word||(s.type==='Long-Term Hold'?'HOLD':'—');};
+  const wordOf=s=>{const a=computeSimpleAction(s);return a.word||(s.	type==='Long-Term Hold'?'HOLD':'—');};
   const b={BOUGHT:[],BUY:[],WATCH:[],WAIT:[],HOLD:[]};
   list.forEach(s=>{ if(s.position){ b.BOUGHT.push(s); return; } const w=wordOf(s); (b[w]||b.HOLD).push(s); });
   const byPct=(x,y)=>{if(x.starred&&!y.starred)return -1;if(!x.starred&&y.starred)return 1;return (y.pct||0)-(x.pct||0);};
@@ -1445,6 +1447,35 @@ function saveEarningsDate(id, val){
 // strategy has WORKED on this name, never predicts the next trade.
 function _mean(a){ return a.length?a.reduce((x,y)=>x+y,0)/a.length:null; }
 function _std(a){ if(a.length<2) return null; const m=_mean(a); return Math.sqrt(a.reduce((s,v)=>s+(v-m)*(v-m),0)/a.length); }
+
+// Regression channel: rolling 252-day least-squares fit, refit at every day
+// using only prior data (never future prices) — same math as the ToS
+// indicator's magenta/yellow/red bands. Returns how many standard
+// deviations today's price sits from the channel center.
+function computeRegDistPct(snaps, idx, window){
+  window = window || 252;
+  if(idx < window-1) return null;
+  const slice = snaps.slice(idx-window+1, idx+1);
+  const closes = slice.map(sn=>sn.price);
+  if(closes.some(v=>v==null)) return null;
+  const n = closes.length;
+  let xSum=0, xMean, denom=0;
+  for(let i=0;i<n;i++) xSum+=i;
+  xMean = xSum/n;
+  for(let i=0;i<n;i++) denom += (i-xMean)*(i-xMean);
+  let yMean=0; for(const c of closes) yMean+=c; yMean/=n;
+  let num=0;
+  for(let i=0;i<n;i++) num += (i-xMean)*(closes[i]-yMean);
+  const slope = denom!==0 ? num/denom : 0;
+  const intercept = yMean - slope*xMean;
+  const fitted = [];
+  for(let i=0;i<n;i++) fitted.push(slope*i+intercept);
+  let sumSq=0;
+  for(let i=0;i<n;i++){ const d=closes[i]-fitted[i]; sumSq+=d*d; }
+  const std = Math.sqrt(sumSq/n);
+  const mid = fitted[n-1];
+  return std>0 ? (closes[n-1]-mid)/std : null;
+}
 function tickerBacktest(s, strategyOverride){
   const strategy = strategyOverride || getStrategyFor(s);
   const snaps=(s.snapshots||[]).filter(x=>x&&x.date&&x.price!=null).sort((a,b)=>new Date(a.date)-new Date(b.date));
