@@ -1567,7 +1567,7 @@ function tickerBacktest(s, strategyOverride){
   const sweetSpotWins = sweetSpotTrades.filter(t=>t.ret>0).length;
   const sweetSpotAvg = sweetSpotN ? sweetSpotTrades.reduce((a,t)=>a+t.ret,0)/sweetSpotN : null;
 
-  return {trades, bars:snaps.length, months:Math.round(snaps.length/21), from:snaps[0]?.date||null, to:snaps[snaps.length-1]?.date||null, n, wins, winRate:n?wins/n:0, avg, avgHeld, best, worst, enough:n>=4, tell, tellStats, strategy, momentumAccuracy, momentumEvaluable, sweetSpotN, sweetSpotWins, sweetSpotAvg};
+  return {trades, bars:snaps.length, months:Math.round(snaps.length/21), from:snaps[0]?.date||null, to:snaps[snaps.length-1]?.date||null, n, wins, winRate:n?wins/n:0, avg, avgHeld, best, worst, enough:n>=4, tell, tellStats, strategy, momentumAccuracy, momentumEvaluable: evaluable.length, sweetSpotN, sweetSpotWins, sweetSpotAvg};
 }
 function openBacktest(id){
   const s=stocks.find(x=>String(x.id)===String(id)); if(!s) return;
