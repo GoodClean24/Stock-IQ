@@ -1477,14 +1477,22 @@ function _std(a){ if(a.length<2) return null; const m=_mean(a); return Math.sqrt
 // Real backtested win%/avg% per zone, from the 285-ticker/6-year study —
 // baked in as reference numbers so every zone shows its actual track
 // record, not just a pass/fail on one preferred range.
-function regressionZoneInfo(rd){
+function regressionZoneInfo(rd, zoneStats){
   if(rd==null) return null;
-  if(rd <= -2)   return {label:'Deep pullback', tier:'ok',     refWin:39, refAvg:5.3,  color:'#4DA8FF'};
-  if(rd <= -1)   return {label:'Below sweet spot', tier:'weak', refWin:36, refAvg:2.6,  color:'#7A8099'};
-  if(rd <= -0.75) return {label:'Sweet spot edge', tier:'weak', refWin:28, refAvg:0.6,  color:'#FF8C00'};
-  if(rd <= -0.25) return {label:'Sweet spot — center', tier:'strong', refWin:42, refAvg:11.7, color:'#00C805'};
-  if(rd <= 0)    return {label:'Sweet spot edge', tier:'ok',   refWin:43, refAvg:5.3,  color:'#F5C518'};
-  return                {label:'Above center', tier:'ok',      refWin:36, refAvg:3.7,  color:'#7A8099'};
+  const zoneKey = rd<=-2?'deep':rd<=-1?'below':rd<=-0.75?'edgeLow':rd<=-0.25?'center':rd<=0?'edgeHigh':'above';
+  const generic = {
+    deep:    {label:'Deep pullback', tier:'ok',     refWin:39, refAvg:5.3,  color:'#4DA8FF'},
+    below:   {label:'Below sweet spot', tier:'weak', refWin:36, refAvg:2.6,  color:'#7A8099'},
+    edgeLow: {label:'Sweet spot edge', tier:'weak', refWin:28, refAvg:0.6,  color:'#FF8C00'},
+    center:  {label:'Sweet spot — center', tier:'strong', refWin:42, refAvg:11.7, color:'#00C805'},
+    edgeHigh:{label:'Sweet spot edge', tier:'ok',   refWin:43, refAvg:5.3,  color:'#F5C518'},
+    above:   {label:'Above center', tier:'ok',      refWin:36, refAvg:3.7,  color:'#7A8099'},
+  }[zoneKey];
+  const own = zoneStats && zoneStats[zoneKey];
+  if(own){
+    return {...generic, refWin: own.winPct, refAvg: own.avgPct, isOwnData: true, ownN: own.n};
+  }
+  return {...generic, isOwnData: false};
 }
 function getRegDistPct(s){
   const snaps = (s.snapshots||[]).filter(sn=>sn&&sn.date&&sn.price!=null).sort((a,b)=>new Date(a.date)-new Date(b.date));
@@ -1601,7 +1609,26 @@ function tickerBacktest(s, strategyOverride){
   const sweetSpotWins = sweetSpotTrades.filter(t=>t.ret>0).length;
   const sweetSpotAvg = sweetSpotN ? sweetSpotTrades.reduce((a,t)=>a+t.ret,0)/sweetSpotN : null;
 
-  return {trades, bars:snaps.length, months:Math.round(snaps.length/21), from:snaps[0]?.date||null, to:snaps[snaps.length-1]?.date||null, n, wins, winRate:n?wins/n:0, avg, avgHeld, best, worst, enough:n>=4, tell, tellStats, strategy, momentumAccuracy, momentumEvaluable: evaluable.length, sweetSpotN, sweetSpotWins, sweetSpotAvg};
+  // Per-ticker stats for EVERY regression zone, not just the sweet spot —
+  // used to show this specific stock's own track record on the checklist,
+  // falling back to the generic 285-ticker reference only when there
+  // isn't enough ticker-specific history yet.
+  const zoneBounds = [
+    {key:'deep',    lo:-99, hi:-2},
+    {key:'below',   lo:-2,  hi:-1},
+    {key:'edgeLow', lo:-1,  hi:-0.75},
+    {key:'center',  lo:-0.75, hi:-0.25},
+    {key:'edgeHigh',lo:-0.25, hi:0},
+    {key:'above',   lo:0,   hi:99},
+  ];
+  const zoneStats = {};
+  zoneBounds.forEach(z=>{
+    const zt = trades.filter(t=>t.regDistPct!=null && t.regDistPct>z.lo && t.regDistPct<=z.hi);
+    const n = zt.length;
+    const w = zt.filter(t=>t.ret>0).length;
+    zoneStats[z.key] = n>=3 ? {n, winPct: Math.round(w/n*100), avgPct: (zt.reduce((a,t)=>a+t.ret,0)/n*100)} : null;
+  });
+  return {trades, bars:snaps.length, months:Math.round(snaps.length/21), from:snaps[0]?.date||null, to:snaps[snaps.length-1]?.date||null, n, wins, winRate:n?wins/n:0, avg, avgHeld, best, worst, enough:n>=4, tell, tellStats, strategy, momentumAccuracy, momentumEvaluable: evaluable.length, sweetSpotN, sweetSpotWins, sweetSpotAvg, zoneStats};
 }
 function openBacktest(id){
   const s=stocks.find(x=>String(x.id)===String(id)); if(!s) return;
@@ -2269,13 +2296,13 @@ function renderCleanDetail(s){
       ${row('vol','Volume at/above 20-day avg',setupVals.vol,volRatioNow!=null?volRatioNow>=0.98:null)}
       ${row('rsi','RSI 55 or under (not overbought)',setupVals.rsi,s.rsi!=null?s.rsi<=55:null)}
       ${row('uptrend','Still above 200-day (uptrend intact)',setupVals.uptrend,upPct!=null?upPct>0:null)}
-      ${(()=>{const rd=getRegDistPct(s); const z=regressionZoneInfo(rd); if(rd==null) return row('regression','Regression zone','need 1yr+ history',null); return `<button onclick="showLearn('regression','${s.id}')" style="all:unset;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 2px;border-bottom:1px solid ${C.border};width:100%;box-sizing:border-box;"><span style="display:flex;align-items:center;gap:9px;"><span style="width:8px;height:8px;border-radius:50%;background:${z.color};flex-shrink:0;"></span><span style="color:${C.text};font-size:13.5px;">${z.label}</span></span><span style="display:flex;align-items:center;gap:8px;color:#CDD2DE;font-size:12px;">${rd.toFixed(2)} std · ${z.refWin}% win, +${z.refAvg}% avg<span style="color:#8A90A0;font-size:14px;">›</span></span></button>`;})()}
+      ${(()=>{const rd=getRegDistPct(s); const bt=(()=>{try{return tickerBacktest(s);}catch(e){return null;}})(); const z=regressionZoneInfo(rd, bt?bt.zoneStats:null); if(rd==null) return row('regression','Regression zone','need 1yr+ history',null); return `<button onclick="showLearn('regression','${s.id}')" style="all:unset;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 2px;border-bottom:1px solid ${C.border};width:100%;box-sizing:border-box;"><span style="display:flex;align-items:center;gap:9px;"><span style="width:8px;height:8px;border-radius:50%;background:${z.color};flex-shrink:0;"></span><span style="color:${C.text};font-size:13.5px;">${z.label}</span></span><span style="display:flex;align-items:center;gap:8px;color:#CDD2DE;font-size:12px;">${rd.toFixed(2)} std · ${z.refWin}% win, +${z.refAvg}% avg<span style="color:#8A90A0;font-size:14px;">›</span></span></button>`;})()}
       ` : `
       ${row('uptrend','Uptrend (price above 200, 50 above 200)',setupVals.uptrend,cGet('uptrend')?cGet('uptrend').pass:null)}
       ${row('rsi','RSI in the 45–60 band',setupVals.rsi,cGet('rsi')?cGet('rsi').pass:null)}
       ${row('atr','Daily range tradeable (ATR 4–8%)',setupVals.atr,cGet('range')?cGet('range').pass:null)}
       ${row('macd','MACD crossed up',setupVals.macd,cGet('macd')?cGet('macd').pass:null)}
-      ${(()=>{const rd=getRegDistPct(s); const z=regressionZoneInfo(rd); if(rd==null) return row('regression','Regression zone','need 1yr+ history',null); return `<button onclick="showLearn('regression','${s.id}')" style="all:unset;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 2px;border-bottom:1px solid ${C.border};width:100%;box-sizing:border-box;"><span style="display:flex;align-items:center;gap:9px;"><span style="width:8px;height:8px;border-radius:50%;background:${z.color};flex-shrink:0;"></span><span style="color:${C.text};font-size:13.5px;">${z.label}</span></span><span style="display:flex;align-items:center;gap:8px;color:#CDD2DE;font-size:12px;">${rd.toFixed(2)} std · ${z.refWin}% win, +${z.refAvg}% avg<span style="color:#8A90A0;font-size:14px;">›</span></span></button>`;})()}
+      ${(()=>{const rd=getRegDistPct(s); const bt=(()=>{try{return tickerBacktest(s);}catch(e){return null;}})(); const z=regressionZoneInfo(rd, bt?bt.zoneStats:null); if(rd==null) return row('regression','Regression zone','need 1yr+ history',null); return `<button onclick="showLearn('regression','${s.id}')" style="all:unset;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 2px;border-bottom:1px solid ${C.border};width:100%;box-sizing:border-box;"><span style="display:flex;align-items:center;gap:9px;"><span style="width:8px;height:8px;border-radius:50%;background:${z.color};flex-shrink:0;"></span><span style="color:${C.text};font-size:13.5px;">${z.label}</span></span><span style="display:flex;align-items:center;gap:8px;color:#CDD2DE;font-size:12px;">${rd.toFixed(2)} std · ${z.refWin}% win, +${z.refAvg.toFixed(1)}% avg${z.isOwnData?` (${s.ticker}, n=${z.ownN})`:' (general)'}<span style="color:#8A90A0;font-size:14px;">›</span></span></button>`;})()}
       `}
       <button onclick="setEarningsDate('${s.id}')" style="all:unset;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 2px;width:100%;box-sizing:border-box;">
         <span style="color:${C.text};font-size:13.5px;">Earnings date</span>
