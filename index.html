@@ -1626,7 +1626,10 @@ function openBacktest(id){
     } else {
       tellLine = `Not enough wins yet (${bt.wins}) to say which condition matters most for this name — treat any "watch for X" as a guess until there are 3+.`;
     }
-    verdict=`The strategy has worked on ${s.ticker}: ${bt.wins} of ${bt.n} trades won, averaging ${pct(bt.avg)} and held about ${Math.round(bt.avgHeld)} days. This is a name the system tends to handle well. ${tellLine}`; vColor=C.green; }
+    const regLine = bt.sweetSpotN>=3
+      ? ` It's also had ${bt.sweetSpotN} entr${bt.sweetSpotN===1?'y':'ies'} in the regression sweet spot, winning ${Math.round(bt.sweetSpotWins/bt.sweetSpotN*100)}% of the time averaging ${pct(bt.sweetSpotAvg)}.`
+      : '';
+    verdict=`The strategy has worked on ${s.ticker}: ${bt.wins} of ${bt.n} trades won, averaging ${pct(bt.avg)} and held about ${Math.round(bt.avgHeld)} days. This is a name the system tends to handle well. ${tellLine}${regLine}`; vColor=C.green; }
   else { verdict=`The strategy has struggled on ${s.ticker}: only ${bt.wins} of ${bt.n} trades won, averaging ${pct(bt.avg)}. This stock hasn't suited the system historically — be extra selective, or watch it rather than trade it. A choppy or news-driven name can look like a setup without following through.`; vColor='#E8A317'; }
 
   const stat=(label,val,color)=>`<div style="flex:1;background:${C.cardHigh};border-radius:12px;padding:14px 10px;text-align:center;"><div style="color:#8A90A0;font-size:9px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:5px;">${label}</div><div style="color:${color||C.text};font-size:18px;font-weight:800;">${val}</div></div>`;
@@ -2279,6 +2282,23 @@ function renderCleanDetail(s){
       </button>
     </div>
 
+    ${hasHist ? (()=>{
+      const bt = tickerBacktest(s);
+      if(bt.n===0) return '';
+      const miniStat=(label,val,color)=>`<div style="flex:1;background:${C.cardHigh};border-radius:10px;padding:9px 6px;text-align:center;"><div style="color:#8A90A0;font-size:8.5px;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:3px;">${label}</div><div style="color:${color||C.text};font-size:13px;font-weight:800;">${val}</div></div>`;
+      return `<div style="padding:14px 20px;border-bottom:1px solid ${C.border};">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <span style="color:#AEB4C2;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;">How it's fared on ${s.ticker}</span>
+          <button onclick="openBacktest('${s.id}')" style="background:none;border:none;color:${C.teal};font-size:11px;font-weight:700;cursor:pointer;">Full backtest ›</button>
+        </div>
+        <div style="display:flex;gap:6px;">
+          ${miniStat('Trades', bt.n)}
+          ${miniStat('Win Rate', Math.round(bt.winRate*100)+'%', bt.winRate>=0.5?C.green:C.yellow)}
+          ${miniStat('Avg', (bt.avg>=0?'+':'')+(bt.avg*100).toFixed(1)+'%', bt.avg>=0?C.green:C.red)}
+          ${bt.sweetSpotN>=1?miniStat('Reg. Trades', bt.sweetSpotN):''}
+        </div>
+      </div>` ;
+    })() : ''}
     <div style="padding:14px 20px;">
       ${held ? '' : `<div style="color:#AEB4C2;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">Your plan</div>${planRows}`}
       ${(isBuy||held)?riskRewardHTML(s):''}
