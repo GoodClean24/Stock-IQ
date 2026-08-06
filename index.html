@@ -1520,7 +1520,7 @@ function tickerBacktest(s, strategyOverride){
     const entryDistMA50 = sn.ma50 ? ((sn.price/sn.ma50-1)*100) : null;
     const rsiChange5 = (rsiDay5!=null && entryRSI!=null) ? (rsiDay5-entryRSI) : null;
     const rsiChange10 = (rsiDay10!=null && entryRSI!=null) ? (rsiDay10-entryRSI) : null;
-    trades.push({entryDate:sn.date, entry, exitDate:snaps[exitIdx].date, exit:exitPrice, ret:(exitPrice/entry-1), held:exitIdx-i, open:exitPrice==null, entryDistMA50, entryRSI, rsiDay5, rsiDay10, rsiChange5, rsiChange10});
+    trades.push({entryDate:sn.date, entry, exitDate:snaps[exitIdx].date, exit:exitPrice, ret:(exitPrice/entry-1), held:exitIdx-i, open:exitPrice==null, entryDistMA50, entryRSI, rsiDay5, rsiDay10, rsiChange5, rsiChange10, regDistPct: computeRegDistPct(snaps, i, 252)});
     lastExit=exitIdx;
   }
   const n=trades.length, wins=trades.filter(t=>t.ret>0).length;
@@ -1562,7 +1562,12 @@ function tickerBacktest(s, strategyOverride){
       tell='rsi'; tellStats={mean:rMean, std:rStd, n:rsis.length};
     }
   }
-  return {trades, bars:snaps.length, months:Math.round(snaps.length/21), from:snaps[0]?.date||null, to:snaps[snaps.length-1]?.date||null, n, wins, winRate:n?wins/n:0, avg, avgHeld, best, worst, enough:n>=4, tell, tellStats, strategy, momentumAccuracy, momentumEvaluable:evaluable.length};
+  const sweetSpotTrades = trades.filter(t=>t.regDistPct!=null && t.regDistPct>-1 && t.regDistPct<=0);
+  const sweetSpotN = sweetSpotTrades.length;
+  const sweetSpotWins = sweetSpotTrades.filter(t=>t.ret>0).length;
+  const sweetSpotAvg = sweetSpotN ? sweetSpotTrades.reduce((a,t)=>a+t.ret,0)/sweetSpotN : null;
+
+  return {trades, bars:snaps.length, months:Math.round(snaps.length/21), from:snaps[0]?.date||null, to:snaps[snaps.length-1]?.date||null, n, wins, winRate:n?wins/n:0, avg, avgHeld, best, worst, enough:n>=4, tell, tellStats, strategy, momentumAccuracy, momentumEvaluable, sweetSpotN, sweetSpotWins, sweetSpotAvg};
 }
 function openBacktest(id){
   const s=stocks.find(x=>String(x.id)===String(id)); if(!s) return;
