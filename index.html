@@ -1458,7 +1458,6 @@ function getRegDistPct(s){
   return computeRegDistPct(snaps, snaps.length-1, 252);
 }
 function computeRegDistPct(snaps, idx, window){
-function computeRegDistPct(snaps, idx, window){
   window = window || 252;
   if(idx < window-1) return null;
   const slice = snaps.slice(idx-window+1, idx+1);
