@@ -1399,6 +1399,7 @@ function doResetPaperPortfolio(){
 // Parse a TOS "Days To Earnings" value like "-19 Days" or "5" into a signed int.
 function parseEarnOffset(v){
   if(v==null || v==='') return null;
+  if(/^today$/i.test(String(v).trim())) return 0;
   const m = String(v).match(/-?\d+/);
   return m ? parseInt(m[0]) : null;
 }
