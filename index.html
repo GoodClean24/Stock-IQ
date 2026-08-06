@@ -1427,11 +1427,17 @@ function earnDateFromOffset(offset, baseDateStr){
 }
 function earningsDaysAway(s){
   if(!s.earningsDate) return null;
-  const d = new Date(s.earningsDate); if(isNaN(d)) return null;
-  return Math.round((d - Date.now())/86400000);
+  const m = String(s.earningsDate).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const d = m ? new Date(parseInt(m[1]), parseInt(m[2])-1, parseInt(m[3])) : new Date(s.earningsDate);
+  if(isNaN(d)) return null;
+  const now = new Date();
+  const todayLocal = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((d - todayLocal)/86400000);
 }
 function fmtEarnDate(v){
-  const d = new Date(v); if(isNaN(d)) return v;
+  const m = String(v).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const d = m ? new Date(parseInt(m[1]), parseInt(m[2])-1, parseInt(m[3])) : new Date(v);
+  if(isNaN(d)) return v;
   return d.toLocaleDateString(undefined,{month:'short',day:'numeric'});
 }
 function setEarningsDate(id){
