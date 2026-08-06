@@ -1088,7 +1088,7 @@ function setupScore(s){
   const ed = earningsDaysAway(s);
   if(ed!=null && ed>=0 && ed<=7) score -= 50;  // earnings imminent — push it down the list
   if(isProven(s)) score += 15;                 // proven track record — nudge (only sorts BUY/WATCH)
-  const regDist = s.regDistPct!=null ? s.regDistPct : null;
+  const regDist = getRegDistPct(s);
   if(regDist!=null && regDist>-1 && regDist<=0) score += 15;  // sweet-spot zone — same weight as isProven
   return score;
 }
@@ -1452,6 +1452,12 @@ function _std(a){ if(a.length<2) return null; const m=_mean(a); return Math.sqrt
 // using only prior data (never future prices) — same math as the ToS
 // indicator's magenta/yellow/red bands. Returns how many standard
 // deviations today's price sits from the channel center.
+function getRegDistPct(s){
+  const snaps = (s.snapshots||[]).filter(sn=>sn&&sn.date&&sn.price!=null).sort((a,b)=>new Date(a.date)-new Date(b.date));
+  if(snaps.length<252) return null;
+  return computeRegDistPct(snaps, snaps.length-1, 252);
+}
+function computeRegDistPct(snaps, idx, window){
 function computeRegDistPct(snaps, idx, window){
   window = window || 252;
   if(idx < window-1) return null;
