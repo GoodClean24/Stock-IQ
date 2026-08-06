@@ -1088,6 +1088,8 @@ function setupScore(s){
   const ed = earningsDaysAway(s);
   if(ed!=null && ed>=0 && ed<=7) score -= 50;  // earnings imminent — push it down the list
   if(isProven(s)) score += 15;                 // proven track record — nudge (only sorts BUY/WATCH)
+  const regDist = s.regDistPct!=null ? s.regDistPct : null;
+  if(regDist!=null && regDist>-1 && regDist<=0) score += 15;  // sweet-spot zone — same weight as isProven
   return score;
 }
 function groupedListHTML(list){
