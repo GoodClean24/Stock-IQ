@@ -2302,7 +2302,19 @@ function renderCleanDetail(s){
       ${row('rsi','RSI in the 45–60 band',setupVals.rsi,cGet('rsi')?cGet('rsi').pass:null)}
       ${row('atr','Daily range tradeable (ATR 4–8%)',setupVals.atr,cGet('range')?cGet('range').pass:null)}
       ${row('macd','MACD crossed up',setupVals.macd,cGet('macd')?cGet('macd').pass:null)}
-      ${(()=>{const rd=getRegDistPct(s); const bt=(()=>{try{return tickerBacktest(s);}catch(e){return null;}})(); const z=regressionZoneInfo(rd, bt?bt.zoneStats:null); if(rd==null) return row('regression','Regression zone','need 1yr+ history',null); return `<button onclick="showLearn('regression','${s.id}')" style="all:unset;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 2px;border-bottom:1px solid ${C.border};width:100%;box-sizing:border-box;"><span style="display:flex;align-items:center;gap:9px;"><span style="width:8px;height:8px;border-radius:50%;background:${z.color};flex-shrink:0;"></span><span style="color:${C.text};font-size:13.5px;">${z.label}</span></span><span style="display:flex;align-items:center;gap:8px;color:#CDD2DE;font-size:12px;">${rd.toFixed(2)} std · ${z.refWin}% win, +${z.refAvg.toFixed(1)}% avg${z.isOwnData?` (${s.ticker}, n=${z.ownN})`:' (general)'}<span style="color:#8A90A0;font-size:14px;">›</span></span></button>`;})()}
+      ${(()=>{const rd=getRegDistPct(s); const bt=(()=>{try{return tickerBacktest(s);}catch(e){return null;}})(); const z=regressionZoneInfo(rd, bt?bt.zoneStats:null); if(rd==null) return row('regression','Regression zone','need 1yr+ history',null);
+const zoneLabels = {deep:'Deep pullback', below:'Below sweet spot', edgeLow:'Sweet spot edge', center:'Sweet spot — center', edgeHigh:'Sweet spot edge', above:'Above center'};
+let bestZoneNote = '';
+if(bt && bt.zoneStats){
+  const currentKey = rd<=-2?'deep':rd<=-1?'below':rd<=-0.75?'edgeLow':rd<=-0.25?'center':rd<=0?'edgeHigh':'above';
+  let bestKey=null, bestAvg=-999;
+  Object.keys(bt.zoneStats).forEach(k=>{ const zs=bt.zoneStats[k]; if(zs && zs.avgPct>bestAvg){ bestAvg=zs.avgPct; bestKey=k; } });
+  if(bestKey && bestKey!==currentKey && bestAvg > (bt.zoneStats[currentKey]?bt.zoneStats[currentKey].avgPct:-999)+3){
+    const bz = bt.zoneStats[bestKey];
+    bestZoneNote = `<div style="color:#F5C518;font-size:11.5px;line-height:1.5;padding:8px 2px 0;">💡 ${s.ticker}'s best zone has actually been "${zoneLabels[bestKey]}" — ${bz.winPct}% win, +${bz.avgPct.toFixed(1)}% avg (n=${bz.n}). Worth knowing this stock doesn't necessarily follow the general pattern.</div>`;
+  }
+}
+return `<button onclick="showLearn('regression','${s.id}')" style="all:unset;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 2px;border-bottom:1px solid ${C.border};width:100%;box-sizing:border-box;"><span style="display:flex;align-items:center;gap:9px;"><span style="width:8px;height:8px;border-radius:50%;background:${z.color};flex-shrink:0;"></span><span style="color:${C.text};font-size:13.5px;">${z.label}</span></span><span style="display:flex;align-items:center;gap:8px;color:#CDD2DE;font-size:12px;">${rd.toFixed(2)} std · ${z.refWin}% win, +${z.refAvg.toFixed(1)}% avg${z.isOwnData?` (${s.ticker}, n=${z.ownN})`:' (general)'}<span style="color:#8A90A0;font-size:14px;">›</span></span></button>${bestZoneNote}`;})()}
       `}
       <button onclick="setEarningsDate('${s.id}')" style="all:unset;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 2px;width:100%;box-sizing:border-box;">
         <span style="color:${C.text};font-size:13.5px;">Earnings date</span>
