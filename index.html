@@ -1404,10 +1404,21 @@ function parseEarnOffset(v){
   return m ? parseInt(m[0]) : null;
 }
 // Turn a days-offset (relative to a base date) into a fixed ISO earnings date.
+function parseAppDateStr(str){
+  if(!str) return null;
+  const m = String(str).match(/^([A-Za-z]{3})\w*\s+(\d{1,2}),\s*(\d{4})$/);
+  if(m){
+    const months = {Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11};
+    const mon = months[m[1].slice(0,3)];
+    if(mon!=null) return new Date(parseInt(m[3]), mon, parseInt(m[2]));
+  }
+  const d = new Date(str);
+  return isNaN(d) ? null : d;
+}
 function earnDateFromOffset(offset, baseDateStr){
   if(offset==null) return null;
-  const base = baseDateStr ? new Date(baseDateStr) : new Date();
-  if(isNaN(base)) return null;
+  const base = baseDateStr ? parseAppDateStr(baseDateStr) : new Date();
+  if(!base || isNaN(base)) return null;
   const d = new Date(base.getFullYear(), base.getMonth(), base.getDate() - offset);
   const yyyy = d.getFullYear();
   const mm = String(d.getMonth()+1).padStart(2,'0');
