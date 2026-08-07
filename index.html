@@ -1308,6 +1308,22 @@ function planNumbers(s){
 }
 // Live-number explainer text. Each returns a short, plain paragraph.
 const LEARN = {
+  regression:(s)=>{
+    const rd = getRegDistPct(s);
+    if(rd==null) return 'This needs at least a year of history loaded to compute — it uses a rolling 252-day trend channel, the same math as the regression indicator on your ToS charts.';
+    let bt=null; try{ bt=tickerBacktest(s); }catch(e){}
+    const z = regressionZoneInfo(rd, bt?bt.zoneStats:null);
+    const base = `This measures how far ${s.ticker}'s price sits from its own 1-year trend line, in standard deviations — same math as the magenta/yellow/red bands on your ToS chart. Right now it's at ${rd.toFixed(2)} std, putting it in the "${z.label}" zone.`;
+    const source = z.isOwnData
+      ? ` Based on ${s.ticker}'s own history in this zone (${z.ownN} past trades): ${z.refWin}% win rate, averaging ${z.refAvg.toFixed(1)}%.`
+      : ` Not enough of ${s.ticker}'s own trades in this zone yet, so this is the general reference across 285 tested stocks: ${z.refWin}% win rate, averaging ${z.refAvg.toFixed(1)}%.`;
+    const tierNote = z.tier==='strong'
+      ? ` This is historically the strongest zone — a real, additional boost.`
+      : z.tier==='weak'
+      ? ` This zone has historically been the weakest, even though it's still net positive — don't expect the same odds as the sweet-spot center.`
+      : ` A middling zone — real, positive on average, but not the strongest signal.`;
+    return base + source + tierNote;
+  },
   uptrend:(s)=>`We only buy with the longer trend, never against it. This checks price is above its 200-day and 50-day averages, and the 50 sits above the 200. Right now price is ${fmtP(s.price)} and the 200-day is ${s.ma200!=null?fmtP(s.ma200):'—'}. ${(s.price>s.ma200&&s.ma50>s.ma200)?'Trend is up — good.':'Not lined up yet — that\u2019s why this one is a wait.'}`,
   rsi:(s)=>{
     if(getStrategyFor(s)==='Dip Buy') return `RSI measures momentum from 0 to 100. For a dip entry we want it at 55 or under — a sign the stock has cooled off and isn\u2019t still being chased at the top. Yours is ${s.rsi!=null?s.rsi.toFixed(1):'—'}.`;
@@ -1330,7 +1346,7 @@ const LEARN = {
 };
 function showLearn(key, sid){
   const s=(stocks||[]).find(x=>String(x.id)===String(sid)); if(!s||!LEARN[key])return;
-  const titles={uptrend:'Uptrend',rsi:'RSI',atr:'Daily range (ATR)',macd:'MACD cross',pullback:'Pullback from high',vol:'Volume',entry:'Entry',stop:'Stop loss',exit:'Trailing exit',size:'Position size'};
+  const titles={uptrend:'Uptrend',rsi:'RSI',atr:'Daily range (ATR)',macd:'MACD cross',pullback:'Pullback from high',vol:'Volume',entry:'Entry',stop:'Stop loss',exit:'Trailing exit',size:'Position size',regression:'Regression Zone'};
   const ov=document.createElement('div');
   ov.id='learn-overlay';
   ov.style.cssText='position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.55);display:flex;align-items:flex-end;justify-content:center;';
