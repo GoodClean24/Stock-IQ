@@ -1833,25 +1833,6 @@ function positionStats(s){
   // never reclaimed, 60% win rate when it has. Strongest validated signal
   // in the app — gets to override the normal status line when it applies.
   let centerReclaim = null;
-  const entryIdxForReg = snaps.findIndex(sn=>sn.date===pos.date);
-  if(entryIdxForReg>=0){
-    const entryRegDist = computeRegDistPct(snaps, entryIdxForReg, 252);
-    if(entryRegDist!=null && entryRegDist>-0.75 && entryRegDist<=-0.25){
-      let reclaimed = false;
-      for(let k=entryIdxForReg+1; k<snaps.length; k++){
-        const rd = computeRegDistPct(snaps, k, 252);
-        if(rd!=null && rd>0){ reclaimed = true; break; }
-      }
-      centerReclaim = {
-        applies: true,
-        reclaimed,
-        note: reclaimed
-          ? 'Reclaimed the center line ✓ — trades that do this have won 60% of the time, averaging +14.5% (validated on holdout data).'
-          : "Hasn't reclaimed the center line yet — trades that never do have a 0% win rate on every test we've run, including a genuine holdout. This is the strongest warning sign in this app. Watch closely."
-      };
-    }
-  }
-
   // Center-line reclaim check — only meaningful if the entry itself was in
   // the sweet-spot center. Tracks whether price has EVER crossed back above
   // the regression middle line since entry. Validated on genuine holdout
