@@ -1506,7 +1506,17 @@ function regressionZoneInfo(rd, zoneStats){
   }[zoneKey];
   const own = zoneStats && zoneStats[zoneKey];
   if(own){
-    return {...generic, refWin: own.winPct, refAvg: own.avgPct, isOwnData: true, ownN: own.n};
+    // If this ticker's OWN best zone is the one it's currently sitting in,
+    // treat it as a real green signal regardless of the zone's generic
+    // reputation — COIN doing best "above center" is a real, ticker-
+    // specific finding, not something the generic grey/orange labels
+    // should bury.
+    let bestKey=null, bestAvg=-999;
+    Object.keys(zoneStats).forEach(k=>{ const zs=zoneStats[k]; if(zs && zs.avgPct>bestAvg){ bestAvg=zs.avgPct; bestKey=k; } });
+    const isBestZone = bestKey===zoneKey;
+    return {...generic, refWin: own.winPct, refAvg: own.avgPct, isOwnData: true, ownN: own.n,
+      tier: isBestZone ? 'strong' : generic.tier,
+      color: isBestZone ? '#00C805' : generic.color};
   }
   return {...generic, isOwnData: false};
 }
