@@ -2312,7 +2312,7 @@ function renderCleanDetail(s){
       ${row('vol','Volume at/above 20-day avg',setupVals.vol,volRatioNow!=null?volRatioNow>=0.98:null)}
       ${row('rsi','RSI 55 or under (not overbought)',setupVals.rsi,s.rsi!=null?s.rsi<=55:null)}
       ${row('uptrend','Still above 200-day (uptrend intact)',setupVals.uptrend,upPct!=null?upPct>0:null)}
-      ${(()=>{const rd=getRegDistPct(s); const bt=(()=>{try{return tickerBacktest(s);}catch(e){return null;}})(); const z=regressionZoneInfo(rd, bt?bt.zoneStats:null); if(rd==null) return row('regression','Regression zone','need 1yr+ history',null); return `<button onclick="showLearn('regression','${s.id}')" style="all:unset;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 2px;border-bottom:1px solid ${C.border};width:100%;box-sizing:border-box;"><span style="display:flex;align-items:center;gap:9px;"><span style="width:8px;height:8px;border-radius:50%;background:${z.color};flex-shrink:0;"></span><span style="color:${C.text};font-size:13.5px;">${z.label}</span></span><span style="display:flex;align-items:center;gap:8px;color:#CDD2DE;font-size:12px;">${rd.toFixed(2)} std · ${z.refWin}% win, +${z.refAvg}% avg<span style="color:#8A90A0;font-size:14px;">›</span></span></button>`;})()}
+      ${(()=>{const rd=getRegDistPct(s); const bt=(()=>{try{return tickerBacktest(s);}catch(e){return null;}})(); const z=regressionZoneInfo(rd, bt?bt.zoneStats:null); if(rd==null) return row('regression','Regression zone','need 1yr+ history',null); return `<button onclick="showLearn('regression','${s.id}')" style="all:unset;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 2px;border-bottom:1px solid ${C.border};width:100%;box-sizing:border-box;"><span style="display:flex;align-items:center;gap:9px;"><span style="width:8px;height:8px;border-radius:50%;background:${z.color};flex-shrink:0;"></span><span style="color:${C.text};font-size:13.5px;">${z.label}</span></span><span style="display:flex;align-items:center;gap:8px;color:#CDD2DE;font-size:12px;">${rd.toFixed(2)} std · ${z.refWin}% win, ${z.refAvg>=0?'+':''}${z.refAvg.toFixed(1)}% avg${z.isOwnData?` (${s.ticker})`:' (general)'}<span style="color:#8A90A0;font-size:14px;">›</span></span></button>`;})()}
       ` : `
       ${row('uptrend','Uptrend (price above 200, 50 above 200)',setupVals.uptrend,cGet('uptrend')?cGet('uptrend').pass:null)}
       ${row('rsi','RSI in the 45–60 band',setupVals.rsi,cGet('rsi')?cGet('rsi').pass:null)}
@@ -2354,6 +2354,22 @@ return `<button onclick="showLearn('regression','${s.id}')" style="all:unset;cur
           ${bt.sweetSpotN>=1?miniStat('Reg. Trades', bt.sweetSpotN):''}
         </div>
       </div>` ;
+    })() : ''}
+    ${hasHist ? (()=>{
+      let bt=null; try{ bt=tickerBacktest(s); }catch(e){}
+      if(!bt || !bt.zoneStats) return '';
+      const zoneLabels = {deep:'Deep pullback', below:'Below sweet spot', edgeLow:'Sweet spot edge', center:'Sweet spot — center', edgeHigh:'Sweet spot edge', above:'Above center'};
+      let bestKey=null, bestAvg=-999;
+      Object.keys(bt.zoneStats).forEach(k=>{ const zs=bt.zoneStats[k]; if(zs && zs.avgPct>bestAvg){ bestAvg=zs.avgPct; bestKey=k; } });
+      if(!bestKey) return `<div style="padding:14px 20px;border-bottom:1px solid ${C.border};"><span style="color:#AEB4C2;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;">Regression track record</span><div style="color:${C.textMuted};font-size:12.5px;line-height:1.55;margin-top:8px;">Not enough of ${s.ticker}'s own trades yet in any single zone (need 3+) to say which one has worked best. Upload more history to unlock this.</div></div>`;
+      const bz = bt.zoneStats[bestKey];
+      return `<div style="padding:14px 20px;border-bottom:1px solid ${C.border};">
+        <span style="color:#AEB4C2;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;">Regression track record</span>
+        <div style="background:${C.cardHigh};border-radius:12px;padding:12px 14px;margin-top:8px;">
+          <div style="color:${C.green};font-size:13px;font-weight:800;margin-bottom:4px;">Best zone: ${zoneLabels[bestKey]}</div>
+          <div style="color:#D5DAE5;font-size:12.5px;line-height:1.55;">${s.ticker} has historically done best entering here — ${bz.winPct}% win rate, ${bz.avgPct>=0?'+':''}${bz.avgPct.toFixed(1)}% avg return, based on ${bz.n} past trade${bz.n===1?'':'s'}.</div>
+        </div>
+      </div>`;
     })() : ''}
     <div style="padding:14px 20px;">
       ${held ? '' : `<div style="color:#AEB4C2;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">Your plan</div>${planRows}`}
