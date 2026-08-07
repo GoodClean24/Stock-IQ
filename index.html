@@ -1828,11 +1828,6 @@ function positionStats(s){
   const aboveMAs = s.price>s.ma50 && s.ma50>s.ma200;
   const lockedIn = trailExit!=null && trailExit>pos.entry;
 
-  // Center-line reclaim check — computed here, early, so the main status
-  // line below can reference it. On 108 holdout trades: 0% win rate when
-  // never reclaimed, 60% win rate when it has. Strongest validated signal
-  // in the app — gets to override the normal status line when it applies.
-  let centerReclaim = null;
   // Center-line reclaim check — only meaningful if the entry itself was in
   // the sweet-spot center. Tracks whether price has EVER crossed back above
   // the regression middle line since entry. Validated on genuine holdout
