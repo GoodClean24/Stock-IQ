@@ -1504,6 +1504,15 @@ function regressionZoneInfo(rd, zoneStats){
     edgeHigh:{label:'Sweet spot edge', tier:'ok',   refWin:43, refAvg:5.3,  color:'#F5C518'},
     above:   {label:'Above center', tier:'ok',      refWin:36, refAvg:3.7,  color:'#7A8099'},
   }[zoneKey];
+  // Sub-split "above center" using the finer breakdown found on the
+  // watchlist: mild positive is actually strong, +1 to +2 is a real
+  // caution zone, not a smooth gradient the way the negative side was.
+  if(zoneKey==='above'){
+    if(rd<=0.5){ generic.label='Above center (mild)'; generic.tier='strong'; generic.refWin=67; generic.refAvg=18.9; generic.color='#00C805'; }
+    else if(rd<=1){ generic.label='Above center'; generic.tier='ok'; generic.refWin=49; generic.refAvg=10.6; generic.color='#7A8099'; }
+    else if(rd<=2){ generic.label='Above center (stretched)'; generic.tier='weak'; generic.refWin=29; generic.refAvg=-5.5; generic.color='#FF4444'; }
+    else { generic.label='Above center (extreme)'; generic.tier='ok'; generic.refWin=36; generic.refAvg=3.7; generic.color='#7A8099'; }
+  }
   const own = zoneStats && zoneStats[zoneKey];
   if(own){
     // If this ticker's OWN best zone is the one it's currently sitting in,
@@ -2281,7 +2290,7 @@ function renderCleanDetail(s){
       ${ps.momentumCall!=='n/a' ? `<div style="background:${(ps.momentumCall==='warning'?C.red:(ps.momentumCall==='onTrack'?C.green:C.yellow))}1A;border-radius:12px;padding:12px 14px;margin-bottom:10px;">
         <div style="color:${ps.momentumCall==='warning'?C.red:(ps.momentumCall==='onTrack'?C.green:C.yellow)};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">Momentum Check</div>
         <div style="color:#D5DAE5;font-size:12.5px;line-height:1.55;">${ps.momentumNote}</div>
-        ${ps.momentumAccuracy!=null ? `<div style="color:${C.textMuted};font-size:11px;margin-top:4px;">This check has been right ${(ps.momentumAccuracy*100).toFixed(0)}% of the time on ${s.ticker} (${ps.momentumEvaluable} past trades)</div>` : ''}
+        ${ps.momentumAccuracy!=null ? `<div style="color:${C.textSub};font-size:11px;margin-top:4px;">This check has been right ${(ps.momentumAccuracy*100).toFixed(0)}% of the time on ${s.ticker} (${ps.momentumEvaluable} past trades)</div>` : ''}
       </div>` : ''}
       ${ps.reversalStatus!=='n/a' ? `<div style="background:${(ps.reversalStatus==='warning'?C.red:(ps.reversalStatus==='caution'?C.yellow:C.green))}1A;border-radius:12px;padding:12px 14px;margin-bottom:10px;">
         <div style="color:${ps.reversalStatus==='warning'?C.red:(ps.reversalStatus==='caution'?C.yellow:C.green)};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">${ps.reversalStatus==='warning'?'⚠ Reversal signs':(ps.reversalStatus==='caution'?'◐ Watching for reversal':'✓ No reversal signs')}</div>
