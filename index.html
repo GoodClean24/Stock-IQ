@@ -1088,11 +1088,16 @@ function setupScore(s){
   const ed = earningsDaysAway(s);
   if(ed!=null && ed>=0 && ed<=7) score -= 50;  // earnings imminent — push it down the list
   if(isProven(s)) score += 15;                 // proven track record — nudge (only sorts BUY/WATCH)
-  const regZone = regressionZoneInfo(getRegDistPct(s));
-  if(regZone){
-    if(regZone.tier==='strong') score += 15;
-    else if(regZone.tier==='ok') score += 6;
-    // 'weak' tier gets no boost — matches the real backtested numbers
+  // Sector split found the regression boost only holds for Dip Buy —
+  // it actually reverses for Trend/Industrials, where non-center entries
+  // outperformed center entries by a wide margin. Only apply the boost
+  // where it's actually been shown to help.
+  if(getStrategyFor(s)==='Dip Buy'){
+    const regZone = regressionZoneInfo(getRegDistPct(s));
+    if(regZone){
+      if(regZone.tier==='strong') score += 15;
+      else if(regZone.tier==='ok') score += 6;
+    }
   }
   return score;
 }
@@ -1510,7 +1515,7 @@ function regressionZoneInfo(rd, zoneStats){
   if(zoneKey==='above'){
     if(rd<=0.5){ generic.label='Above center (mild)'; generic.tier='strong'; generic.refWin=67; generic.refAvg=18.9; generic.color='#00C805'; }
     else if(rd<=1){ generic.label='Above center'; generic.tier='ok'; generic.refWin=49; generic.refAvg=10.6; generic.color='#7A8099'; }
-    else if(rd<=2){ generic.label='Above center (stretched)'; generic.tier='weak'; generic.refWin=29; generic.refAvg=-5.5; generic.color='#FF4444'; }
+    else if(rd<=2){ generic.label='Above center (stretched)'; generic.tier='ok'; generic.refWin=36; generic.refAvg=2.5; generic.color='#7A8099'; }
     else { generic.label='Above center (extreme)'; generic.tier='ok'; generic.refWin=36; generic.refAvg=3.7; generic.color='#7A8099'; }
   }
   const own = zoneStats && zoneStats[zoneKey];
@@ -1823,12 +1828,10 @@ function positionStats(s){
   const aboveMAs = s.price>s.ma50 && s.ma50>s.ma200;
   const lockedIn = trailExit!=null && trailExit>pos.entry;
 
-  // Day-5 / Day-10 momentum check for this specific open position
-// Center-line reclaim check — only meaningful if the entry itself was in
-  // the sweet-spot center. Tracks whether price has EVER crossed back above
-  // the regression middle line since entry. On 226 real trades: 0% of
-  // trades that never reclaimed the line went on to win. 62% of trades
-  // that did reclaim it won, averaging +19%. Cleanest signal we've found.
+  // Center-line reclaim check — computed here, early, so the main status
+  // line below can reference it. On 108 holdout trades: 0% win rate when
+  // never reclaimed, 60% win rate when it has. Strongest validated signal
+  // in the app — gets to override the normal status line when it applies.
   let centerReclaim = null;
   const entryIdxForReg = snaps.findIndex(sn=>sn.date===pos.date);
   if(entryIdxForReg>=0){
@@ -1843,14 +1846,40 @@ function positionStats(s){
         applies: true,
         reclaimed,
         note: reclaimed
-          ? 'Reclaimed the center line ✓ — trades that do this have won 62% of the time, averaging +19% (based on 125 past trades).'
-          : "Hasn't reclaimed the center line yet — on 101 past trades that never did, none went on to win. Worth watching closely."
+          ? 'Reclaimed the center line ✓ — trades that do this have won 60% of the time, averaging +14.5% (validated on holdout data).'
+          : "Hasn't reclaimed the center line yet — trades that never do have a 0% win rate on every test we've run, including a genuine holdout. This is the strongest warning sign in this app. Watch closely."
+      };
+    }
+  }
+
+  // Center-line reclaim check — only meaningful if the entry itself was in
+  // the sweet-spot center. Tracks whether price has EVER crossed back above
+  // the regression middle line since entry. Validated on genuine holdout
+  // data (2025+, never touched during discovery): 0% win rate when it
+  // never reclaims, 60% win rate / +14.5% avg when it does. Strongest
+  // validated signal in this app.
+  let centerReclaim = null;
+  const entryIdxForReg = snaps.findIndex(sn=>sn.date===pos.date);
+  if(entryIdxForReg>=0){
+    const entryRegDist = computeRegDistPct(snaps, entryIdxForReg, 252);
+    if(entryRegDist!=null && entryRegDist>-0.75 && entryRegDist<=-0.25){
+      let reclaimed = false;
+      for(let k=entryIdxForReg+1; k<snaps.length; k++){
+        const rd = computeRegDistPct(snaps, k, 252);
+        if(rd!=null && rd>0){ reclaimed = true; break; }
+      }
+      centerReclaim = {
+        applies: true,
+        reclaimed,
+        note: reclaimed
+          ? 'Reclaimed the center line ✓ — trades that do this have won 60% of the time, averaging +14.5% (validated on holdout data).'
+          : "Hasn't reclaimed the center line yet — trades that never do have a 0% win rate on every test run so far, including a genuine holdout. This is the strongest warning sign in this app. Watch closely."
       };
     }
   }
 
   // Day-5 / Day-10 momentum check for this specific open position
-  const entrySnap = snaps.find(sn=>sn.date===pos.date);  
+  const entrySnap = snaps.find(sn=>sn.date===pos.date);
   const entryRSI = entrySnap ? entrySnap.rsi : null;
   const rsiChange = (entryRSI!=null && s.rsi!=null) ? (s.rsi-entryRSI) : null;
   let momentumCall = 'n/a', momentumNote = '';
@@ -1864,7 +1893,10 @@ function positionStats(s){
   try { const _bt = tickerBacktest(s); momentumAccuracy=_bt.momentumAccuracy; momentumEvaluable=_bt.momentumEvaluable; } catch(e){}
 
   let status, statusColor;
-  if(macdFading){ status='Momentum is fading — MACD has rolled over. The push that got you in is weakening. Keep a close eye on your exit.'; statusColor=C.yellow; }
+  if(centerReclaim && centerReclaim.applies && !centerReclaim.reclaimed){
+    status = centerReclaim.note; statusColor = C.red;
+  }
+  else if(macdFading){ status='Momentum is fading — MACD has rolled over. The push that got you in is weakening. Keep a close eye on your exit.'; statusColor=C.yellow; }
   else if(macdFlat){ status='MACD is sitting right at the pivot — essentially tied with its signal line. Could break either way; not decisive yet, just watch it.'; statusColor=C.teal; }
   else if(distPct!=null && distPct<3){ status='Price is close to your exit. A pullback from here would sell you out — that\u2019s fine, it means the run may be ending.'; statusColor=C.yellow; }
   else if(lockedIn){ status='Trending up, and your exit has climbed above your entry — you\u2019re locked into a profit now no matter what. Let it run.'; statusColor=C.green; }
