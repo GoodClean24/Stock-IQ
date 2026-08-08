@@ -1534,6 +1534,23 @@ function regressionZoneInfo(rd, zoneStats){
   }
   return {...generic, isOwnData: false};
 }
+// Retroactively computes what the regression zone was on the actual entry
+// day, using stored snapshot history — same math tickerBacktest already
+// uses for historical trades, just applied to a live held position.
+function getEntryRegDistPct(s){
+  if(!s.position) return null;
+  const snaps = (s.snapshots||[]).filter(sn=>sn&&sn.date&&sn.price!=null).sort((a,b)=>new Date(a.date)-new Date(b.date));
+  let idx = snaps.findIndex(sn=>sn.date===s.position.date);
+  if(idx<0 && snaps.length){
+    const entryTime = new Date(s.position.date).getTime();
+    let best=-1, bestDiff=Infinity;
+    snaps.forEach((sn,i)=>{ const d=Math.abs(new Date(sn.date).getTime()-entryTime); if(d<bestDiff){bestDiff=d; best=i;} });
+    idx = best;
+  }
+  if(idx<0) return null;
+  return computeRegDistPct(snaps, idx, 252);
+}
+function getRegDistPct(s){
 function getRegDistPct(s){
   const snaps = (s.snapshots||[]).filter(sn=>sn&&sn.date&&sn.price!=null).sort((a,b)=>new Date(a.date)-new Date(b.date));
   if(snaps.length<252) return null;
