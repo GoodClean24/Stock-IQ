@@ -7494,6 +7494,28 @@ const PLAYBOOKS = {
 };
 
 function pbFor(s){ return s && PLAYBOOKS[String(s.ticker||'').toUpperCase()] || null; }
+function ensureCorePlaceholders(){
+  // Migration safety: once a Core record has real uploaded history, it is no
+  // longer a placeholder. Older v2 builds accidentally left this flag set,
+  // which forced valid Core tickers to WAIT before their playbook was checked.
+  stocks = stocks.map(s => {
+    const t=String(s.ticker||'').toUpperCase();
+    if(CORE_TICKERS.includes(t) && (s.snapshots||[]).length){
+      return {...s, coreStatus:'CORE PLAYBOOK', _v2Placeholder:false};
+    }
+    return s;
+  });
+  const have=new Set(stocks.map(s=>String(s.ticker||'').toUpperCase()));
+  for(const t of CORE_TICKERS){
+    if(!have.has(t)){
+      stocks.push({
+        id:`v2_core_${t}`, ticker:t, name:t, type:'Swing Trade', coreStatus:'CORE PLAYBOOK',
+        starred:false, notes:'', research:'', realized:[], scannerSources:[], snapshots:[],
+        _v2Placeholder:true
+      });
+    }
+  }
+}
 function isCoreStock(s){ return !!pbFor(s) && !s.archived; }
 function isMarketStock(s){ return MARKET_TICKERS.includes(String(s?.ticker||'').toUpperCase()); }
 function isResearchStock(s){ return !isCoreStock(s) && !isMarketStock(s) && !s.archived; }
@@ -7594,6 +7616,7 @@ function earningsState(s){ const pb=pbFor(s); if(!pb)return null; const days=ear
 
 function preEntryState(s){
   if(!isCoreStock(s)) return {state:'RESEARCH ONLY',reason:'No validated StockIQ playbook yet.'};
+  if(s._v2Placeholder || !(s.snapshots||[]).length) return {state:'WAIT',reason:'Daily data has not been loaded for this Core playbook yet.',checks:setupChecks(s)};
   const checks=setupChecks(s), required=checks.filter(x=>x.required), missing=required.filter(x=>!x.ok);
   if(required.length && missing.length===0){ const tail=marketTailwind(s); return {state:tail.ok?'A+ BUY':'BUY',reason:tail.ok?'Setup is ready and its market/sector tailwind is supportive.':'Setup is ready.',checks}; }
   if(missing.length===1) return {state:'PREPARING',reason:`Waiting for: ${missing[0].label}.`,checks};
@@ -7686,7 +7709,7 @@ function renderStockCard(s){
     </div>${conflict?`<div style="color:${C.yellow};font-size:11px;margin-top:9px;font-weight:700;">Portfolio conflict: ${conflict}</div>`:''}
   </div>`;
 }
-function renderHome(){ renderMarket(); renderPortfolioBox(); const pw=document.getElementById('position-watch'); if(pw)pw.innerHTML=''; renderTonightsOpportunities(); renderFilterBar(); renderListHeader(); renderStockList(); }
+function renderHome(){ ensureCorePlaceholders(); renderMarket(); renderPortfolioBox(); const pw=document.getElementById('position-watch'); if(pw)pw.innerHTML=''; renderTonightsOpportunities(); renderFilterBar(); renderListHeader(); renderStockList(); }
 
 // ── v2 DETAIL ───────────────────────────────────────────────────────────────
 function checklistHTML(checks){ return `<div style="display:flex;flex-direction:column;gap:7px;">${checks.map(x=>`<div style="display:flex;gap:9px;align-items:flex-start;"><span style="color:${x.ok?C.green:C.red};font-size:15px;font-weight:900;line-height:1;">${x.ok?'✓':'×'}</span><div><div style="color:${C.text};font-size:12.5px;font-weight:700;">${x.label}</div><div style="color:${C.textSub};font-size:10.5px;line-height:1.4;margin-top:2px;">${x.teach}</div></div></div>`).join('')}</div>`; }
@@ -7741,7 +7764,7 @@ async function previewV2Daily(input){
 }
 async function applyV2Daily(){ const parsed=window._v2PendingDaily; if(!parsed)return; closeAllOverlays(); showSaveStatus('saving'); const groups=parsed.groups, byTicker=new Map(stocks.map(s=>[String(s.ticker||'').toUpperCase(),s])), updates=[];
   const wanted=new Set([...CORE_TICKERS,...MARKET_TICKERS,...stocks.filter(isResearchStock).map(s=>String(s.ticker).toUpperCase())]);
-  for(const t of wanted){ const rows=groups.get(t); if(!rows||!rows.length)continue; const old=byTicker.get(t), latest=rows[rows.length-1], prev=rows.length>1?rows[rows.length-2]:null; const base=old||{id:`v2_${t}`,ticker:t,name:t,type:'Swing Trade',starred:false,notes:'',realized:[],scannerSources:[],coreStatus:CORE_TICKERS.includes(t)?'CORE PLAYBOOK':MARKET_TICKERS.includes(t)?'MARKET':'RESEARCH ONLY'}; const u={...base,price:latest.price,change:prev?.price?latest.price-prev.price:0,pct:prev?.price?((latest.price/prev.price)-1)*100:0,rsi:latest.rsi,vol:latest.vol,avgvol:latest.avgvol,ma20:latest.ma20,ema20:latest.ema20,ma50:latest.ma50,ma200:latest.ma200,macdLine:latest.macdLine,signalLine:latest.signalLine,atr:latest.atr,hi52:latest.hi52,lo52:latest.lo52,sector:latest.sector||base.sector,industry:latest.industry||base.industry,analyzed:latest.date,snapshots:rows,type:'Swing Trade',coreStatus:CORE_TICKERS.includes(t)?'CORE PLAYBOOK':MARKET_TICKERS.includes(t)?'MARKET':(base.coreStatus||'RESEARCH ONLY')}; updates.push(u); }
+  for(const t of wanted){ const rows=groups.get(t); if(!rows||!rows.length)continue; const old=byTicker.get(t), latest=rows[rows.length-1], prev=rows.length>1?rows[rows.length-2]:null; const base=old||{id:`v2_${t}`,ticker:t,name:t,type:'Swing Trade',starred:false,notes:'',realized:[],scannerSources:[],coreStatus:CORE_TICKERS.includes(t)?'CORE PLAYBOOK':MARKET_TICKERS.includes(t)?'MARKET':'RESEARCH ONLY'}; const u={...base,price:latest.price,change:prev?.price?latest.price-prev.price:0,pct:prev?.price?((latest.price/prev.price)-1)*100:0,rsi:latest.rsi,vol:latest.vol,avgvol:latest.avgvol,ma20:latest.ma20,ema20:latest.ema20,ma50:latest.ma50,ma200:latest.ma200,macdLine:latest.macdLine,signalLine:latest.signalLine,atr:latest.atr,hi52:latest.hi52,lo52:latest.lo52,sector:latest.sector||base.sector,industry:latest.industry||base.industry,analyzed:latest.date,snapshots:rows,type:'Swing Trade',coreStatus:CORE_TICKERS.includes(t)?'CORE PLAYBOOK':MARKET_TICKERS.includes(t)?'MARKET':(base.coreStatus||'RESEARCH ONLY'),_v2Placeholder:false}; updates.push(u); }
   const updMap=new Map(updates.map(x=>[String(x.ticker).toUpperCase(),x])); stocks=stocks.map(s=>updMap.get(String(s.ticker).toUpperCase())||s); updates.forEach(u=>{if(!byTicker.has(String(u.ticker).toUpperCase()))stocks.push(u);});
   try{ for(const u of updates)await fbSaveStock(u); showSaveStatus('saved'); setTimeout(()=>showSaveStatus('ready'),1800);}catch(e){console.error(e);showSaveStatus('error');} renderHome(); }
 
@@ -7752,7 +7775,7 @@ function showAddFlow(){ if(_origShowAddFlow)_origShowAddFlow(); setTimeout(()=>{
 // ── v2 initialization ────────────────────────────────────────────────────────
 (function initStockIQV2(){
   const style=document.createElement('style'); style.textContent=`.v2lbl{color:${C.textMuted};font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px}.v2val{color:${C.text};font-size:12px;font-weight:900}.v2big{color:${C.text};font-size:16px;font-weight:950}`; document.head.appendChild(style);
-  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2 · playbooks';
+  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.1 · playbooks';
   const topButtons=[...document.querySelectorAll('button')]; const add=topButtons.find(b=>b.textContent.includes('Add Stock')); if(add)add.innerHTML='<span style="font-size:16px;">+</span> Research'; const scan=topButtons.find(b=>b.textContent.includes('Import Scan')); if(scan){scan.textContent='Daily Data';scan.onclick=showDailyDataFlow;scan.setAttribute('aria-label','Upload daily multi-ticker data');}
   activeTag='All'; sortMode='opportunity';
 })();
