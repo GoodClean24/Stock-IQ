@@ -1551,7 +1551,6 @@ function getEntryRegDistPct(s){
   return computeRegDistPct(snaps, idx, 252);
 }
 function getRegDistPct(s){
-function getRegDistPct(s){
   const snaps = (s.snapshots||[]).filter(sn=>sn&&sn.date&&sn.price!=null).sort((a,b)=>new Date(a.date)-new Date(b.date));
   if(snaps.length<252) return null;
   return computeRegDistPct(snaps, snaps.length-1, 252);
