@@ -1855,7 +1855,20 @@ function positionStats(s){
   }
 
   // Day-5 / Day-10 momentum check for this specific open position
-  const entrySnap = snaps.find(sn=>sn.date===pos.date);
+  // Uses the closest available snapshot to the entry date, not an exact
+  // match — a history re-import after buying can shift snapshot dates
+  // slightly, and an exact-match lookup would silently break the check
+  // instead of just being slightly less precise.
+  let entrySnap = snaps.find(sn=>sn.date===pos.date);
+  if(!entrySnap && snaps.length){
+    const entryTime = new Date(pos.date).getTime();
+    entrySnap = snaps.reduce((closest, sn)=>{
+      const t = new Date(sn.date).getTime();
+      if(isNaN(t)) return closest;
+      if(!closest) return sn;
+      return Math.abs(t-entryTime) < Math.abs(new Date(closest.date).getTime()-entryTime) ? sn : closest;
+    }, null);
+  }
   const entryRSI = entrySnap ? entrySnap.rsi : null;
   const rsiChange = (entryRSI!=null && s.rsi!=null) ? (s.rsi-entryRSI) : null;
   let momentumCall = 'n/a', momentumNote = '';
