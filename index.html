@@ -7676,7 +7676,15 @@ function preEntryState(s){
   if(s._v2Placeholder || !(s.snapshots||[]).length) return {state:'WAIT',reason:'Daily data has not been loaded for this Core playbook yet.',checks:setupChecks(s)};
   const checks=setupChecks(s), required=checks.filter(x=>x.required), missing=required.filter(x=>!x.ok);
   if(required.length && missing.length===0){ const tail=marketTailwind(s), sweet=sweetSpotFit(s,checks); const aplus=tail.ok&&sweet; return {state:aplus?'A+ BUY':'BUY',reason:aplus?'Required setup is ready, the historical sweet spot is aligned, and the market/sector tailwind is supportive.':sweet?'Required setup is ready. Sweet spot is aligned; market/sector boost is not required.':'Required setup is ready. Some A+ preferences are not aligned, but they do not block the trade.',checks}; }
-  if(missing.length===1) return {state:'PREPARING',reason:`Waiting for: ${missing[0].label}.`,checks};
+  if(missing.length===1){
+  const m=missing[0];
+
+  return {
+    state:'PREPARING',
+    reason:`${m.label}. ${m.teach||''}`,
+    checks
+  };
+}
   return {state:'WAIT',reason:missing.length?`${missing.length} setup requirements are not ready yet.`:'Not enough data yet.',checks};
 }
 
