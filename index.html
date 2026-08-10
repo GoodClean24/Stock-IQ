@@ -7751,9 +7751,12 @@ function regressionPanel(s,pb){
   const yFor=(z)=> centerY - (z*spacing);
   const lineHTML=[-3,-2,-1,0,1,2,3].map(z=>{
     const y=yFor(z);
-    const width = z===0 ? 3 : 2;
-    const opacity = z===0 ? 1 : 0.7;
-    return `<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="#FFFFFF" stroke-width="${width}" opacity="${opacity}" stroke-linecap="round" />`;
+    const isCenter = z===0;
+    const isSecond = Math.abs(z)===2;
+    const width = isCenter ? 3 : (isSecond ? 1.4 : 2);
+    const opacity = isCenter ? 1 : (isSecond ? 0.75 : 0.7);
+    const dash = isCenter || isSecond ? '7 7' : '';
+    return `<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="#FFFFFF" stroke-width="${width}" opacity="${opacity}" ${dash?`stroke-dasharray="${dash}"`:''} stroke-linecap="round" />`;
   }).join('');
   let bandHTML='';
   if(range){
