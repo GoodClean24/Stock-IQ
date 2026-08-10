@@ -7591,8 +7591,8 @@ function setupChecks(s){
   const regUp=reg.slope!=null&&reg.slope>0;
 
   if(['ONTO','HWM','FTAI','MOD','PLTR','MPC'].includes(s.ticker)){
-    add('Price above 200-day average',longTrend,'The larger trend is still intact.');
-    add('50-day above 200-day',stack,'The medium-term trend is still stronger than the long-term trend.');
+    add('Price above 200-day average',longTrend,`Current ${p==null?'—':money(p)} · 200-day ${m200==null?'—':money(m200)}${p!=null&&m200!=null&&!longTrend?` · needs ${pctFmt((m200/p-1)*100)} to reclaim`:''}`);
+    add('50-day above 200-day',stack,`50-day ${m50==null?'—':money(m50)} · 200-day ${m200==null?'—':money(m200)}`);
     add('Regression trend rising',regUp,'The stock’s 126-day regression path is still moving higher.');
   }
 
@@ -7614,19 +7614,19 @@ function setupChecks(s){
   }
 
   if(s.ticker==='MTSI'){
-    add('Price above 200-day average',longTrend,'Keeps the larger trend healthy.');
+    add('Price above 200-day average',longTrend,`Current ${p==null?'—':money(p)} · 200-day ${m200==null?'—':money(m200)}${p!=null&&m200!=null&&!longTrend?` · needs ${pctFmt((m200/p-1)*100)} to reclaim`:''}`);
     add('Regression trend rising',regUp,'The 126-day regression path is still moving higher.');
     add('RSI in 35–60 range',rsi!=null&&rsi>=35&&rsi<=60,`Current RSI ${rsi==null?'—':rsi.toFixed(1)}`);
-    add('Price reclaimed 50-day average',crossUp(s,'price','ma50'),'This is the actual MTSI trigger.');
+    add('Price reclaimed 50-day average',crossUp(s,'price','ma50'),`Current ${p==null?'—':money(p)} · 50-day ${m50==null?'—':money(m50)}${p!=null&&m50!=null&&p<m50?` · needs ${pctFmt((m50/p-1)*100)} to reclaim`:' · waiting for a fresh cross above'}`);
     add('MACD histogram improving',hist!=null&&prevHist!=null&&hist>prevHist,`Helpful confirmation, but it no longer blocks a valid BUY.`,false,'A+');
   }
 
   if(s.ticker==='THC'){
-    add('Price above 200-day average',longTrend,'Keeps the larger trend healthy.');
+    add('Price above 200-day average',longTrend,`Current ${p==null?'—':money(p)} · 200-day ${m200==null?'—':money(m200)}${p!=null&&m200!=null&&!longTrend?` · needs ${pctFmt((m200/p-1)*100)} to reclaim`:''}`);
     add('Regression trend rising',regUp,'The 126-day regression path is still moving higher.');
     add('RSI in 30–57 BUY range',rsi!=null&&rsi>=30&&rsi<=57,`Current RSI ${rsi==null?'—':rsi.toFixed(1)}`);
     add('RSI 30–55 — A+ range',rsi!=null&&rsi>=30&&rsi<=55,'The tighter historical sweet spot remains 30–55.',false,'A+');
-    add('Price reclaimed 20-day average',crossUp(s,'price','ma20'),'This is the THC trigger.');
+    add('Price reclaimed 20-day average',crossUp(s,'price','ma20'),`Current ${p==null?'—':money(p)} · 20-day ${e20==null?'—':money(e20)}${p!=null&&e20!=null&&p<e20?` · needs ${pctFmt((e20/p-1)*100)} to reclaim`:' · waiting for a fresh cross above'}`);
   }
 
   if(['DELL','VRT','DVN'].includes(s.ticker)){
@@ -7634,9 +7634,9 @@ function setupChecks(s){
     const sweetMom=s.ticker==='DELL'?8:s.ticker==='DVN'?8:5;
     const buyRV=s.ticker==='DELL'?0.9:0.7;
     const sweetRV=s.ticker==='DELL'?1.0:0.8;
-    add('Price above 20-day average',p!=null&&e20!=null&&p>e20,'Price is holding above its short-term trend.');
-    add('20-day above 50-day',e20!=null&&m50!=null&&e20>m50,'Short-term trend is leading the medium trend.');
-    add('50-day above 200-day',stack,'The larger trend stack is healthy.');
+    add('Price above 20-day average',p!=null&&e20!=null&&p>e20,`Current ${p==null?'—':money(p)} · 20-day ${e20==null?'—':money(e20)}${p!=null&&e20!=null&&p<=e20?` · needs ${pctFmt((e20/p-1)*100)} to reclaim`:''}`);
+    add('20-day above 50-day',e20!=null&&m50!=null&&e20>m50,`20-day ${e20==null?'—':money(e20)} · 50-day ${m50==null?'—':money(m50)}`);
+    add('50-day above 200-day',stack,`50-day ${m50==null?'—':money(m50)} · 200-day ${m200==null?'—':money(m200)}`);
     add('Regression trend rising',regUp,'The stock’s 126-day regression path is moving higher.');
     add(`RSI in ${pb.rsi[0]}–${pb.rsi[1]} range`,rsi!=null&&rsi>=pb.rsi[0]&&rsi<=pb.rsi[1],`Current RSI ${rsi==null?'—':rsi.toFixed(1)}`);
     add(`20-day momentum at least +${buyMom}%`,ch20!=null&&ch20>=buyMom,`Current 20-day change ${ch20==null?'—':pctFmt(ch20)}`);
@@ -7677,47 +7677,18 @@ function preEntryState(s){
   const checks=setupChecks(s), required=checks.filter(x=>x.required), missing=required.filter(x=>!x.ok);
   if(required.length && missing.length===0){ const tail=marketTailwind(s), sweet=sweetSpotFit(s,checks); const aplus=tail.ok&&sweet; return {state:aplus?'A+ BUY':'BUY',reason:aplus?'Required setup is ready, the historical sweet spot is aligned, and the market/sector tailwind is supportive.':sweet?'Required setup is ready. Sweet spot is aligned; market/sector boost is not required.':'Required setup is ready. Some A+ preferences are not aligned, but they do not block the trade.',checks}; }
   const structuralLabels=[
-  'Price above 20-day average',
-  '20-day above 50-day',
-  '50-day above 200-day',
-  'Price above 200-day average',
-  'Regression trend rising'
-];
-
-const missingStructural=missing.filter(
-  x=>structuralLabels.includes(x.label)
-);
-
-const missingEntry=missing.filter(
-  x=>!structuralLabels.includes(x.label)
-);
-
-if(
-  missing.length===1 ||
-  (
-    missingStructural.length===0 &&
-    missingEntry.length<=2
-  )
-){
-  const reason=missing
-    .map(x=>`${x.label}. ${x.teach||''}`)
-    .join('<br><br>');
-
-  return {
-    state:'PREPARING',
-    reason,
-    checks
-  };
-}
-
-return {
-  state:'WAIT',
-  reason:missing.length
-    ?`${missing.length} setup requirements are not ready yet.`
-    :'Not enough data yet.',
-  checks
-};
-}
+    'Price above 20-day average',
+    '20-day above 50-day',
+    '50-day above 200-day',
+    'Price above 200-day average',
+    'Regression trend rising'
+  ];
+  const missingStructural=missing.filter(x=>structuralLabels.includes(x.label));
+  const missingEntry=missing.filter(x=>!structuralLabels.includes(x.label));
+  if(missing.length===1 || (missingStructural.length===0 && missingEntry.length<=2)){
+    const reason=missing.map(x=>`${x.label}. ${x.teach||''}`).join('<br><br>');
+    return {state:'PREPARING',reason,checks};
+  }
   return {state:'WAIT',reason:missing.length?`${missing.length} setup requirements are not ready yet.`:'Not enough data yet.',checks};
 }
 
@@ -7812,7 +7783,12 @@ function renderHome(){ ensureCorePlaceholders(); renderMarket(); renderPortfolio
 // ── v2 DETAIL ───────────────────────────────────────────────────────────────
 function calloutBox(kind,title,text){ const cfg={green:{bg:C.greenDim,border:C.green+'66',title:C.green},yellow:{bg:C.yellowDim,border:C.yellow+'66',title:C.yellow},red:{bg:C.redDim,border:C.red+'66',title:C.red},blue:{bg:C.blueDim,border:C.blue+'66',title:C.blue},purple:{bg:C.purpleDim,border:C.purple+'66',title:C.purple},teal:{bg:C.tealDim,border:C.teal+'66',title:C.teal}}[kind]||{bg:C.cardHigh,border:C.border,title:C.text}; return `<div style="background:${cfg.bg};border:1px solid ${cfg.border};border-radius:14px;padding:14px 15px;margin:0 16px 12px;"><div style="color:${cfg.title};font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;">${title}</div><div style="color:${C.text};font-size:14px;font-weight:800;line-height:1.45;">${text}</div></div>`; }
 function topCallout(s,pb,st){ if(!st||!st.state) return ''; if(s.position){ if(st.state==='EXIT') return calloutBox('red','Action Needed',st.reason||'Exit the position.'); if(st.state==='DECISION DAY') return calloutBox('purple','Decision Day',st.reason||'The normal hold has been reached.'); if(st.state==='RUNNER') return calloutBox('purple','Runner Active',st.reason||'The stock is strong enough to keep running.'); if(st.state==='WATCH EXIT') return calloutBox('yellow','Pay Attention',st.reason||'The trade is weakening but not broken.'); return calloutBox('teal','Current Plan',st.reason||'Hold the position unless the stop is hit.'); } if(st.state==='A+ BUY') return calloutBox('green','Best Opportunity',st.reason||'The setup is valid and the environment is supportive.'); if(st.state==='BUY') return calloutBox('green','Ready To Buy',st.reason||'The setup is valid.'); if(st.state==='PREPARING') return calloutBox('yellow','What Needs To Happen',st.reason||'The setup is close but still missing a trigger.'); return calloutBox('blue','Why It Is Waiting',st.reason||'The setup is not ready yet.'); }
-function checklistHTML(checks){ return `<div style="display:flex;flex-direction:column;gap:9px;">${checks.map(x=>`<div style="display:flex;gap:10px;align-items:flex-start;"><span style="color:${x.ok?C.green:C.red};font-size:16px;font-weight:900;line-height:1;">${x.ok?'✓':'×'}</span><div><div style="color:${C.text};font-size:13.5px;font-weight:800;">${x.label}</div><div style="color:${C.textSub};font-size:12px;line-height:1.45;margin-top:3px;">${x.teach}</div></div></div>`).join('')}</div>`; }
+function checklistHTML(checks){
+  const required=checks.filter(x=>x.required);
+  const aplus=checks.filter(x=>!x.required && x.tier==='A+');
+  const rows=(items,isAPlus=false)=>items.map(x=>`<div style="display:flex;gap:10px;align-items:flex-start;"><span style="color:${x.ok?C.green:(isAPlus?C.yellow:C.red)};font-size:16px;font-weight:900;line-height:1;">${x.ok?'✓':(isAPlus?'○':'×')}</span><div><div style="color:${C.text};font-size:13.5px;font-weight:800;">${x.label}</div><div style="color:${C.textSub};font-size:12px;line-height:1.45;margin-top:3px;">${x.teach}</div></div></div>`).join('');
+  return `<div style="display:flex;flex-direction:column;gap:9px;">${rows(required)}${aplus.length?`<div style="border-top:1px solid ${C.border};margin-top:5px;padding-top:12px;"><div style="color:${C.yellow};font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px;">A+ Boosts</div><div style="display:flex;flex-direction:column;gap:9px;">${rows(aplus,true)}</div></div>`:''}</div>`;
+}
 function panel(title,body){ return `<div style="background:${C.card};border:1px solid ${C.border};border-radius:16px;padding:16px;margin:0 16px 12px;"><div style="color:${C.textSub};font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px;">${title}</div>${body}</div>`; }
 function regressionFocusText(s,pb){
   const map={
