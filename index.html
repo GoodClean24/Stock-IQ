@@ -7474,7 +7474,7 @@ const PLAYBOOKS = {
     teach:'ONTO has historically worked best after a meaningful pullback below its normal trend while the larger uptrend stays intact.'},
   HWM:{name:'Regression Pullback', confidence:'HIGH', hold:20, maxHold:30, stopPct:8, cluster:'Industrial / Aerospace',
     stats:{trades:29,win:79,avg:6.3,drawdown:'~4–5%',worst:'~-7%'},
-    regRange:[-2.0,-0.75], rsi:[0,55], market:'XLI', earnings:'HOLD THROUGH',
+    regRange:[-2.0,-0.75], buyRegRange:[-2.0,-0.65], rsi:[0,55], market:'XLI', earnings:'HOLD THROUGH',
     teach:'HWM tends to reward pullbacks below its recent trend when the long-term trend is still healthy.'},
   MTSI:{name:'50-Day Reclaim', confidence:'HIGH', hold:10, maxHold:25, stopPct:9.5, cluster:'Tech / AI / Semis',
     stats:{trades:20,win:85,avg:5.5,drawdown:'~4%',worst:'~-9%'},
@@ -7494,7 +7494,7 @@ const PLAYBOOKS = {
     teach:'VRT has historically rewarded strong trend structure with positive momentum and enough room for normal volatility.'},
   FTAI:{name:'Regression Pullback', confidence:'HIGH', hold:20, maxHold:20, stopPct:10.5, cluster:'Industrial / Aerospace',
     stats:{trades:18,win:78,avg:13.3,drawdown:'~8%',worst:'~-11%'},
-    regRange:[-2.5,-1.0], rsi:[0,50], market:'XLI', earnings:'EXIT BEFORE EARNINGS',
+    regRange:[-2.5,-1.0], buyRegRange:[-2.5,-0.9], rsi:[0,50], market:'XLI', earnings:'EXIT BEFORE EARNINGS',
     teach:'FTAI has historically worked after a deep pullback below its rising trend, but earnings has hurt this setup.'},
   MOD:{name:'Deep Pullback', confidence:'HIGH', hold:20, maxHold:20, stopPct:10, cluster:'Independent',
     stats:{trades:22,win:68,avg:14.3,drawdown:'~8%',worst:'~-14%'},
@@ -7510,7 +7510,7 @@ const PLAYBOOKS = {
     teach:'DVN has historically rewarded established momentum, especially when the broad market trend is healthy. It needs room; tight trailing stops hurt results.'},
   MPC:{name:'Regression Pullback', confidence:'MODERATE', hold:10, maxHold:10, stopPct:6, cluster:'Energy',
     stats:{trades:37,win:73,avg:2.4,drawdown:'~4%',worst:'~10%'},
-    regRange:[-2.0,-0.75], rsi:[0,55], market:'XLE', earnings:'EXIT BEFORE EARNINGS',
+    regRange:[-2.0,-0.75], buyRegRange:[-3.0,-0.5], rsi:[0,55], market:'XLE', earnings:'EXIT BEFORE EARNINGS',
     teach:'MPC has a smaller but repeatable pullback edge. It is a diversifier, not a high-expectancy first choice.'},
 };
 
@@ -7561,9 +7561,9 @@ function prevSnap(s,n=1){ const a=s.snapshots||[]; return a.length>n?a[a.length-
 function snapVal(sn,...keys){ for(const k of keys){ if(sn && sn[k]!=null && !Number.isNaN(Number(sn[k]))) return Number(sn[k]); } return null; }
 function curVal(s,...keys){ for(const k of keys){ if(s && s[k]!=null && !Number.isNaN(Number(s[k]))) return Number(s[k]); } const l=latestSnap(s); return snapVal(l,...keys); }
 
-function regressionStats(s, window=252){
+function regressionStats(s, window=126){
   const snaps=(s.snapshots||[]).filter(x=>x.price!=null).slice(-window);
-  if(snaps.length<120) return {z:null,slope:null,center:null,sd:null,n:snaps.length};
+  if(snaps.length<40) return {z:null,slope:null,center:null,sd:null,n:snaps.length};
   const ys=snaps.map(x=>Number(x.price)), n=ys.length;
   const xbar=(n-1)/2, ybar=ys.reduce((a,b)=>a+b,0)/n;
   let num=0,den=0; for(let i=0;i<n;i++){ num+=(i-xbar)*(ys[i]-ybar); den+=(i-xbar)*(i-xbar); }
@@ -7585,48 +7585,72 @@ function setupChecks(s){
   const pb=pbFor(s); if(!pb) return [];
   const p=curVal(s,'price'), e20=curVal(s,'ma20','ema20'), m50=curVal(s,'ma50'), m200=curVal(s,'ma200'), rsi=curVal(s,'rsi');
   const reg=regressionStats(s), ch20=changeN(s,20), rv=relativeVolume(s), offHi=pctFrom52High(s), hist=macdHist(s), prevHist=macdHist(s,prevSnap(s));
-  const out=[]; const add=(label,ok,teach,required=true)=>out.push({label,ok:!!ok,teach,required});
+  const out=[]; const add=(label,ok,teach,required=true,tier='REQUIRED')=>out.push({label,ok:!!ok,teach,required,tier});
   const longTrend= p!=null&&m200!=null&&p>m200;
   const stack= m50!=null&&m200!=null&&m50>m200;
   const regUp=reg.slope!=null&&reg.slope>0;
+
   if(['ONTO','HWM','FTAI','MOD','PLTR','MPC'].includes(s.ticker)){
     add('Price above 200-day average',longTrend,'The larger trend is still intact.');
     add('50-day above 200-day',stack,'The medium-term trend is still stronger than the long-term trend.');
-    add('Regression trend rising',regUp,'The stock’s recent normal path is still moving higher.');
+    add('Regression trend rising',regUp,'The stock’s 126-day regression path is still moving higher.');
   }
+
   if(['ONTO','HWM','FTAI','MPC'].includes(s.ticker)){
-    const [lo,hi]=pb.regRange; add(`Regression in historical range`,reg.z!=null&&reg.z>=lo&&reg.z<=hi,`Current ${reg.z==null?'—':reg.z.toFixed(2)} · historical ${lo} to ${hi}`);
+    const sweet=pb.regRange, buy=pb.buyRegRange||sweet;
+    add('Regression inside BUY range',reg.z!=null&&reg.z>=buy[0]&&reg.z<=buy[1],`Current ${reg.z==null?'—':reg.z.toFixed(2)} · BUY range ${buy[0]} to ${buy[1]}`);
+    if(buy[0]!==sweet[0] || buy[1]!==sweet[1]) add('Regression in A+ Sweet Spot',reg.z!=null&&reg.z>=sweet[0]&&reg.z<=sweet[1],`Best historical zone ${sweet[0]} to ${sweet[1]}`,false,'A+');
     add('RSI in preferred range',rsi!=null&&rsi>=pb.rsi[0]&&rsi<=pb.rsi[1],`Current RSI ${rsi==null?'—':rsi.toFixed(1)}`);
   }
-  if(s.ticker==='MOD'||s.ticker==='PLTR'){
-    const threshold=s.ticker==='MOD'?-15:-22;
-    add(`Deep enough below 52-week high`,offHi!=null&&offHi<=threshold,`Current ${offHi==null?'—':offHi.toFixed(1)+'%'} · needs ${Math.abs(threshold)}%+ below the high`);
-    add('RSI in preferred range',rsi!=null&&rsi>=pb.rsi[0]&&rsi<=pb.rsi[1],`Current RSI ${rsi==null?'—':rsi.toFixed(1)}`);
+
+  if(s.ticker==='MOD'){
+    add('At least 14% below 52-week high',offHi!=null&&offHi<=-14,`Current ${offHi==null?'—':offHi.toFixed(1)+'%'} · BUY begins at 14% below the high`);
+    add('15%+ below high — A+ depth',offHi!=null&&offHi<=-15,'The strongest historical MOD zone started around 15% below the high.',false,'A+');
+    add('RSI in 35–60 range',rsi!=null&&rsi>=35&&rsi<=60,`Current RSI ${rsi==null?'—':rsi.toFixed(1)}`);
   }
+  if(s.ticker==='PLTR'){
+    add('At least 22% below 52-week high',offHi!=null&&offHi<=-22,`Current ${offHi==null?'—':offHi.toFixed(1)+'%'} · this deep pullback remains required`);
+    add('RSI in 25–50 range',rsi!=null&&rsi>=25&&rsi<=50,`Current RSI ${rsi==null?'—':rsi.toFixed(1)}`);
+  }
+
   if(s.ticker==='MTSI'){
     add('Price above 200-day average',longTrend,'Keeps the larger trend healthy.');
-    add('Regression trend rising',regUp,'The larger path is still moving higher.');
+    add('Regression trend rising',regUp,'The 126-day regression path is still moving higher.');
     add('RSI in 35–60 range',rsi!=null&&rsi>=35&&rsi<=60,`Current RSI ${rsi==null?'—':rsi.toFixed(1)}`);
-    add('Momentum improving',hist!=null&&prevHist!=null&&hist>prevHist,`MACD histogram ${hist==null?'—':hist.toFixed(2)} and improving.`);
     add('Price reclaimed 50-day average',crossUp(s,'price','ma50'),'This is the actual MTSI trigger.');
+    add('MACD histogram improving',hist!=null&&prevHist!=null&&hist>prevHist,`Helpful confirmation, but it no longer blocks a valid BUY.`,false,'A+');
   }
+
   if(s.ticker==='THC'){
     add('Price above 200-day average',longTrend,'Keeps the larger trend healthy.');
-    add('Regression trend rising',regUp,'The larger path is still moving higher.');
-    add('RSI in 30–55 range',rsi!=null&&rsi>=30&&rsi<=55,`Current RSI ${rsi==null?'—':rsi.toFixed(1)}`);
+    add('Regression trend rising',regUp,'The 126-day regression path is still moving higher.');
+    add('RSI in 30–57 BUY range',rsi!=null&&rsi>=30&&rsi<=57,`Current RSI ${rsi==null?'—':rsi.toFixed(1)}`);
+    add('RSI 30–55 — A+ range',rsi!=null&&rsi>=30&&rsi<=55,'The tighter historical sweet spot remains 30–55.',false,'A+');
     add('Price reclaimed 20-day average',crossUp(s,'price','ma20'),'This is the THC trigger.');
   }
+
   if(['DELL','VRT','DVN'].includes(s.ticker)){
-    const minCh=s.ticker==='DELL'?8:s.ticker==='DVN'?8:5, minRV=s.ticker==='DELL'?1:0.8;
+    const buyMom=s.ticker==='DELL'?8:s.ticker==='DVN'?7:4;
+    const sweetMom=s.ticker==='DELL'?8:s.ticker==='DVN'?8:5;
+    const buyRV=s.ticker==='DELL'?0.9:0.7;
+    const sweetRV=s.ticker==='DELL'?1.0:0.8;
     add('Price above 20-day average',p!=null&&e20!=null&&p>e20,'Price is holding above its short-term trend.');
     add('20-day above 50-day',e20!=null&&m50!=null&&e20>m50,'Short-term trend is leading the medium trend.');
     add('50-day above 200-day',stack,'The larger trend stack is healthy.');
-    add('Regression trend rising',regUp,'The stock’s normal path is moving higher.');
+    add('Regression trend rising',regUp,'The stock’s 126-day regression path is moving higher.');
     add(`RSI in ${pb.rsi[0]}–${pb.rsi[1]} range`,rsi!=null&&rsi>=pb.rsi[0]&&rsi<=pb.rsi[1],`Current RSI ${rsi==null?'—':rsi.toFixed(1)}`);
-    add(`20-day momentum at least +${minCh}%`,ch20!=null&&ch20>=minCh,`Current 20-day change ${ch20==null?'—':pctFmt(ch20)}`);
-    add(`Volume at least ${minRV.toFixed(1)}× normal`,rv!=null&&rv>=minRV,`Current relative volume ${rv==null?'—':rv.toFixed(2)+'×'}`);
+    add(`20-day momentum at least +${buyMom}%`,ch20!=null&&ch20>=buyMom,`Current 20-day change ${ch20==null?'—':pctFmt(ch20)}`);
+    if(sweetMom>buyMom) add(`A+ momentum +${sweetMom}% or better`,ch20!=null&&ch20>=sweetMom,'Stronger historical momentum zone.',false,'A+');
+    add(`Volume at least ${buyRV.toFixed(1)}× normal`,rv!=null&&rv>=buyRV,`Current relative volume ${rv==null?'—':rv.toFixed(2)+'×'}`);
+    if(sweetRV>buyRV) add(`A+ volume ${sweetRV.toFixed(1)}× or better`,rv!=null&&rv>=sweetRV,'Stronger historical participation.',false,'A+');
   }
   return out;
+}
+
+function sweetSpotFit(s,checks=null){
+  checks=checks||setupChecks(s);
+  const preferred=checks.filter(x=>!x.required && x.tier==='A+');
+  return preferred.length===0 || preferred.every(x=>x.ok);
 }
 
 function marketStock(t){ return stocks.find(s=>String(s.ticker||'').toUpperCase()===t); }
@@ -7651,7 +7675,7 @@ function preEntryState(s){
   if(!isCoreStock(s)) return {state:'RESEARCH ONLY',reason:'No validated StockIQ playbook yet.'};
   if(s._v2Placeholder || !(s.snapshots||[]).length) return {state:'WAIT',reason:'Daily data has not been loaded for this Core playbook yet.',checks:setupChecks(s)};
   const checks=setupChecks(s), required=checks.filter(x=>x.required), missing=required.filter(x=>!x.ok);
-  if(required.length && missing.length===0){ const tail=marketTailwind(s); return {state:tail.ok?'A+ BUY':'BUY',reason:tail.ok?'Setup is ready and its market/sector tailwind is supportive.':'Setup is ready.',checks}; }
+  if(required.length && missing.length===0){ const tail=marketTailwind(s), sweet=sweetSpotFit(s,checks); const aplus=tail.ok&&sweet; return {state:aplus?'A+ BUY':'BUY',reason:aplus?'Required setup is ready, the historical sweet spot is aligned, and the market/sector tailwind is supportive.':sweet?'Required setup is ready. Sweet spot is aligned; market/sector boost is not required.':'Required setup is ready. Some A+ preferences are not aligned, but they do not block the trade.',checks}; }
   if(missing.length===1) return {state:'PREPARING',reason:`Waiting for: ${missing[0].label}.`,checks};
   return {state:'WAIT',reason:missing.length?`${missing.length} setup requirements are not ready yet.`:'Not enough data yet.',checks};
 }
@@ -7907,15 +7931,15 @@ function sweetSpotPanel(s,pb){
 function earningsPanel(s,pb){ const e=earningsState(s); return panel('Earnings',`<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;"><div><div style="color:${C.text};font-size:14px;font-weight:900;">${e?.rule||'No rule'}</div><div style="color:${C.textSub};font-size:12.5px;margin-top:4px;">${e?.days==null?'Earnings date not loaded':`${e.days} day${Math.abs(e.days)===1?'':'s'} until earnings`}</div></div>${e?.days!=null?`<div style="color:${C.text};font-size:12px;font-weight:800;">${s.earningsDate||''}</div>`:''}</div>${e?.rule==='WAIT FOR REACTION'?`<div style="margin-top:12px;padding-top:10px;border-top:1px solid ${C.border};"><div style="color:${C.textSub};font-size:12px;margin-bottom:8px;">After earnings, we want at least 2 of these 3 to improve:</div>${checklistHTML([{label:'Regression improving',ok:indicatorImproving(s,'reg'),teach:'Price is moving back toward its normal trend.'},{label:'RSI improving',ok:indicatorImproving(s,'rsi'),teach:'Momentum is strengthening.'},{label:'MACD improving',ok:indicatorImproving(s,'macd'),teach:'Buying momentum is improving.'}])}</div>`:''}`); }
 function indicatorPanel(s,pb){ const r=regressionStats(s),rv=relativeVolume(s),h=macdHist(s),atr=curVal(s,'atr'),price=curVal(s,'price'),atrp=atr&&price?atr/price*100:null; const rows=[['EMA20',curVal(s,'ma20','ema20')!=null?money(curVal(s,'ma20','ema20')):'—','Short-term trend'],['SMA50',curVal(s,'ma50')!=null?money(curVal(s,'ma50')):'—','Medium-term trend'],['SMA200',curVal(s,'ma200')!=null?money(curVal(s,'ma200')):'—','Long-term trend'],['RSI',curVal(s,'rsi')!=null?curVal(s,'rsi').toFixed(1):'—','Momentum'],['MACD Hist',h!=null?h.toFixed(2):'—','Momentum direction'],['ATR%',atrp!=null?atrp.toFixed(1)+'%':'—','Typical daily movement'],['Rel Volume',rv!=null?rv.toFixed(2)+'×':'—','Participation'],['Reg Z',r.z!=null?r.z.toFixed(2):'—','Position vs normal trend']]; return panel('Indicators / Learn Why',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">${rows.map(([a,b,c])=>`<div style="background:${C.cardHigh};border-radius:10px;padding:10px;"><div class="v2lbl">${a}</div><div style="color:${C.text};font-size:13px;font-weight:900;">${b}</div><div style="color:${C.textSub};font-size:11.5px;line-height:1.45;margin-top:4px;">${c}</div></div>`).join('')}</div>`); }
 function marketPanel(s,pb){ const t=marketTailwind(s); return panel('Market & Sector',`<div style="display:flex;justify-content:space-between;align-items:center;"><div><div style="color:${t.ok?C.green:C.text};font-size:14px;font-weight:900;">Tailwind: ${t.label}</div><div style="color:${C.textSub};font-size:12.5px;margin-top:4px;line-height:1.5;">${t.text}</div></div><div style="color:${C.textSub};font-size:11px;font-weight:800;">${pb.market||'—'}</div></div>`); }
-function entryPanel(s,pb,st){ const sig=curVal(s,'price'),max=buyUpTo(s); return panel('Entry Plan',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;"><div><div class="v2lbl">Signal Price</div><div class="v2big">${money(sig)}</div></div><div><div class="v2lbl">Buy Up To</div><div class="v2big" style="color:${C.green};">${money(max)}</div></div></div><div style="color:${C.textSub};font-size:12.5px;line-height:1.55;margin-top:10px;">At or below ${money(max)}: OK to buy. Above it: don’t chase. A sharp gap down should be reviewed before entering.</div>${['BUY','A+ BUY'].includes(st.state)?`<button onclick="showV2BuyFlow('${s.id}')" style="width:100%;margin-top:12px;padding:12px;border:none;border-radius:11px;background:${C.green};color:#000;font-weight:900;cursor:pointer;">I BOUGHT THIS</button>`:''}`); }
+function entryPanel(s,pb,st){ const sig=curVal(s,'price'),max=buyUpTo(s); return panel('Entry Plan',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;"><div><div class="v2lbl">Signal Price</div><div class="v2big">${money(sig)}</div></div><div><div class="v2lbl">Buy Up To</div><div class="v2big" style="color:${C.green};">${money(max)}</div></div></div><div style="color:${C.textSub};font-size:12.5px;line-height:1.55;margin-top:10px;">At or below ${money(max)}: OK to buy. Above it: don’t chase. A sharp gap down should be reviewed before entering.</div>`); }
 function riskPanel(s,pb){ if(s.position){ const st=suggestedStop(s),p=curVal(s,'price'),dist=p&&st.price?((p/st.price)-1)*100:null, risk=plannedRisk(s); return panel('Risk Plan',`<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;"><div><div class="v2lbl">Entry</div><div class="v2val">${money(s.position.entry)}</div></div><div><div class="v2lbl">${st.type}</div><div class="v2val" style="color:${st.active?C.purple:C.red};">${money(st.price)}</div></div><div><div class="v2lbl">Distance</div><div class="v2val">${dist==null?'—':dist.toFixed(1)+'%'}</div></div></div><div style="color:${C.textSub};font-size:12.5px;line-height:1.55;margin-top:10px;">Planned risk: ${risk==null?'—':fmtP(risk)}. ${st.why}</div>`);} return panel('Risk Plan',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;"><div><div class="v2lbl">Emergency Stop</div><div class="v2big">-${pb.stopPct}%</div></div><div><div class="v2lbl">Normal Hold</div><div class="v2big">${pb.hold} days</div></div></div><div style="color:${C.textSub};font-size:12.5px;line-height:1.55;margin-top:10px;">The exact stop is calculated from your actual purchase price. Want less risk? Buy fewer shares—don’t squeeze the stop.</div>`); }
 function positionTop(s,pb,st){ const p=curVal(s,'price'),pl=s.position?.entry&&p?((p/s.position.entry)-1)*100:null; return `<div style="padding:16px 16px 10px;"><div style="display:flex;justify-content:space-between;align-items:flex-start;"><div><button onclick="showScreen('home')" style="background:none;border:none;color:${C.textSub};padding:0 0 9px;cursor:pointer;">← Back</button><div style="display:flex;gap:9px;align-items:center;"><span style="color:${C.text};font-size:24px;font-weight:950;">${s.ticker}</span>${badge(st.state)}</div><div style="color:${C.text};font-size:13px;font-weight:700;margin-top:5px;">${companyNameFor(s)}</div><div style="color:${C.textSub};font-size:13px;margin-top:3px;">${pb.name}</div></div><div style="text-align:right;"><div style="color:${C.text};font-size:20px;font-weight:900;">${money(p)}</div><div style="color:${pl>=0?C.green:C.red};font-size:13px;font-weight:900;">${pl==null?'—':pctFmt(pl)}</div></div></div></div>`; }
-function preTop(s,pb,st){ return `<div style="padding:16px 16px 10px;"><button onclick="showScreen('home')" style="background:none;border:none;color:${C.textSub};padding:0 0 9px;cursor:pointer;">← Back</button><div style="display:flex;justify-content:space-between;align-items:flex-start;"><div><div style="display:flex;gap:9px;align-items:center;"><span style="color:${C.text};font-size:24px;font-weight:950;">${s.ticker}</span>${badge(st.state)}</div><div style="color:${C.text};font-size:13px;font-weight:700;margin-top:5px;">${companyNameFor(s)}</div><div style="color:${C.textSub};font-size:13px;margin-top:3px;">${pb.name}</div></div><div style="color:${C.text};font-size:20px;font-weight:900;">${money(curVal(s,'price'))}</div></div></div>`; }
+function preTop(s,pb,st){ const canBuy=['BUY','A+ BUY'].includes(st.state); return `<div style="padding:16px 16px 10px;"><button onclick="showScreen('home')" style="background:none;border:none;color:${C.textSub};padding:0 0 9px;cursor:pointer;">← Back</button><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;"><div style="min-width:0;"><div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;"><span style="color:${C.text};font-size:24px;font-weight:950;">${s.ticker}</span>${badge(st.state)}</div><div style="color:${C.text};font-size:13px;font-weight:700;margin-top:5px;">${companyNameFor(s)}</div><div style="color:${C.textSub};font-size:13px;margin-top:3px;">${pb.name}</div></div><div style="text-align:right;flex-shrink:0;"><div style="color:${C.text};font-size:20px;font-weight:900;margin-bottom:${canBuy?'8px':'0'};">${money(curVal(s,'price'))}</div>${canBuy?`<button onclick="showV2BuyFlow('${s.id}')" style="border:none;border-radius:10px;background:${C.green};color:#000;font-size:13px;font-weight:950;padding:9px 18px;cursor:pointer;box-shadow:0 0 0 1px ${C.green}33;">BUY</button>`:''}</div></div></div>`; }
 function renderDetail(s){
   const el=document.getElementById('detail-content'); if(!el)return; const pb=pbFor(s); if(!pb){ el.innerHTML=`<div style="padding:16px;"><button onclick="showScreen('home')" style="background:none;border:none;color:${C.textSub};padding:0 0 12px;">← Back</button><h2 style="color:${C.text};margin:0;">${s.ticker}</h2>${companyNameFor(s)?`<div style="color:${C.textSub};font-size:13px;margin-top:4px;">${companyNameFor(s)}</div>`:''}<div style="margin-top:12px;">${badge('RESEARCH ONLY')}</div><p style="color:${C.textSub};font-size:13px;line-height:1.65;">This ticker can show indicators, but StockIQ will not issue trading signals until it has a validated playbook.</p>${indicatorPanel(s,{})}</div>`; return; }
   const st=stockState(s),checks=setupChecks(s),conflict=portfolioConflict(s);
   let html=s.position?positionTop(s,pb,st):preTop(s,pb,st); html+=topCallout(s,pb,st);
-  if(s.position){ html+=riskPanel(s,pb); html+=panel('Trade Health',checklistHTML(checks)); html+=earningsPanel(s,pb); html+=regressionPanel(s,pb); if(pb.maxHold>pb.hold)html+=panel('Decision / Runner',`<div style="color:${C.text};font-size:13px;font-weight:800;">Normal hold: ${pb.hold} days · Max runner window: ${pb.maxHold} days</div><div style="color:${C.textSub};font-size:11px;margin-top:6px;">At decision day, StockIQ checks whether this ticker’s proven runner conditions are still healthy.</div>`); html+=historyPanel(pb); html+=sweetSpotPanel(s,pb); html+=indicatorPanel(s,pb); html+=marketPanel(s,pb); html+=panel('Manage Position',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;"><button onclick="showV2CloseFlow('${s.id}')" style="padding:11px;border-radius:10px;border:1px solid ${C.red}66;background:${C.redDim};color:${C.red};font-weight:800;cursor:pointer;">Close Position</button><button onclick="showV2StopFlow('${s.id}')" style="padding:11px;border-radius:10px;border:1px solid ${C.border};background:${C.cardHigh};color:${C.text};font-weight:800;cursor:pointer;">Update Stop</button></div>`); }
+  if(s.position){ html+=riskPanel(s,pb); html+=panel('Trade Health',checklistHTML(checks)); html+=earningsPanel(s,pb); html+=regressionPanel(s,pb); if(pb.maxHold>pb.hold)html+=panel('Decision / Runner',`<div style="color:${C.text};font-size:13px;font-weight:800;">Normal hold: ${pb.hold} days · Max runner window: ${pb.maxHold} days</div><div style="color:${C.textSub};font-size:11px;margin-top:6px;">At decision day, StockIQ checks whether this ticker’s proven runner conditions are still healthy.</div>`); html+=historyPanel(pb); html+=sweetSpotPanel(s,pb); html+=indicatorPanel(s,pb); html+=marketPanel(s,pb); html+=panel('Manage Position',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;"><button onclick="showV2CloseFlow('${s.id}')" style="padding:11px;border-radius:10px;border:1px solid ${C.red}66;background:${C.redDim};color:${C.red};font-weight:800;cursor:pointer;">Sell</button><button onclick="showV2StopFlow('${s.id}')" style="padding:11px;border-radius:10px;border:1px solid ${C.border};background:${C.cardHigh};color:${C.text};font-weight:800;cursor:pointer;">Update Stop</button></div>`); }
   else { html+=panel('Setup Requirements',checklistHTML(checks)); if(['BUY','A+ BUY'].includes(st.state))html+=entryPanel(s,pb,st); html+=riskPanel(s,pb); html+=regressionPanel(s,pb); html+=earningsPanel(s,pb); html+=marketPanel(s,pb); if(conflict)html+=panel('Portfolio Conflict',`<div style="color:${C.yellow};font-size:12.5px;line-height:1.55;font-weight:700;">${conflict}</div>`); html+=historyPanel(pb); html+=sweetSpotPanel(s,pb); html+=indicatorPanel(s,pb); }
   el.innerHTML=html;
 }
@@ -7926,8 +7950,8 @@ function showV2BuyFlow(id){ const s=stocks.find(x=>String(x.id)===String(id)); i
 async function saveV2Buy(id){ const s=stocks.find(x=>String(x.id)===String(id)); if(!s)return; const entry=parseFloat(document.getElementById('v2-entry').value),shares=parseFloat(document.getElementById('v2-shares').value); if(!entry||!shares)return; const d=latestSnap(s)?.date||today(); const u={...s,position:{...(s.position||{}),entry,shares,date:d,recordedStop:entry*(1-pbFor(s).stopPct/100)},type:'Swing Trade'}; stocks=stocks.map(x=>String(x.id)===String(id)?u:x); closeAllOverlays(); await fbSaveStock(u); renderHome(); openDetail(id); }
 function showV2StopFlow(id){ const s=stocks.find(x=>String(x.id)===String(id)); if(!s)return; const sug=suggestedStop(s); showModal(`<div style="background:${C.card};border-radius:20px;padding:22px;border:1px solid ${C.border};"><div style="color:${C.text};font-size:18px;font-weight:900;margin-bottom:12px;">Update Recorded Stop</div><div style="color:${C.textSub};font-size:13px;margin-bottom:12px;">Suggested: ${money(sug.price)} (${sug.type})</div><input id="v2-stop" type="number" step="0.01" value="${s.position?.recordedStop||sug.price||''}" style="width:100%;box-sizing:border-box;background:${C.cardHigh};border:1px solid ${C.border};border-radius:10px;color:${C.text};padding:11px;margin-bottom:14px;"><button onclick="saveV2Stop('${id}')" style="width:100%;padding:12px;border:none;border-radius:10px;background:${C.text};color:${C.bg};font-weight:900;">Save Stop</button></div>`); }
 async function saveV2Stop(id){ const s=stocks.find(x=>String(x.id)===String(id)); if(!s)return; const v=parseFloat(document.getElementById('v2-stop').value); const u={...s,position:{...s.position,recordedStop:v}}; stocks=stocks.map(x=>String(x.id)===String(id)?u:x); closeAllOverlays(); await fbSaveStock(u); renderHome(); openDetail(id); }
-function showV2CloseFlow(id){ const s=stocks.find(x=>String(x.id)===String(id)); if(!s)return; showModal(`<div style="background:${C.card};border-radius:20px;padding:22px;border:1px solid ${C.border};"><div style="color:${C.text};font-size:18px;font-weight:900;margin-bottom:12px;">Close ${s.ticker}</div><label class="v2lbl">Exit Price</label><input id="v2-exit" type="number" step="0.01" value="${curVal(s,'price')||''}" style="width:100%;box-sizing:border-box;background:${C.cardHigh};border:1px solid ${C.border};border-radius:10px;color:${C.text};padding:11px;margin:5px 0 14px;"><button onclick="saveV2Close('${id}')" style="width:100%;padding:12px;border:none;border-radius:10px;background:${C.red};color:#fff;font-weight:900;">Close Position</button></div>`); }
-async function saveV2Close(id){ const s=stocks.find(x=>String(x.id)===String(id)); if(!s||!s.position)return; const ex=parseFloat(document.getElementById('v2-exit').value); const shares=s.position.shares||0,pl=(ex-s.position.entry)*shares,rec={entry:s.position.entry,exit:ex,shares,pl,date:latestSnap(s)?.date||today(),playbook:pbFor(s)?.name||'',days:positionDays(s)}; const u={...s,position:null,realized:[...(s.realized||[]),rec]}; stocks=stocks.map(x=>String(x.id)===String(id)?u:x); closeAllOverlays(); await fbSaveStock(u); renderHome(); showScreen('home'); }
+function showV2CloseFlow(id){ const s=stocks.find(x=>String(x.id)===String(id)); if(!s||!s.position)return; const held=s.position.shares||0; showModal(`<div style="background:${C.card};border-radius:20px;padding:22px;border:1px solid ${C.border};"><div style="color:${C.text};font-size:18px;font-weight:900;margin-bottom:4px;">Sell ${s.ticker}</div><div style="color:${C.textSub};font-size:12px;margin-bottom:14px;">Paper position: ${held} shares @ ${money(s.position.entry)}</div><label class="v2lbl">Sell Price</label><input id="v2-exit" type="number" step="0.01" value="${curVal(s,'price')||''}" style="width:100%;box-sizing:border-box;background:${C.cardHigh};border:1px solid ${C.border};border-radius:10px;color:${C.text};padding:11px;margin:5px 0 12px;"><label class="v2lbl">Shares to Sell</label><input id="v2-sell-shares" type="number" min="0.01" max="${held}" step="0.01" value="${held}" style="width:100%;box-sizing:border-box;background:${C.cardHigh};border:1px solid ${C.border};border-radius:10px;color:${C.text};padding:11px;margin:5px 0 14px;"><button onclick="saveV2Close('${id}')" style="width:100%;padding:12px;border:none;border-radius:10px;background:${C.red};color:#fff;font-weight:900;">SELL</button></div>`); }
+async function saveV2Close(id){ const s=stocks.find(x=>String(x.id)===String(id)); if(!s||!s.position)return; const ex=parseFloat(document.getElementById('v2-exit').value), held=Number(s.position.shares||0), sellShares=parseFloat(document.getElementById('v2-sell-shares')?.value); if(!ex||!sellShares||sellShares<=0||sellShares>held)return; const pl=(ex-s.position.entry)*sellShares,rec={entry:s.position.entry,exit:ex,shares:sellShares,pl,date:latestSnap(s)?.date||today(),playbook:pbFor(s)?.name||'',days:positionDays(s),action:'SELL'}; const remaining=Math.max(0,held-sellShares); const nextPosition=remaining>0?{...s.position,shares:remaining}:null; const u={...s,position:nextPosition,realized:[...(s.realized||[]),rec]}; stocks=stocks.map(x=>String(x.id)===String(id)?u:x); closeAllOverlays(); await fbSaveStock(u); renderHome(); if(nextPosition)openDetail(id); else showScreen('home'); }
 
 // ── One-file daily import ───────────────────────────────────────────────────
 function parseDailyMultiCSV(text){
@@ -7963,7 +7987,7 @@ function showAddFlow(){ if(_origShowAddFlow)_origShowAddFlow(); setTimeout(()=>{
 // ── v2 initialization ────────────────────────────────────────────────────────
 (function initStockIQV2(){
   const style=document.createElement('style'); style.textContent=`.v2lbl{color:${C.textSub};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}.v2val{color:${C.text};font-size:14px;font-weight:900}.v2big{color:${C.text};font-size:18px;font-weight:950}`; document.head.appendChild(style);
-  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.4.1 · detail fix';
+  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.7.1 · paper trades';
   const topButtons=[...document.querySelectorAll('button')]; const add=topButtons.find(b=>b.textContent.includes('Add Stock')); if(add)add.innerHTML='<span style="font-size:16px;">+</span> Research'; const scan=topButtons.find(b=>b.textContent.includes('Import Scan')); if(scan){scan.textContent='Daily Data';scan.onclick=showDailyDataFlow;scan.setAttribute('aria-label','Upload daily multi-ticker data');}
   activeTag='All'; sortMode='opportunity';
 })();
