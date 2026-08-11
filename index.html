@@ -7820,14 +7820,14 @@ function positionState(s){
   if(earn?.rule==='EXIT BEFORE EARNINGS'&&earn.days!=null&&earn.days<=1&&earn.days>=0) return {state:'EXIT',reason:'Earnings rule says exit before the report.',day:d,stop};
   if(d>=pb.hold){ if(pb.maxHold>pb.hold&&runnerHealthy(s)&&d<pb.maxHold)return {state:'RUNNER',reason:`Normal ${pb.hold}-day trade is complete and strength still supports an extension.`,day:d,stop}; return {state:'DECISION DAY',reason:`Normal ${pb.hold}-day hold is complete. Review and exit unless runner conditions are met.`,day:d,stop}; }
   const checks=setupChecks(s), red=checks.filter(x=>!x.ok).length; if(red>=Math.max(2,Math.ceil(checks.length/2))) return {state:'WATCH EXIT',reason:'Several setup conditions have weakened, but the emergency stop is still intact.',day:d,stop};
-  return {state:'HOLD',reason:'Still inside the normal historical holding window.',day:d,stop};
+  return {state:'BOUGHT',reason:'Position is open. Follow the trade plan and watch the exit signals.',day:d,stop};
 }
 function stockState(s){ return s.position?positionState(s):preEntryState(s); }
-function statePriority(state){ return ({'EXIT':0,'DECISION DAY':1,'RUNNER':2,'A+ BUY':3,'BUY':4,'PREPARING':5,'WATCH EXIT':6,'HOLD':7,'WAIT':8,'RESEARCH ONLY':9}[state]??10); }
+function statePriority(state){ return ({'EXIT':0,'DECISION DAY':1,'RUNNER':2,'WATCH EXIT':3,'BOUGHT':4,'A+ BUY':5,'BUY':6,'PREPARING':7,'WAIT':8,'RESEARCH ONLY':9}[state]??10); }
 function stateStyle(state){
   const map={
     'A+ BUY':{c:C.green,b:C.greenDim},'BUY':{c:C.green,b:C.greenDim},'PREPARING':{c:C.yellow,b:C.yellowDim},'WAIT':{c:C.textSub,b:C.cardHigh},
-    'HOLD':{c:C.blue,b:C.blueDim},'WATCH EXIT':{c:C.yellow,b:C.yellowDim},'DECISION DAY':{c:C.orange,b:C.orangeDim},'RUNNER':{c:C.purple,b:C.purpleDim},'EXIT':{c:C.red,b:C.redDim},'RESEARCH ONLY':{c:C.teal,b:C.tealDim}
+    'BOUGHT':{c:C.teal,b:C.tealDim},'WATCH EXIT':{c:C.yellow,b:C.yellowDim},'DECISION DAY':{c:C.orange,b:C.orangeDim},'RUNNER':{c:C.purple,b:C.purpleDim},'EXIT':{c:C.red,b:C.redDim},'RESEARCH ONLY':{c:C.teal,b:C.tealDim}
   }; return map[state]||{c:C.textSub,b:C.cardHigh};
 }
 function badge(state){ const st=stateStyle(state); return `<span style="background:${st.b};border:1px solid ${st.c}55;color:${st.c};font-size:10px;font-weight:900;padding:3px 8px;border-radius:6px;letter-spacing:.04em;white-space:nowrap;">${state}</span>`; }
@@ -7858,8 +7858,58 @@ function renderPortfolioBox(){
   </div></div>`;
 }
 function renderTonightsOpportunities(){
-  const el=document.getElementById('tonights-opportunities'); if(!el)return; const arr=stocks.filter(s=>isValidatedStock(s)).map(s=>({s,state:stockState(s)})).filter(x=>['EXIT','DECISION DAY','RUNNER','A+ BUY','BUY','PREPARING'].includes(x.state?.state)).sort((a,b)=>statePriority(a.state.state)-statePriority(b.state.state)).slice(0,5);
-  el.innerHTML=`<div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:16px;margin:0 16px 14px;"><div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:.09em;margin-bottom:10px;">Today's Actions</div>${arr.length?arr.map(x=>{const st=x.state.state, pb=pbFor(x.s),conf=portfolioConflict(x.s); return `<div onclick="openDetail('${x.s.id}')" style="padding:10px 0;border-bottom:1px solid ${C.border};cursor:pointer;"><div style="display:flex;align-items:center;justify-content:space-between;gap:8px;"><div style="display:flex;align-items:center;gap:8px;"><span style="color:${C.text};font-size:14px;font-weight:900;">${x.s.ticker}</span>${badge(st)}</div><span style="color:${C.textSub};font-size:11px;">${x.s.position?`Day ${x.state.day}/${pb.hold}`:(['BUY','A+ BUY'].includes(st)?`Buy up to ${money(buyUpTo(x.s))}`:'')}</span></div><div style="color:${C.textSub};font-size:11.5px;line-height:1.45;margin-top:4px;">${conf||x.state.reason}</div></div>`;}).join(''):`<div style="color:${C.textSub};font-size:13px;padding:6px 0;">No action needed today.</div>`}</div>`;
+  const el=document.getElementById('tonights-opportunities');
+  if(!el)return;
+
+  const owned=stocks
+    .filter(s=>isValidatedStock(s)&&s.position)
+    .map(s=>({s,state:stockState(s)}))
+    .sort((a,b)=>statePriority(a.state?.state)-statePriority(b.state?.state));
+
+  const arr=stocks
+    .filter(s=>isValidatedStock(s)&&!s.position)
+    .map(s=>({s,state:stockState(s)}))
+    .filter(x=>['A+ BUY','BUY','PREPARING'].includes(x.state?.state))
+    .sort((a,b)=>statePriority(a.state.state)-statePriority(b.state.state))
+    .slice(0,5);
+
+  const ownedBox=owned.length?`
+    <div style="background:${C.card};border-radius:16px;border:1.5px solid ${C.teal}77;padding:16px;margin:0 16px 12px;box-shadow:0 0 0 1px ${C.teal}11;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <div style="color:${C.teal};font-size:10px;text-transform:uppercase;letter-spacing:.09em;font-weight:950;">Bought Positions</div>
+        <div style="color:${C.textMuted};font-size:10px;">Watch closely · ${owned.length} open</div>
+      </div>
+      ${owned.map(x=>{
+        const s=x.s, st=x.state?.state||'BOUGHT', pb=pbFor(s), p=curVal(s,'price'), entry=Number(s.position?.entry||0), shares=Number(s.position?.shares||0);
+        const pl=(p!=null&&entry&&shares)?(p-entry)*shares:null;
+        const plPct=(p!=null&&entry)?((p/entry)-1)*100:null;
+        const tier=s.position?.signalTier||'BUY';
+        return `<div onclick="openDetail('${s.id}')" style="padding:11px 0;border-bottom:1px solid ${C.border};cursor:pointer;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+            <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+              <span style="color:${C.text};font-size:15px;font-weight:950;">${s.ticker}</span>
+              ${badge(st)}
+              <span style="color:${tier==='A+ BUY'?C.green:C.textMuted};font-size:9px;font-weight:900;">${tier}</span>
+            </div>
+            <div style="text-align:right;flex-shrink:0;">
+              <div style="color:${pl==null?C.textSub:(pl>=0?C.green:C.red)};font-size:13px;font-weight:950;">${pl==null?'—':`${pl>=0?'+':''}${fmtP(pl)}`}</div>
+              <div style="color:${C.textMuted};font-size:10px;">${plPct==null?'':`${plPct>=0?'+':''}${plPct.toFixed(1)}%`} · Day ${x.state?.day||1}/${pb?.hold||'—'}</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:6px;color:${C.textSub};font-size:10.5px;">
+            <span>Entry ${money(entry)}</span><span>${shares} shares</span><span>Now ${money(p)}</span>
+          </div>
+          <div style="color:${C.textSub};font-size:11.5px;line-height:1.45;margin-top:5px;">${x.state?.reason||'Position is open.'}</div>
+        </div>`;
+      }).join('')}
+    </div>`:'';
+
+  const actionBox=`<div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:16px;margin:0 16px 14px;">
+    <div style="color:${C.textMuted};font-size:10px;text-transform:uppercase;letter-spacing:.09em;margin-bottom:10px;">Today's Actions</div>
+    ${arr.length?arr.map(x=>{const st=x.state.state, conf=portfolioConflict(x.s); return `<div onclick="openDetail('${x.s.id}')" style="padding:10px 0;border-bottom:1px solid ${C.border};cursor:pointer;"><div style="display:flex;align-items:center;justify-content:space-between;gap:8px;"><div style="display:flex;align-items:center;gap:8px;"><span style="color:${C.text};font-size:14px;font-weight:900;">${x.s.ticker}</span>${badge(st)}</div><span style="color:${C.textSub};font-size:11px;">${['BUY','A+ BUY'].includes(st)?`Buy up to ${money(buyUpTo(x.s))}`:''}</span></div><div style="color:${C.textSub};font-size:11.5px;line-height:1.45;margin-top:4px;">${conf||x.state.reason}</div></div>`;}).join(''):`<div style="color:${C.textSub};font-size:13px;padding:6px 0;">No new action needed today.</div>`}
+  </div>`;
+
+  el.innerHTML=ownedBox+actionBox;
 }
 function renderFilterBar(){
   const el=document.getElementById('filter-bar'); if(!el)return; const opts=['All','Core','Bench','Buy','Preparing','Positions','Wait','Research'];
@@ -7976,6 +8026,31 @@ function regressionPanel(s,pb){
     <div style="color:${range&&(pos.startsWith('IN'))?C.green:(pos.startsWith('OUTSIDE')?C.red:C.textSub)};font-size:12.5px;font-weight:900;margin-top:4px;">${pos}</div>
     <div style="color:${C.textSub};font-size:12.5px;line-height:1.6;margin-top:6px;">${note}</div>`);
 }
+function tradeWindowStats(s,entry,entryDate,exitDate=null){
+  if(!entry||!entryDate)return {mfe:null,mae:null};
+  const start=new Date(entryDate), end=exitDate?new Date(exitDate):null;
+  const rows=(s.snapshots||[]).filter(sn=>sn&&sn.date&&new Date(sn.date)>=start&&(!end||new Date(sn.date)<=end));
+  const highs=rows.map(sn=>Number(sn.high!=null?sn.high:sn.price)).filter(Number.isFinite);
+  const lows=rows.map(sn=>Number(sn.low!=null?sn.low:sn.price)).filter(Number.isFinite);
+  return {mfe:highs.length?((Math.max(...highs)/entry)-1)*100:null,mae:lows.length?((Math.min(...lows)/entry)-1)*100:null};
+}
+function yourTradeProofPanel(s,pb){
+  const realized=(s.realized||[]).filter(r=>r&&r.entry&&r.exit);
+  const pct=r=>r.plPct!=null?Number(r.plPct):((Number(r.exit)/Number(r.entry))-1)*100;
+  const completed=realized.length,wins=realized.filter(r=>pct(r)>0).length,avg=completed?realized.reduce((a,r)=>a+pct(r),0)/completed:null;
+  const live=s.position?tradeWindowStats(s,Number(s.position.entry),s.position.date):null;
+  const livePct=s.position&&s.position.entry?((curVal(s,'price')/s.position.entry)-1)*100:null;
+  let body=`<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px;">
+    <div><div class="v2lbl">Completed</div><div class="v2big">${completed}</div></div>
+    <div><div class="v2lbl">Your Win Rate</div><div class="v2big">${completed?Math.round(wins/completed*100)+'%':'—'}</div></div>
+    <div><div class="v2lbl">Avg Return</div><div class="v2big">${avg!=null?(avg>=0?'+':'')+avg.toFixed(1)+'%':'—'}</div></div>
+  </div>`;
+  if(s.position) body+=`<div style="background:${C.green}10;border:1px solid ${C.green}44;border-radius:12px;padding:11px 12px;margin-bottom:12px;"><div style="color:${C.green};font-size:11px;font-weight:900;text-transform:uppercase;margin-bottom:6px;">Current Trade</div><div style="color:${C.text};font-size:12.5px;line-height:1.7;">Entry ${money(s.position.entry)} · ${s.position.shares} shares · ${s.position.signalTier||'BUY'}<br>Current ${livePct!=null?(livePct>=0?'+':'')+livePct.toFixed(1)+'%':'—'} · Max gain while held ${live&&live.mfe!=null?'+'+live.mfe.toFixed(1)+'%':'—'} · Worst drawdown ${live&&live.mae!=null?live.mae.toFixed(1)+'%':'—'}</div></div>`;
+  if(realized.length){ body+=`<div style="color:${C.text};font-size:12px;font-weight:900;margin-bottom:6px;">Buy / Sell History</div>`; body+=realized.slice().reverse().slice(0,6).map(r=>{const rp=pct(r),path=tradeWindowStats(s,Number(r.entry),r.dateIn||r.date,r.dateOut||r.date),give=path.mfe!=null?Math.max(0,path.mfe-rp):null;return `<div style="border-top:1px solid ${C.border};padding:9px 0;"><div style="display:flex;justify-content:space-between;"><span style="color:${C.text};font-size:12.5px;font-weight:800;">${r.dateIn||'—'} → ${r.dateOut||r.date||'—'} · ${r.signalTier||'BUY'}</span><span style="color:${rp>=0?C.green:C.red};font-size:12.5px;font-weight:900;">${rp>=0?'+':''}${rp.toFixed(1)}%</span></div><div style="color:${C.textSub};font-size:11.5px;margin-top:4px;line-height:1.5;">${money(r.entry)} → ${money(r.exit)} · ${r.shares} sh · Peak while held ${path.mfe!=null?'+'+path.mfe.toFixed(1)+'%':'—'} · Drawdown ${path.mae!=null?path.mae.toFixed(1)+'%':'—'}${give!=null?' · Gave back '+give.toFixed(1)+' pts':''}</div></div>`;}).join(''); }
+  else if(!s.position) body+=`<div style="color:${C.textSub};font-size:12.5px;line-height:1.6;">No completed trades yet. Your first recorded buy and sell will start the forward-learning record for ${s.ticker}.</div>`;
+  body+=`<div style="margin-top:12px;padding-top:10px;border-top:1px solid ${C.border};color:${C.textSub};font-size:11.5px;line-height:1.55;"><b style="color:${C.text};">Historical Proof stays unchanged.</b> Your trades are forward evidence. After about 10 completed trades in the same ticker/playbook, this becomes meaningful live validation.</div>`;
+  return panel('Your Trade Proof',body);
+}
 function historyPanel(pb){ return panel('Historical Proof',`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;"><div style="color:${C.text};font-size:15px;font-weight:900;">${pb.confidence} CONFIDENCE</div><div style="color:${C.textSub};font-size:11px;">${pb.tier==='BENCH'?'Bench backtest · forward testing':'Validated playbook'}</div></div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;"><div><div class="v2lbl">Trades</div><div class="v2big">${pb.stats.trades}</div></div><div><div class="v2lbl">Win Rate</div><div class="v2big">~${pb.stats.win}%</div></div><div><div class="v2lbl">Avg Return</div><div class="v2big">~${pb.stats.avg}%</div></div></div><div style="margin-top:12px;color:${C.textSub};font-size:12.5px;line-height:1.6;">Normal drawdown ${pb.stats.drawdown}. ${pb.tier==='BENCH'?'Bench results are used to choose what to forward-test; they are not promoted to Core yet.':'The setup survived holdout testing, best-trade removal, best-year removal, and nearby-rule checks.'} Historical results are evidence, not a guarantee.</div>`); }
 function sweetSpotTiles(s,pb){
   const p=curVal(s,'price'), e20=curVal(s,'ma20','ema20'), m50=curVal(s,'ma50'), m200=curVal(s,'ma200'), rsi=curVal(s,'rsi');
@@ -8074,8 +8149,8 @@ function renderDetail(s){
   const el=document.getElementById('detail-content'); if(!el)return; const pb=pbFor(s); if(!pb){ el.innerHTML=`<div style="padding:16px;"><button onclick="showScreen('home')" style="background:none;border:none;color:${C.textSub};padding:0 0 12px;">← Back</button><h2 style="color:${C.text};margin:0;">${s.ticker}</h2>${companyNameFor(s)?`<div style="color:${C.textSub};font-size:13px;margin-top:4px;">${companyNameFor(s)}</div>`:''}<div style="margin-top:12px;">${badge('RESEARCH ONLY')}</div><p style="color:${C.textSub};font-size:13px;line-height:1.65;">This ticker can show indicators, but StockIQ will not issue trading signals until it has a validated playbook.</p>${indicatorPanel(s,{})}</div>`; return; }
   const st=stockState(s),checks=setupChecks(s),conflict=portfolioConflict(s);
   let html=s.position?positionTop(s,pb,st):preTop(s,pb,st); html+=topCallout(s,pb,st);
-  if(s.position){ html+=riskPanel(s,pb); html+=panel('Trade Health',checklistHTML(checks)); html+=earningsPanel(s,pb); html+=regressionPanel(s,pb); if(pb.maxHold>pb.hold)html+=panel('Decision / Runner',`<div style="color:${C.text};font-size:13px;font-weight:800;">Normal hold: ${pb.hold} days · Max runner window: ${pb.maxHold} days</div><div style="color:${C.textSub};font-size:11px;margin-top:6px;">At decision day, StockIQ checks whether this ticker’s proven runner conditions are still healthy.</div>`); html+=historyPanel(pb); html+=sweetSpotPanel(s,pb); html+=indicatorPanel(s,pb); html+=marketPanel(s,pb); html+=panel('Manage Position',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;"><button onclick="showV2CloseFlow('${s.id}')" style="padding:11px;border-radius:10px;border:1px solid ${C.red}66;background:${C.redDim};color:${C.red};font-weight:800;cursor:pointer;">Sell</button><button onclick="showV2StopFlow('${s.id}')" style="padding:11px;border-radius:10px;border:1px solid ${C.border};background:${C.cardHigh};color:${C.text};font-weight:800;cursor:pointer;">Update Stop</button></div>`); }
-  else { html+=panel('Setup Requirements',checklistHTML(checks)); if(['BUY','A+ BUY'].includes(st.state))html+=entryPanel(s,pb,st); html+=riskPanel(s,pb); html+=regressionPanel(s,pb); html+=earningsPanel(s,pb); html+=marketPanel(s,pb); if(conflict)html+=panel('Portfolio Conflict',`<div style="color:${C.yellow};font-size:12.5px;line-height:1.55;font-weight:700;">${conflict}</div>`); html+=historyPanel(pb); html+=sweetSpotPanel(s,pb); html+=indicatorPanel(s,pb); }
+  if(s.position){ html+=riskPanel(s,pb); html+=panel('Trade Health',checklistHTML(checks)); html+=earningsPanel(s,pb); html+=regressionPanel(s,pb); if(pb.maxHold>pb.hold)html+=panel('Decision / Runner',`<div style="color:${C.text};font-size:13px;font-weight:800;">Normal hold: ${pb.hold} days · Max runner window: ${pb.maxHold} days</div><div style="color:${C.textSub};font-size:11px;margin-top:6px;">At decision day, StockIQ checks whether this ticker’s proven runner conditions are still healthy.</div>`); html+=historyPanel(pb); html+=yourTradeProofPanel(s,pb); html+=sweetSpotPanel(s,pb); html+=indicatorPanel(s,pb); html+=marketPanel(s,pb); html+=panel('Manage Position',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;"><button onclick="showV2CloseFlow('${s.id}')" style="padding:11px;border-radius:10px;border:1px solid ${C.red}66;background:${C.redDim};color:${C.red};font-weight:800;cursor:pointer;">Sell</button><button onclick="showV2StopFlow('${s.id}')" style="padding:11px;border-radius:10px;border:1px solid ${C.border};background:${C.cardHigh};color:${C.text};font-weight:800;cursor:pointer;">Update Stop</button></div>`); }
+  else { html+=panel('Setup Requirements',checklistHTML(checks)); if(['BUY','A+ BUY'].includes(st.state))html+=entryPanel(s,pb,st); html+=riskPanel(s,pb); html+=regressionPanel(s,pb); html+=earningsPanel(s,pb); html+=marketPanel(s,pb); if(conflict)html+=panel('Portfolio Conflict',`<div style="color:${C.yellow};font-size:12.5px;line-height:1.55;font-weight:700;">${conflict}</div>`); html+=historyPanel(pb); html+=yourTradeProofPanel(s,pb); html+=sweetSpotPanel(s,pb); html+=indicatorPanel(s,pb); }
   el.innerHTML=html;
 }
 function openDetail(id){ const s=stocks.find(x=>String(x.id)===String(id)); if(!s)return; showScreen('detail'); renderDetail(s); }
@@ -8086,7 +8161,7 @@ async function saveV2Buy(id,signalTier){ const s=stocks.find(x=>String(x.id)===S
 function showV2StopFlow(id){ const s=stocks.find(x=>String(x.id)===String(id)); if(!s)return; const sug=suggestedStop(s); showModal(`<div style="background:${C.card};border-radius:20px;padding:22px;border:1px solid ${C.border};"><div style="color:${C.text};font-size:18px;font-weight:900;margin-bottom:12px;">Update Recorded Stop</div><div style="color:${C.textSub};font-size:13px;margin-bottom:12px;">Suggested: ${money(sug.price)} (${sug.type})</div><input id="v2-stop" type="number" step="0.01" value="${s.position?.recordedStop||sug.price||''}" style="width:100%;box-sizing:border-box;background:${C.cardHigh};border:1px solid ${C.border};border-radius:10px;color:${C.text};padding:11px;margin-bottom:14px;"><button onclick="saveV2Stop('${id}')" style="width:100%;padding:12px;border:none;border-radius:10px;background:${C.text};color:${C.bg};font-weight:900;">Save Stop</button></div>`); }
 async function saveV2Stop(id){ const s=stocks.find(x=>String(x.id)===String(id)); if(!s)return; const v=parseFloat(document.getElementById('v2-stop').value); const u={...s,position:{...s.position,recordedStop:v}}; stocks=stocks.map(x=>String(x.id)===String(id)?u:x); closeAllOverlays(); await fbSaveStock(u); renderHome(); openDetail(id); }
 function showV2CloseFlow(id){ const s=stocks.find(x=>String(x.id)===String(id)); if(!s||!s.position)return; const held=s.position.shares||0; showModal(`<div style="background:${C.card};border-radius:20px;padding:22px;border:1px solid ${C.border};"><div style="color:${C.text};font-size:18px;font-weight:900;margin-bottom:4px;">Sell ${s.ticker}</div><div style="color:${C.textSub};font-size:12px;margin-bottom:14px;">Paper position: ${held} shares @ ${money(s.position.entry)}</div><label class="v2lbl">Sell Price</label><input id="v2-exit" type="number" step="0.01" value="${curVal(s,'price')||''}" style="width:100%;box-sizing:border-box;background:${C.cardHigh};border:1px solid ${C.border};border-radius:10px;color:${C.text};padding:11px;margin:5px 0 12px;"><label class="v2lbl">Shares to Sell</label><input id="v2-sell-shares" type="number" min="0.01" max="${held}" step="0.01" value="${held}" style="width:100%;box-sizing:border-box;background:${C.cardHigh};border:1px solid ${C.border};border-radius:10px;color:${C.text};padding:11px;margin:5px 0 14px;"><button onclick="saveV2Close('${id}')" style="width:100%;padding:12px;border:none;border-radius:10px;background:${C.red};color:#fff;font-weight:900;">SELL</button></div>`); }
-async function saveV2Close(id){ const s=stocks.find(x=>String(x.id)===String(id)); if(!s||!s.position)return; const ex=parseFloat(document.getElementById('v2-exit').value), held=Number(s.position.shares||0), sellShares=parseFloat(document.getElementById('v2-sell-shares')?.value); if(!ex||!sellShares||sellShares<=0||sellShares>held)return; const pl=(ex-s.position.entry)*sellShares,rec={entry:s.position.entry,exit:ex,shares:sellShares,pl,date:latestSnap(s)?.date||today(),playbook:pbFor(s)?.name||'',days:positionDays(s),action:'SELL'}; const remaining=Math.max(0,held-sellShares); const nextPosition=remaining>0?{...s.position,shares:remaining}:null; const u={...s,position:nextPosition,realized:[...(s.realized||[]),rec]}; stocks=stocks.map(x=>String(x.id)===String(id)?u:x); closeAllOverlays(); await fbSaveStock(u); renderHome(); if(nextPosition)openDetail(id); else showScreen('home'); }
+async function saveV2Close(id){ const s=stocks.find(x=>String(x.id)===String(id)); if(!s||!s.position)return; const ex=parseFloat(document.getElementById('v2-exit').value),held=Number(s.position.shares||0),sellShares=parseFloat(document.getElementById('v2-sell-shares')?.value); if(!ex||!sellShares||sellShares<=0||sellShares>held)return; const outDate=latestSnap(s)?.date||today(),inDate=s.position.date||today(),pl=(ex-s.position.entry)*sellShares,plPct=s.position.entry?((ex/s.position.entry)-1)*100:0,path=tradeWindowStats(s,Number(s.position.entry),inDate,outDate),rec={entry:s.position.entry,exit:ex,shares:sellShares,pl,plPct,date:outDate,dateIn:inDate,dateOut:outDate,playbook:pbFor(s)?.name||'',days:positionDays(s),action:'SELL',signalTier:s.position.signalTier||'BUY',mfePct:path.mfe,maePct:path.mae}; const remaining=Math.max(0,held-sellShares),nextPosition=remaining>0?{...s.position,shares:remaining}:null,u={...s,position:nextPosition,realized:[...(s.realized||[]),rec]}; stocks=stocks.map(x=>String(x.id)===String(id)?u:x); closeAllOverlays(); await fbSaveStock(u); renderHome(); if(nextPosition)openDetail(id); else showScreen('home'); }
 
 // ── One-file daily import ───────────────────────────────────────────────────
 function parseDailyMultiCSV(text){
