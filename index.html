@@ -180,9 +180,35 @@ let saveTimer   = null;
 function stocksRef(uid) { return db.collection('users').doc(uid).collection('stocks'); }
 function stockRef(uid, id) { return stocksRef(uid).doc(String(id)); }
 
+function cleanForFirestore(value) {
+  // Firestore rejects `undefined` anywhere inside an object/array.
+  // Bench placeholders can legitimately have optional fields that are missing,
+  // so strip them before every account save rather than letting one bad field
+  // block an otherwise valid BUY/SELL/stop update.
+  if (value === undefined || typeof value === 'function') return undefined;
+  if (value === null) return null;
+  if (Array.isArray(value)) {
+    return value
+      .map(cleanForFirestore)
+      .filter(v => v !== undefined);
+  }
+  if (typeof value === 'object') {
+    // Preserve Firestore/Date-like special objects if they ever appear.
+    if (value instanceof Date) return value;
+    const out = {};
+    for (const [k,v] of Object.entries(value)) {
+      const cleaned = cleanForFirestore(v);
+      if (cleaned !== undefined) out[k] = cleaned;
+    }
+    return out;
+  }
+  return value;
+}
+
 async function fbSaveStock(stock) {
-  if (!currentUser) return;
-  await stockRef(currentUser.uid, stock.id).set(stock);
+  if (!currentUser) throw new Error('You are not signed in to StockIQ.');
+  const cleanStock = cleanForFirestore(stock);
+  await stockRef(currentUser.uid, stock.id).set(cleanStock);
 }
 async function fbDeleteStock(id) {
   if (!currentUser) return;
@@ -8271,7 +8297,8 @@ async function saveV2Buy(id,signalTier){
   }catch(e){
     console.error('BUY save failed',e);
     showSaveStatus('error');
-    alert(`The ${s.ticker} position was recorded on this screen, but StockIQ could not save it to your account. Please keep this page open and try again.`);
+    const reason = e?.message ? String(e.message).replace(/^FirebaseError:\s*/,'') : 'Unknown save error';
+    alert(`StockIQ could not save the ${s.ticker} position to your account.\n\n${reason}\n\nYour entry is still visible on this page, but do not close or refresh it until the save succeeds.`);
   }
 }
 function showV2StopFlow(id){ const s=stocks.find(x=>String(x.id)===String(id)); if(!s)return; const sug=suggestedStop(s); showModal(`<div style="background:${C.card};border-radius:20px;padding:22px;border:1px solid ${C.border};"><div style="color:${C.text};font-size:18px;font-weight:900;margin-bottom:12px;">Update Recorded Stop</div><div style="color:${C.textSub};font-size:13px;margin-bottom:12px;">Suggested: ${money(sug.price)} (${sug.type})</div><input id="v2-stop" type="number" step="0.01" value="${s.position?.recordedStop||sug.price||''}" style="width:100%;box-sizing:border-box;background:${C.cardHigh};border:1px solid ${C.border};border-radius:10px;color:${C.text};padding:11px;margin-bottom:14px;"><button onclick="saveV2Stop('${id}')" style="width:100%;padding:12px;border:none;border-radius:10px;background:${C.text};color:${C.bg};font-weight:900;">Save Stop</button></div>`); }
