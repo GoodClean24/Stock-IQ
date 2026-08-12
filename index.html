@@ -7637,16 +7637,27 @@ function snapVal(sn,...keys){ for(const k of keys){ if(sn && sn[k]!=null && !Num
 function curVal(s,...keys){ for(const k of keys){ if(s && s[k]!=null && !Number.isNaN(Number(s[k]))) return Number(s[k]); } const l=latestSnap(s); return snapVal(l,...keys); }
 
 function regressionStats(s, window=126){
-  const snaps=(s.snapshots||[]).filter(x=>x.price!=null).slice(-window);
-  if(snaps.length<40) return {z:null,slope:null,center:null,sd:null,n:snaps.length};
-  const ys=snaps.map(x=>Number(x.price)), n=ys.length;
+  const snaps=(s.snapshots||[]).filter(x=>x.price!=null);
+  const latest=snaps.length?snaps[snaps.length-1]:null;
+  // Daily Python export is the source of truth for the current 126-day regression.
+  // Fall back to local calculation only when imported regression values are absent.
+  if(window===126 && latest){
+    const iz=snapVal(latest,'regZ126','RegZ126','regz126');
+    const isl=snapVal(latest,'regSlope126','RegSlope126','regslope126');
+    const ic=snapVal(latest,'regCenter126','RegCenter126','regcenter126');
+    const isd=snapVal(latest,'regResidualSD126','RegResidualSD126','regresidualsd126');
+    if(iz!=null && isl!=null) return {z:iz,slope:isl,center:ic,sd:isd,n:Math.min(126,snaps.length),source:'imported'};
+  }
+  const use=snaps.slice(-window);
+  if(use.length<40) return {z:null,slope:null,center:null,sd:null,n:use.length,source:'calculated'};
+  const ys=use.map(x=>Number(x.price)), n=ys.length;
   const xbar=(n-1)/2, ybar=ys.reduce((a,b)=>a+b,0)/n;
   let num=0,den=0; for(let i=0;i<n;i++){ num+=(i-xbar)*(ys[i]-ybar); den+=(i-xbar)*(i-xbar); }
   const slope=den?num/den:0, intercept=ybar-slope*xbar;
   const residuals=ys.map((y,i)=>y-(intercept+slope*i));
   const sd=Math.sqrt(residuals.reduce((a,b)=>a+b*b,0)/Math.max(1,n-2));
   const center=intercept+slope*(n-1), price=ys[n-1];
-  return {z:sd?(price-center)/sd:null,slope,center,sd,n};
+  return {z:sd?(price-center)/sd:null,slope,center,sd,n,source:'calculated'};
 }
 function changeN(s,n){ const a=(s.snapshots||[]).filter(x=>x.price!=null); if(a.length<=n)return null; const now=a[a.length-1].price, then=a[a.length-1-n].price; return then?((now/then)-1)*100:null; }
 function relativeVolume(s){ const v=curVal(s,'vol'), av=curVal(s,'avgvol'); return v!=null&&av? v/av:null; }
@@ -8066,6 +8077,7 @@ function tradeWindowStats(s,entry,entryDate,exitDate=null){
   return {mfe:highs.length?((Math.max(...highs)/entry)-1)*100:null,mae:lows.length?((Math.min(...lows)/entry)-1)*100:null};
 }
 function yourTradeProofPanel(s,pb){
+  const missed=(s.missedOpportunities||[]);
   const realized=(s.realized||[]).filter(r=>r&&r.entry&&r.exit);
   const pct=r=>r.plPct!=null?Number(r.plPct):((Number(r.exit)/Number(r.entry))-1)*100;
   const completed=realized.length,wins=realized.filter(r=>pct(r)>0).length,avg=completed?realized.reduce((a,r)=>a+pct(r),0)/completed:null;
@@ -8080,6 +8092,7 @@ function yourTradeProofPanel(s,pb){
   if(realized.length){ body+=`<div style="color:${C.text};font-size:12px;font-weight:900;margin-bottom:6px;">Buy / Sell History</div>`; body+=realized.slice().reverse().slice(0,6).map(r=>{const rp=pct(r),path=tradeWindowStats(s,Number(r.entry),r.dateIn||r.date,r.dateOut||r.date),give=path.mfe!=null?Math.max(0,path.mfe-rp):null;return `<div style="border-top:1px solid ${C.border};padding:9px 0;"><div style="display:flex;justify-content:space-between;"><span style="color:${C.text};font-size:12.5px;font-weight:800;">${r.dateIn||'—'} → ${r.dateOut||r.date||'—'} · ${r.signalTier||'BUY'}</span><span style="color:${rp>=0?C.green:C.red};font-size:12.5px;font-weight:900;">${rp>=0?'+':''}${rp.toFixed(1)}%</span></div><div style="color:${C.textSub};font-size:11.5px;margin-top:4px;line-height:1.5;">${money(r.entry)} → ${money(r.exit)} · ${r.shares} sh · Peak while held ${path.mfe!=null?'+'+path.mfe.toFixed(1)+'%':'—'} · Drawdown ${path.mae!=null?path.mae.toFixed(1)+'%':'—'}${give!=null?' · Gave back '+give.toFixed(1)+' pts':''}</div></div>`;}).join(''); }
   else if(!s.position) body+=`<div style="color:${C.textSub};font-size:12.5px;line-height:1.6;">No completed trades yet. Your first recorded buy and sell will start the forward-learning record for ${s.ticker}.</div>`;
   body+=`<div style="margin-top:12px;padding-top:10px;border-top:1px solid ${C.border};color:${C.textSub};font-size:11.5px;line-height:1.55;"><b style="color:${C.text};">Historical Proof stays unchanged.</b> Your trades are forward evidence. After about 10 completed trades in the same ticker/playbook, this becomes meaningful live validation.</div>`;
+  if(missed.length){ body+=`<div style="margin-top:11px;padding-top:10px;border-top:1px solid ${C.border};"><div style="color:${C.yellow};font-size:11px;font-weight:900;text-transform:uppercase;margin-bottom:5px;">Missed Opportunity Study</div><div style="color:${C.textSub};font-size:11.5px;line-height:1.5;">${missed.length} PREPARING setup${missed.length===1?' has':'s have'} moved +6% before BUY. This is logged for rule research only; StockIQ will not loosen the setup automatically.</div></div>`; }
   return panel('Your Trade Proof',body);
 }
 function historyPanel(pb){ return panel('Historical Proof',`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;"><div style="color:${C.text};font-size:15px;font-weight:900;">${pb.confidence} CONFIDENCE</div><div style="color:${C.textSub};font-size:11px;">${pb.tier==='BENCH'?'Bench backtest · forward testing':'Validated playbook'}</div></div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;"><div><div class="v2lbl">Trades</div><div class="v2big">${pb.stats.trades}</div></div><div><div class="v2lbl">Win Rate</div><div class="v2big">~${pb.stats.win}%</div></div><div><div class="v2lbl">Avg Return</div><div class="v2big">~${pb.stats.avg}%</div></div></div><div style="margin-top:12px;color:${C.textSub};font-size:12.5px;line-height:1.6;">Normal drawdown ${pb.stats.drawdown}. ${pb.tier==='BENCH'?'Bench results are used to choose what to forward-test; they are not promoted to Core yet.':'The setup survived holdout testing, best-trade removal, best-year removal, and nearby-rule checks.'} Historical results are evidence, not a guarantee.</div>`); }
@@ -8187,8 +8200,40 @@ function renderDetail(s){
 function openDetail(id){ const s=stocks.find(x=>String(x.id)===String(id)); if(!s)return; showScreen('detail'); renderDetail(s); }
 
 // ── Position actions ────────────────────────────────────────────────────────
-function showV2BuyFlow(id,signalTier){ const s=stocks.find(x=>String(x.id)===String(id)); if(!s)return; const tier=signalTier==='A+ BUY'?'A+ BUY':'BUY'; showModal(`<div style="background:${C.card};border-radius:20px;padding:22px;border:1px solid ${C.border};"><div style="display:flex;align-items:center;gap:9px;margin-bottom:14px;"><div style="color:${C.text};font-size:19px;font-weight:900;">Record ${tier}: ${s.ticker}</div><span style="padding:4px 8px;border-radius:999px;background:${tier==='A+ BUY'?C.green+'22':C.cardHigh};border:1px solid ${tier==='A+ BUY'?C.green:C.border};color:${tier==='A+ BUY'?C.green:C.textSub};font-size:10px;font-weight:900;">${tier}</span></div><label class="v2lbl">Actual Buy Price</label><input id="v2-entry" type="number" step="0.01" value="${curVal(s,'price')||''}" style="width:100%;box-sizing:border-box;margin:5px 0 12px;background:${C.cardHigh};border:1px solid ${C.border};border-radius:10px;color:${C.text};padding:11px;"><label class="v2lbl">Shares</label><input id="v2-shares" type="number" step="0.01" style="width:100%;box-sizing:border-box;margin:5px 0 15px;background:${C.cardHigh};border:1px solid ${C.border};border-radius:10px;color:${C.text};padding:11px;"><button onclick="saveV2Buy('${s.id}','${tier}')" style="width:100%;padding:12px;border:none;border-radius:10px;background:${C.green};color:#000;font-weight:900;cursor:pointer;">Save ${tier} Position</button></div>`); }
-async function saveV2Buy(id,signalTier){ const s=stocks.find(x=>String(x.id)===String(id)); if(!s)return; const entry=parseFloat(document.getElementById('v2-entry').value),shares=parseFloat(document.getElementById('v2-shares').value); if(!entry||!shares)return; const d=latestSnap(s)?.date||today(); const tier=signalTier==='A+ BUY'?'A+ BUY':'BUY'; const u={...s,position:{...(s.position||{}),entry,shares,date:d,signalTier:tier,recordedStop:entry*(1-pbFor(s).stopPct/100)},type:'Swing Trade'}; stocks=stocks.map(x=>String(x.id)===String(id)?u:x); closeAllOverlays(); await fbSaveStock(u); renderHome(); openDetail(id); }
+function updateV2BuyCalc(changed){
+  const entryEl=document.getElementById('v2-entry'), amountEl=document.getElementById('v2-amount'), sharesEl=document.getElementById('v2-shares'), riskEl=document.getElementById('v2-risk-preview');
+  if(!entryEl||!amountEl||!sharesEl)return;
+  const entry=parseFloat(entryEl.value), amount=parseFloat(amountEl.value), shares=parseFloat(sharesEl.value);
+  if(entry>0){
+    if(changed==='amount' && amount>0) sharesEl.value=(amount/entry).toFixed(2);
+    else if(changed==='shares' && shares>0) amountEl.value=(shares*entry).toFixed(2);
+    else if(changed==='entry'){
+      if(amount>0) sharesEl.value=(amount/entry).toFixed(2);
+      else if(shares>0) amountEl.value=(shares*entry).toFixed(2);
+    }
+  }
+  const finalEntry=parseFloat(entryEl.value), finalShares=parseFloat(sharesEl.value);
+  const stopPct=parseFloat(entryEl.dataset.stopPct||'0');
+  if(riskEl){
+    if(finalEntry>0&&finalShares>0&&stopPct>0){
+      const stop=finalEntry*(1-stopPct/100), riskPerShare=finalEntry-stop, risk=finalShares*riskPerShare, total=finalEntry*finalShares;
+      riskEl.innerHTML=`<div style="display:flex;justify-content:space-between;gap:10px;"><span>Estimated investment</span><strong>${money(total)}</strong></div><div style="display:flex;justify-content:space-between;gap:10px;margin-top:5px;"><span>Emergency stop</span><strong>${money(stop)}</strong></div><div style="display:flex;justify-content:space-between;gap:10px;margin-top:5px;"><span>Estimated risk at stop</span><strong style="color:${C.yellow};">${money(risk)}</strong></div>`;
+    }else riskEl.innerHTML='Enter an amount or share quantity to see estimated risk.';
+  }
+}
+function showV2BuyFlow(id,signalTier){
+  const s=stocks.find(x=>String(x.id)===String(id)); if(!s)return;
+  const tier=signalTier==='A+ BUY'?'A+ BUY':'BUY', pb=pbFor(s), stopPct=Number(pb?.stopPct||0), px=curVal(s,'price')||'';
+  showModal(`<div style="background:${C.card};border-radius:20px;padding:22px;border:1px solid ${C.border};"><div style="display:flex;align-items:center;gap:9px;margin-bottom:14px;"><div style="color:${C.text};font-size:19px;font-weight:900;">Record ${tier}: ${s.ticker}</div><span style="padding:4px 8px;border-radius:999px;background:${tier==='A+ BUY'?C.green+'22':C.cardHigh};border:1px solid ${tier==='A+ BUY'?C.green:C.border};color:${tier==='A+ BUY'?C.green:C.textSub};font-size:10px;font-weight:900;">${tier}</span></div><label class="v2lbl">Actual Buy Price</label><input id="v2-entry" data-stop-pct="${stopPct}" type="number" step="0.01" value="${px}" oninput="updateV2BuyCalc('entry')" style="width:100%;box-sizing:border-box;margin:5px 0 12px;background:${C.cardHigh};border:1px solid ${C.border};border-radius:10px;color:${C.text};padding:11px;"><label class="v2lbl">Total Amount to Invest</label><input id="v2-amount" type="number" min="0" step="0.01" placeholder="e.g. 1500" oninput="updateV2BuyCalc('amount')" style="width:100%;box-sizing:border-box;margin:5px 0 12px;background:${C.cardHigh};border:1px solid ${C.border};border-radius:10px;color:${C.text};padding:11px;"><label class="v2lbl">Shares</label><input id="v2-shares" type="number" min="0" step="0.01" placeholder="Calculated automatically" oninput="updateV2BuyCalc('shares')" style="width:100%;box-sizing:border-box;margin:5px 0 12px;background:${C.cardHigh};border:1px solid ${C.border};border-radius:10px;color:${C.text};padding:11px;"><div id="v2-risk-preview" style="background:${C.cardHigh};border:1px solid ${C.border};border-radius:10px;padding:10px 12px;color:${C.textSub};font-size:11.5px;line-height:1.45;margin-bottom:15px;">Enter an amount or share quantity to see estimated risk.</div><button onclick="saveV2Buy('${s.id}','${tier}')" style="width:100%;padding:12px;border:none;border-radius:10px;background:${C.green};color:#000;font-weight:900;cursor:pointer;">Save ${tier} Position</button></div>`);
+}
+async function saveV2Buy(id,signalTier){
+  const s=stocks.find(x=>String(x.id)===String(id)); if(!s)return;
+  const entry=parseFloat(document.getElementById('v2-entry').value),shares=parseFloat(document.getElementById('v2-shares').value),amount=parseFloat(document.getElementById('v2-amount')?.value);
+  if(!entry||!shares||entry<=0||shares<=0)return;
+  const d=latestSnap(s)?.date||today(), tier=signalTier==='A+ BUY'?'A+ BUY':'BUY', stopPct=Number(pbFor(s)?.stopPct||0), recordedStop=entry*(1-stopPct/100);
+  const u={...s,position:{...(s.position||{}),entry,shares,date:d,signalTier:tier,investmentAmount:(amount>0?amount:entry*shares),recordedStop},prepWatch:null,type:'Swing Trade'};
+  stocks=stocks.map(x=>String(x.id)===String(id)?u:x); closeAllOverlays(); await fbSaveStock(u); renderHome(); openDetail(id);
+}
 function showV2StopFlow(id){ const s=stocks.find(x=>String(x.id)===String(id)); if(!s)return; const sug=suggestedStop(s); showModal(`<div style="background:${C.card};border-radius:20px;padding:22px;border:1px solid ${C.border};"><div style="color:${C.text};font-size:18px;font-weight:900;margin-bottom:12px;">Update Recorded Stop</div><div style="color:${C.textSub};font-size:13px;margin-bottom:12px;">Suggested: ${money(sug.price)} (${sug.type})</div><input id="v2-stop" type="number" step="0.01" value="${s.position?.recordedStop||sug.price||''}" style="width:100%;box-sizing:border-box;background:${C.cardHigh};border:1px solid ${C.border};border-radius:10px;color:${C.text};padding:11px;margin-bottom:14px;"><button onclick="saveV2Stop('${id}')" style="width:100%;padding:12px;border:none;border-radius:10px;background:${C.text};color:${C.bg};font-weight:900;">Save Stop</button></div>`); }
 async function saveV2Stop(id){ const s=stocks.find(x=>String(x.id)===String(id)); if(!s)return; const v=parseFloat(document.getElementById('v2-stop').value); const u={...s,position:{...s.position,recordedStop:v}}; stocks=stocks.map(x=>String(x.id)===String(id)?u:x); closeAllOverlays(); await fbSaveStock(u); renderHome(); openDetail(id); }
 function showV2CloseFlow(id){ const s=stocks.find(x=>String(x.id)===String(id)); if(!s||!s.position)return; const held=s.position.shares||0; showModal(`<div style="background:${C.card};border-radius:20px;padding:22px;border:1px solid ${C.border};"><div style="color:${C.text};font-size:18px;font-weight:900;margin-bottom:4px;">Sell ${s.ticker}</div><div style="color:${C.textSub};font-size:12px;margin-bottom:14px;">Paper position: ${held} shares @ ${money(s.position.entry)}</div><label class="v2lbl">Sell Price</label><input id="v2-exit" type="number" step="0.01" value="${curVal(s,'price')||''}" style="width:100%;box-sizing:border-box;background:${C.cardHigh};border:1px solid ${C.border};border-radius:10px;color:${C.text};padding:11px;margin:5px 0 12px;"><label class="v2lbl">Shares to Sell</label><input id="v2-sell-shares" type="number" min="0.01" max="${held}" step="0.01" value="${held}" style="width:100%;box-sizing:border-box;background:${C.cardHigh};border:1px solid ${C.border};border-radius:10px;color:${C.text};padding:11px;margin:5px 0 14px;"><button onclick="saveV2Close('${id}')" style="width:100%;padding:12px;border:none;border-radius:10px;background:${C.red};color:#fff;font-weight:900;">SELL</button></div>`); }
@@ -8197,9 +8242,9 @@ async function saveV2Close(id){ const s=stocks.find(x=>String(x.id)===String(id)
 // ── One-file daily import ───────────────────────────────────────────────────
 function parseDailyMultiCSV(text){
   text=text.replace(/^\uFEFF/,''); const lines=text.split(/\r?\n/); if(lines.length<2)return {groups:new Map(),headers:[]}; const delim=lines[0].includes('\t')?'\t':','; const headers=splitCSVLine(lines[0],delim); const norm=h=>String(h).toLowerCase().replace(/[^a-z0-9]/g,''); const find=(...alts)=>headers.findIndex(h=>alts.some(a=>norm(h)===norm(a)||norm(h).includes(norm(a))));
-  const I={date:find('Date'),ticker:find('Symbol','Ticker'),close:find('Day Close','Close'),open:find('Open'),high:find('High'),low:find('Low'),vol:find('Volume'),rsi:find('RSI14','RSI'),macd:find('MACD'),sig:find('MACDSignal'),atr:find('ATR14','ATR'),atrPct:find('ATRPercentage'),ema20:find('EMA20'),ma50:find('SMA50'),ma200:find('SMA200'),avgvol:find('AvgVol20'),hi52:find('High52W'),lo52:find('Low52W'),sector:find('Sector'),industry:find('Industry')}; if(I.date<0||I.ticker<0||I.close<0)return {groups:new Map(),headers};
+  const I={date:find('Date'),ticker:find('Symbol','Ticker'),close:find('Day Close','Close'),open:find('Open'),high:find('High'),low:find('Low'),vol:find('Volume'),rsi:find('RSI14','RSI'),macd:find('MACD'),sig:find('MACDSignal'),atr:find('ATR14','ATR'),atrPct:find('ATRPercentage'),ema20:find('EMA20'),ma50:find('SMA50'),ma200:find('SMA200'),avgvol:find('AvgVol20'),hi52:find('High52W'),lo52:find('Low52W'),regZ126:find('RegZ126'),regSlope126:find('RegSlope126'),regCenter126:find('RegCenter126'),regResidualSD126:find('RegResidualSD126'),sector:find('Sector'),industry:find('Industry')}; if(I.date<0||I.ticker<0||I.close<0)return {groups:new Map(),headers};
   const groups=new Map(), num=(cols,i)=>{ if(i<0)return null; const v=parseFloat(String(cols[i]??'').replace(/,/g,'')); return Number.isNaN(v)?null:v; };
-  for(let j=1;j<lines.length;j++){ if(!lines[j].trim())continue; const c=splitCSVLine(lines[j],delim),t=String(c[I.ticker]||'').trim().toUpperCase(); if(!t)continue; const date=parseCSVDate(String(c[I.date]||'').trim()),price=num(c,I.close),atrp=num(c,I.atrPct); const row={date,price,open:num(c,I.open),high:num(c,I.high),low:num(c,I.low),vol:num(c,I.vol),rsi:num(c,I.rsi),macdLine:num(c,I.macd),signalLine:num(c,I.sig),atr:atrp!=null&&price?price*atrp/100:num(c,I.atr),ma20:num(c,I.ema20),ema20:num(c,I.ema20),ma50:num(c,I.ma50),ma200:num(c,I.ma200),avgvol:num(c,I.avgvol),hi52:num(c,I.hi52),lo52:num(c,I.lo52),sector:I.sector>=0?c[I.sector]:null,industry:I.industry>=0?c[I.industry]:null}; if(!groups.has(t))groups.set(t,[]); groups.get(t).push(row); }
+  for(let j=1;j<lines.length;j++){ if(!lines[j].trim())continue; const c=splitCSVLine(lines[j],delim),t=String(c[I.ticker]||'').trim().toUpperCase(); if(!t)continue; const date=parseCSVDate(String(c[I.date]||'').trim()),price=num(c,I.close),atrp=num(c,I.atrPct); const row={date,price,open:num(c,I.open),high:num(c,I.high),low:num(c,I.low),vol:num(c,I.vol),rsi:num(c,I.rsi),macdLine:num(c,I.macd),signalLine:num(c,I.sig),atr:atrp!=null&&price?price*atrp/100:num(c,I.atr),ma20:num(c,I.ema20),ema20:num(c,I.ema20),ma50:num(c,I.ma50),ma200:num(c,I.ma200),avgvol:num(c,I.avgvol),hi52:num(c,I.hi52),lo52:num(c,I.lo52),regZ126:num(c,I.regZ126),regSlope126:num(c,I.regSlope126),regCenter126:num(c,I.regCenter126),regResidualSD126:num(c,I.regResidualSD126),sector:I.sector>=0?c[I.sector]:null,industry:I.industry>=0?c[I.industry]:null}; if(!groups.has(t))groups.set(t,[]); groups.get(t).push(row); }
   for(const rows of groups.values())rows.sort((a,b)=>new Date(a.date)-new Date(b.date)); return {groups,headers};
 }
 function showDailyDataFlow(){ showModal(`<div style="background:${C.card};border-radius:20px;padding:24px;border:1px solid ${C.teal}44;"><div style="color:${C.text};font-size:20px;font-weight:900;margin-bottom:6px;">Upload Daily Data</div><div style="color:${C.textSub};font-size:13px;line-height:1.6;margin-bottom:18px;">Use the multi-ticker daily CSV. StockIQ updates Core stocks, Weekly Bench stocks, market ETFs, and any research names already saved. Your trade entries and stops stay untouched.</div><input id="v2-daily-file" type="file" accept=".csv,.txt" multiple style="display:none" onchange="previewV2Daily(this)"><button onclick="document.getElementById('v2-daily-file').click()" style="width:100%;padding:14px;border:none;border-radius:12px;background:${C.teal};color:#000;font-weight:900;cursor:pointer;">Select Daily CSV</button></div>`); }
@@ -8217,7 +8262,32 @@ async function previewV2Daily(input){
 }
 async function applyV2Daily(){ const parsed=window._v2PendingDaily; if(!parsed)return; closeAllOverlays(); showSaveStatus('saving'); const groups=parsed.groups, byTicker=new Map(stocks.map(s=>[String(s.ticker||'').toUpperCase(),s])), updates=[];
   const wanted=new Set([...CORE_TICKERS,...BENCH_TICKERS,...MARKET_TICKERS,...stocks.filter(isResearchStock).map(s=>String(s.ticker).toUpperCase())]);
-  for(const t of wanted){ const rows=groups.get(t); if(!rows||!rows.length)continue; const old=byTicker.get(t), latest=rows[rows.length-1], prev=rows.length>1?rows[rows.length-2]:null; const base=old||{id:`v2_${t}`,ticker:t,name:t,type:'Swing Trade',starred:false,notes:'',realized:[],scannerSources:[],coreStatus:CORE_TICKERS.includes(t)?'CORE PLAYBOOK':BENCH_TICKERS.includes(t)?'BENCH':MARKET_TICKERS.includes(t)?'MARKET':'RESEARCH ONLY'}; const u={...base,price:latest.price,change:prev?.price?latest.price-prev.price:0,pct:prev?.price?((latest.price/prev.price)-1)*100:0,rsi:latest.rsi,vol:latest.vol,avgvol:latest.avgvol,ma20:latest.ma20,ema20:latest.ema20,ma50:latest.ma50,ma200:latest.ma200,macdLine:latest.macdLine,signalLine:latest.signalLine,atr:latest.atr,hi52:latest.hi52,lo52:latest.lo52,sector:latest.sector||base.sector,industry:latest.industry||base.industry,analyzed:latest.date,snapshots:mergeSnapshotHistory(V2_BASELINE[t]||[],mergeSnapshotHistory(base.snapshots||[],rows)),type:'Swing Trade',coreStatus:CORE_TICKERS.includes(t)?'CORE PLAYBOOK':BENCH_TICKERS.includes(t)?'BENCH':MARKET_TICKERS.includes(t)?'MARKET':(base.coreStatus||'RESEARCH ONLY'),_v2Placeholder:false}; updates.push(u); }
+  for(const t of wanted){
+    const rows=groups.get(t); if(!rows||!rows.length)continue;
+    const old=byTicker.get(t), latest=rows[rows.length-1], prev=rows.length>1?rows[rows.length-2]:null;
+    const oldState=(old&&!old.position&&isValidatedStock(old))?stockState(old)?.state:null;
+    const base=old||{id:`v2_${t}`,ticker:t,name:t,type:'Swing Trade',starred:false,notes:'',realized:[],scannerSources:[],coreStatus:CORE_TICKERS.includes(t)?'CORE PLAYBOOK':BENCH_TICKERS.includes(t)?'BENCH':MARKET_TICKERS.includes(t)?'MARKET':'RESEARCH ONLY'};
+    let u={...base,price:latest.price,change:prev?.price?latest.price-prev.price:0,pct:prev?.price?((latest.price/prev.price)-1)*100:0,rsi:latest.rsi,vol:latest.vol,avgvol:latest.avgvol,ma20:latest.ma20,ema20:latest.ema20,ma50:latest.ma50,ma200:latest.ma200,macdLine:latest.macdLine,signalLine:latest.signalLine,atr:latest.atr,hi52:latest.hi52,lo52:latest.lo52,regZ126:latest.regZ126,regSlope126:latest.regSlope126,regCenter126:latest.regCenter126,regResidualSD126:latest.regResidualSD126,sector:latest.sector||base.sector,industry:latest.industry||base.industry,analyzed:latest.date,snapshots:mergeSnapshotHistory(V2_BASELINE[t]||[],mergeSnapshotHistory(base.snapshots||[],rows)),type:'Swing Trade',coreStatus:CORE_TICKERS.includes(t)?'CORE PLAYBOOK':BENCH_TICKERS.includes(t)?'BENCH':MARKET_TICKERS.includes(t)?'MARKET':(base.coreStatus||'RESEARCH ONLY'),_v2Placeholder:false};
+
+    // PREPARING forward-test: if price runs +6% before the setup becomes BUY,
+    // record a missed opportunity once. This is evidence for future rule tuning,
+    // not permission to loosen rules automatically.
+    if(!u.position && isValidatedStock(u)){
+      const newState=stockState(u)?.state;
+      let watch=base.prepWatch?{...base.prepWatch}:null;
+      let missed=[...(base.missedOpportunities||[])];
+      if(!watch && newState==='PREPARING') watch={date:latest.date,price:latest.price,triggerPct:6};
+      if(watch && ['BUY','A+ BUY'].includes(newState)) watch=null;
+      if(watch && latest.price!=null && watch.price>0 && latest.price>=watch.price*1.06 && !['BUY','A+ BUY'].includes(newState)){
+        const already=missed.some(m=>m.startDate===watch.date);
+        if(!already) missed.push({startDate:watch.date,startPrice:watch.price,hitDate:latest.date,hitPrice:latest.price,movePct:((latest.price/watch.price)-1)*100,stateAtHit:newState||'WAIT'});
+        watch=null;
+      }
+      if(oldState==='PREPARING' && !watch && newState==='PREPARING' && !(base.prepWatch)) watch={date:latest.date,price:latest.price,triggerPct:6};
+      u={...u,prepWatch:watch,missedOpportunities:missed};
+    }
+    updates.push(u);
+  }
   const updMap=new Map(updates.map(x=>[String(x.ticker).toUpperCase(),x])); stocks=stocks.map(s=>updMap.get(String(s.ticker).toUpperCase())||s); updates.forEach(u=>{if(!byTicker.has(String(u.ticker).toUpperCase()))stocks.push(u);});
   try{ for(const u of updates)await fbSaveStock(u); showSaveStatus('saved'); setTimeout(()=>showSaveStatus('ready'),1800);}catch(e){console.error(e);showSaveStatus('error');} renderHome(); }
 
@@ -8228,7 +8298,7 @@ function showAddFlow(){ if(_origShowAddFlow)_origShowAddFlow(); setTimeout(()=>{
 // ── v2 initialization ────────────────────────────────────────────────────────
 (function initStockIQV2(){
   const style=document.createElement('style'); style.textContent=`.v2lbl{color:${C.textSub};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}.v2val{color:${C.text};font-size:14px;font-weight:900}.v2big{color:${C.text};font-size:18px;font-weight:950}`; document.head.appendChild(style);
-  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.8.0 · Core + Weekly Bench';
+  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.1 · Readiness + Live Learning';
   const topButtons=[...document.querySelectorAll('button')]; const add=topButtons.find(b=>b.textContent.includes('Add Stock')); if(add)add.innerHTML='<span style="font-size:16px;">+</span> Research'; const scan=topButtons.find(b=>b.textContent.includes('Import Scan')); if(scan){scan.textContent='Daily Data';scan.onclick=showDailyDataFlow;scan.setAttribute('aria-label','Upload daily multi-ticker data');}
   activeTag='Ready Now'; sortMode='opportunity';
 })();
