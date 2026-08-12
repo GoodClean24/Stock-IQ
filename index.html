@@ -6909,6 +6909,7 @@ function parseScanCSV(text) {
     earnTime:   ['EarningsTime','earnings time'],
     earnVerified:['EarningsVerified','earnings verified'],
     earnSource: ['EarningsSource','earnings source'],
+    lastEarnDate:['LastEarningsDate','last earnings date'],
     hi52:       ['High52W','high52w','52WHigh','Hi52'],
     lo52:       ['Low52W','low52w','52WLow','Lo52'],
   };
@@ -6950,6 +6951,7 @@ function parseScanCSV(text) {
       earnTime: str('earnTime'),
       earnVerified: str('earnVerified')==null ? null : /^(yes|true|1|verified)$/i.test(String(str('earnVerified')).trim()),
       earnSource: str('earnSource'),
+      lastEarnDate: str('lastEarnDate'),
     });
   }
   return rows;
@@ -7059,6 +7061,7 @@ async function doBulkImportScan() {
       ma20: r.ma20, ma50: r.ma50, ma200: r.ma200,
       rsi: r.rsi, vol: r.vol, avgvol: r.avgvol, atr: r.atr,
       macdLine: r.macdLine, signalLine: r.signalLine,
+      lastEarningsDate: r.lastEarnDate || null,
       earningsDate: r.earnDate || (r.earnOffset!=null ? earnDateFromOffset(r.earnOffset, todayStr) : null),
       earningsTime: r.earnTime || '',
       earningsVerified: r.earnVerified!=null ? r.earnVerified : !!(r.earnDate || r.earnOffset!=null),
@@ -7096,6 +7099,7 @@ async function doBulkImportScan() {
       ema20: r.ma20 ?? s.ema20,
       sector: r.sector ?? s.sector,
       industry: r.industry ?? s.industry,
+      lastEarningsDate: r.lastEarnDate || ((s.earningsDate && r.earnDate && String(r.earnDate)>String(s.earningsDate) && String(s.earningsDate)<=String(todayStr)) ? s.earningsDate : (s.lastEarningsDate||null)),
       earningsDate: r.earnDate || (r.earnOffset!=null ? earnDateFromOffset(r.earnOffset, todayStr) : (r.earnVerified===false ? null : s.earningsDate)),
       earningsTime: r.earnTime || (r.earnVerified===false ? '' : (s.earningsTime||'')),
       earningsVerified: r.earnVerified!=null ? r.earnVerified : (r.earnDate||r.earnOffset!=null ? true : earningsIsVerified(s)),
@@ -7193,6 +7197,7 @@ function parseCSV(text) {
     earnTime:  ['EarningsTime','earnings time'],
     earnVerified:['EarningsVerified','earnings verified'],
     earnSource:['EarningsSource','earnings source'],
+    lastEarnDate:['LastEarningsDate','last earnings date'],
     hi52:      ['High52W','high52w','52WHigh','Hi52'],
     ema20live: ['EMA20','ema20','EMA_20'],
     ema20:     ['EMA20','ema20','EMA_20'],
@@ -7257,6 +7262,7 @@ function parseCSV(text) {
       earnTime: (idx.earnTime!==undefined && idx.earnTime>=0 && cols[idx.earnTime]) ? cols[idx.earnTime].trim() : null,
       earnVerified: (idx.earnVerified!==undefined && idx.earnVerified>=0 && cols[idx.earnVerified]!==undefined && cols[idx.earnVerified]!=='' ) ? /^(yes|true|1|verified)$/i.test(cols[idx.earnVerified].trim()) : null,
       earnSource: (idx.earnSource!==undefined && idx.earnSource>=0 && cols[idx.earnSource]) ? cols[idx.earnSource].trim() : null,
+      lastEarnDate: (idx.lastEarnDate!==undefined && idx.lastEarnDate>=0 && cols[idx.lastEarnDate]) ? cols[idx.lastEarnDate].trim() : null,
       hi52:       pf('hi52'),
       ema20live:  pf('ema20live'),
       ema20:      pf('ema20'),
@@ -7443,6 +7449,7 @@ async function doImportCSV(stockId) {
     ema20:      latest.ema20live  ?? s.ema20,
     ema20:      latest.ema20      ?? s.ema20,
     analyzed:   latest.date       || s.analyzed,
+    lastEarningsDate: latest.lastEarnDate || ((s.earningsDate && latest.earnDate && String(latest.earnDate)>String(s.earningsDate) && String(s.earningsDate)<=String(latest.date)) ? s.earningsDate : (s.lastEarningsDate||null)),
     earningsDate: (latest.earnDate || (latest.earnOffset!=null ? earnDateFromOffset(latest.earnOffset, latest.date) : (latest.earnVerified===false ? null : s.earningsDate))) ?? null,
     earningsTime: latest.earnTime || (latest.earnVerified===false ? '' : (s.earningsTime||'')),
     earningsVerified: latest.earnVerified!=null ? latest.earnVerified : (latest.earnDate||latest.earnOffset!=null ? true : earningsIsVerified(s)),
@@ -7908,29 +7915,63 @@ function marketTailwind(s){
   return {label:ok?'Strong':'Neutral',ok,text};
 }
 
-function earningsDays(s){
-  if(!s.earningsDate)return null; const e=parseAppDateStr(s.earningsDate)||new Date(s.earningsDate); if(!e||isNaN(e))return null; const now=new Date(); now.setHours(0,0,0,0); return Math.ceil((e-now)/86400000);
+function dateOnlyDiffDays(dateStr, baseDate=new Date()){
+  if(!dateStr) return null;
+  const d=parseAppDateStr(dateStr)||new Date(dateStr);
+  if(!d||isNaN(d)) return null;
+  const b=new Date(baseDate); b.setHours(0,0,0,0); d.setHours(0,0,0,0);
+  return Math.round((d-b)/86400000);
 }
-function earningsState(s){ const pb=pbFor(s); if(!pb)return null; const days=earningsDays(s); return {rule:pb.earnings,days,verified:earningsIsVerified(s)}; }
+function earningsDays(s){ return dateOnlyDiffDays(s.earningsDate,new Date()); }
+function latestMarketDateStr(s){ return latestSnap(s)?.date || today(); }
+function recentEarningsDate(s){
+  const latest=latestMarketDateStr(s);
+  const cands=[s.lastEarningsDate,s.earningsDate].filter(Boolean).filter(d=>String(d)<=String(latest));
+  return cands.length?cands.sort().slice(-1)[0]:null;
+}
+function postEarningsReaction(s){
+  const eventDate=recentEarningsDate(s);
+  if(!eventDate) return null;
+  const latest=latestMarketDateStr(s);
+  const daysSince=Math.max(0,-dateOnlyDiffDays(eventDate,parseAppDateStr(latest)||new Date(latest)));
+  const items=[
+    {label:'Regression improving',ok:indicatorImproving(s,'reg'),teach:'RegZ improved versus the prior completed daily bar.'},
+    {label:'RSI improving',ok:indicatorImproving(s,'rsi'),teach:'RSI improved versus the prior completed daily bar.'},
+    {label:'MACD improving',ok:indicatorImproving(s,'macd'),teach:'MACD histogram improved versus the prior completed daily bar.'}
+  ];
+  const score=items.filter(x=>x.ok).length;
+  return {eventDate,latest,daysSince,items,score,pass:score>=2};
+}
+function earningsState(s){
+  const pb=pbFor(s); if(!pb)return null;
+  const days=earningsDays(s), reaction=postEarningsReaction(s);
+  return {rule:pb.earnings,days,verified:earningsIsVerified(s),reaction};
+}
 function entryEarningsGate(s,pb){
   if(!pb) return {ok:true};
   const rule=pb.earnings||'WAIT FOR REACTION';
   const verified=earningsIsVerified(s);
   const days=earningsDays(s);
-  if(rule!=='HOLD THROUGH' && !verified){
-    return {ok:false,state:'PREPARING',reason:'Technical setup is ready, but the next earnings date is NOT VERIFIED. Verify earnings before buying.'};
+  const reaction=postEarningsReaction(s);
+  if(rule!=='HOLD THROUGH' && !verified && !reaction){
+    return {ok:false,state:'PREPARING',reason:'Technical setup is ready, but earnings are NOT VERIFIED. Verify the event date before buying.'};
   }
-  if(days==null) return {ok:true};
   const hold=pb.maxHold||pb.hold||20;
-  if(rule==='EXIT BEFORE EARNINGS' && days>=0 && days<=hold){
-    return {ok:false,state:'WAIT',reason:`Earnings are in ${days} day${days===1?'':'s'}, inside this playbook’s normal hold window. Do not initiate before earnings.`};
+  if(rule==='EXIT BEFORE EARNINGS' && days!=null && days>=0 && days<=hold){
+    return {ok:false,state:'WAIT',reason:days===0?'Earnings are today. Do not initiate this playbook on earnings day.':`Earnings are in ${days} day${days===1?'':'s'}, inside this playbook’s normal hold window. Do not initiate before earnings.`};
   }
   if(rule==='WAIT FOR REACTION'){
-    if(days>=0 && days<=hold){
+    if(days!=null && days>0 && days<=hold){
       return {ok:false,state:'WAIT',reason:`Earnings are in ${days} day${days===1?'':'s'}. This playbook requires waiting for the earnings reaction before entry.`};
     }
-    if(days<0 && days>=-2){
-      return {ok:false,state:'PREPARING',reason:'Earnings just occurred. Wait for the post-earnings reaction to settle and for momentum/regression confirmation before entry.'};
+    if(reaction && reaction.daysSince<=2){
+      if(!reaction.pass){
+        return {ok:false,state:'PREPARING',reason:`Post-earnings reaction is ${reaction.score}/3 confirmed. We need at least 2 of 3 to improve: Regression, RSI, and MACD. Recheck after the next completed daily bar.`};
+      }
+      return {ok:true,postEarnings:true,reason:`Post-earnings reaction confirmed ${reaction.score}/3. The technical setup may qualify for the next session if the normal entry requirements still pass.`};
+    }
+    if(days===0){
+      return {ok:false,state:'WAIT',reason:'Earnings are today. Wait for today’s completed reaction bar, then require at least 2 of 3 to improve: Regression, RSI, and MACD.'};
     }
   }
   return {ok:true};
@@ -8292,7 +8333,19 @@ function sweetSpotPanel(s,pb){
     `<div style="overflow-x:auto;"><div style="min-width:620px;"><div style="display:grid;grid-template-columns:minmax(138px,1.25fr) minmax(110px,.95fr) minmax(110px,.95fr) 64px;gap:12px;padding:0 14px 8px;color:${C.textSub};font-size:10.5px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;"><div>Indicator</div><div>Backtest</div><div>Today</div><div style="text-align:right;">Fit</div></div>${tiles.map(rowHTML).join('')}</div></div>`
   );
 }
-function earningsPanel(s,pb){ const e=earningsState(s); const verified=e?.verified; const status=!verified?'⚠ EARNINGS NOT VERIFIED':(e?.days==null?'Date unavailable':`${e.days} day${Math.abs(e.days)===1?'':'s'} until earnings`); return panel('Earnings',`<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;"><div><div style="color:${C.text};font-size:14px;font-weight:900;">${e?.rule||'No rule'}</div><div style="color:${!verified?C.red:C.textSub};font-size:12.5px;margin-top:4px;font-weight:${!verified?'800':'500'};">${status}</div>${s.earningsSource?`<div style="color:${C.textMuted};font-size:10.5px;margin-top:3px;">Source: ${s.earningsSource}${s.earningsTime?` · ${s.earningsTime}`:''}</div>`:''}</div>${e?.days!=null?`<div style="color:${C.text};font-size:12px;font-weight:800;">${s.earningsDate||''}</div>`:''}</div>${!verified&&e?.rule!=='HOLD THROUGH'?`<div style="margin-top:12px;padding:10px;border-radius:10px;background:${C.red}16;border:1px solid ${C.red}44;color:#F5A3A3;font-size:12px;line-height:1.5;">BUY is blocked until earnings are verified. Tap the earnings date control to enter it manually if the daily exporter cannot verify it.</div>`:''}${e?.rule==='WAIT FOR REACTION'?`<div style="margin-top:12px;padding-top:10px;border-top:1px solid ${C.border};"><div style="color:${C.textSub};font-size:12px;margin-bottom:8px;">After earnings, we want at least 2 of these 3 to improve:</div>${checklistHTML([{label:'Regression improving',ok:indicatorImproving(s,'reg'),teach:'Price is moving back toward its normal trend.'},{label:'RSI improving',ok:indicatorImproving(s,'rsi'),teach:'Momentum is strengthening.'},{label:'MACD improving',ok:indicatorImproving(s,'macd'),teach:'Buying momentum is improving.'}])}</div>`:''}`); }
+function earningsPanel(s,pb){
+  const e=earningsState(s), verified=e?.verified, rx=e?.reaction;
+  let status='Date unavailable', statusColor=C.textSub;
+  if(rx && rx.eventDate===latestMarketDateStr(s)){ status='EARNINGS REPORTED TODAY · REACTION BAR LOADED'; statusColor=C.yellow; }
+  else if(rx && rx.daysSince<=2){ status=`POST-EARNINGS DAY ${rx.daysSince} · ${rx.score}/3 CONFIRMED`; statusColor=rx.pass?C.green:C.yellow; }
+  else if(!verified && !rx){ status='⚠ EARNINGS NOT VERIFIED'; statusColor=C.red; }
+  else if(e?.days===0){ status='EARNINGS TODAY · WAIT FOR REACTION BAR'; statusColor=C.yellow; }
+  else if(e?.days!=null && e.days>0){ status=`${e.days} day${e.days===1?'':'s'} until earnings`; }
+  else if(e?.days!=null && e.days<0){ status=`Last listed earnings date was ${Math.abs(e.days)} day${Math.abs(e.days)===1?'':'s'} ago`; }
+  const eventDate=rx?.eventDate || s.earningsDate || '';
+  const reactionBlock=e?.rule==='WAIT FOR REACTION' ? `<div style="margin-top:12px;padding-top:10px;border-top:1px solid ${C.border};"><div style="display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:8px;"><div style="color:${C.text};font-size:12.5px;font-weight:900;">Post-Earnings Plan</div><div style="color:${rx?.pass?C.green:C.yellow};font-size:12px;font-weight:950;">${rx?`${rx.score}/3 confirmed`:'Waiting for reaction data'}</div></div><div style="color:${C.textSub};font-size:12px;line-height:1.55;margin-bottom:9px;">We require at least <b style="color:${C.text};">2 of 3</b> to improve versus the prior completed daily bar. If 2/3 improve <b>and</b> the normal setup requirements still pass, StockIQ can allow an entry for the next session. If fewer than 2 improve, stay PREPARING and recheck after the next daily close.</div>${checklistHTML(rx?.items||[{label:'Regression improving',ok:false,teach:'Needs a completed post-earnings daily bar.'},{label:'RSI improving',ok:false,teach:'Needs a completed post-earnings daily bar.'},{label:'MACD improving',ok:false,teach:'Needs a completed post-earnings daily bar.'}])}<div style="margin-top:9px;padding:9px 10px;border-radius:9px;background:${rx?.pass?C.greenDim:C.cardHigh};border:1px solid ${rx?.pass?C.green+'55':C.border};color:${rx?.pass?C.green:C.textSub};font-size:12px;font-weight:800;line-height:1.45;">${rx?(rx.pass?'PLAN: Reaction confirmed. Re-run the normal BUY requirements; if they all pass, entry is allowed for the next session.':'PLAN: Do not buy yet. Keep it PREPARING and recheck after the next completed daily bar.'):'PLAN: Wait for the first completed post-earnings daily bar.'}</div></div>` : '';
+  return panel('Earnings',`<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;"><div><div style="color:${C.text};font-size:14px;font-weight:900;">${e?.rule||'No rule'}</div><div style="color:${statusColor};font-size:12.5px;margin-top:4px;font-weight:850;">${status}</div>${s.earningsSource?`<div style="color:${C.textMuted};font-size:10.5px;margin-top:3px;">Source: ${s.earningsSource}${s.earningsTime?` · ${s.earningsTime}`:''}</div>`:''}</div>${eventDate?`<div style="color:${C.text};font-size:12px;font-weight:800;text-align:right;"><div>${eventDate}</div><div style="color:${C.textMuted};font-size:10px;margin-top:2px;">event date</div></div>`:''}</div>${!verified&&!rx&&e?.rule!=='HOLD THROUGH'?`<div style="margin-top:12px;padding:10px;border-radius:10px;background:${C.red}16;border:1px solid ${C.red}44;color:#F5A3A3;font-size:12px;line-height:1.5;">BUY is blocked until earnings are verified. Tap the earnings date control to enter it manually if the daily exporter cannot verify it.</div>`:''}${reactionBlock}`);
+}
 function indicatorPanel(s,pb){ const r=regressionStats(s),rv=relativeVolume(s),h=macdHist(s),atr=curVal(s,'atr'),price=curVal(s,'price'),atrp=atr&&price?atr/price*100:null; const rows=[['EMA20',curVal(s,'ma20','ema20')!=null?money(curVal(s,'ma20','ema20')):'—','Short-term trend'],['SMA50',curVal(s,'ma50')!=null?money(curVal(s,'ma50')):'—','Medium-term trend'],['SMA200',curVal(s,'ma200')!=null?money(curVal(s,'ma200')):'—','Long-term trend'],['RSI',curVal(s,'rsi')!=null?curVal(s,'rsi').toFixed(1):'—','Momentum'],['MACD Hist',h!=null?h.toFixed(2):'—','Momentum direction'],['ATR%',atrp!=null?atrp.toFixed(1)+'%':'—','Typical daily movement'],['Rel Volume',rv!=null?rv.toFixed(2)+'×':'—','Participation'],['Reg Z',r.z!=null?r.z.toFixed(2):'—','Position vs normal trend']]; return panel('Indicators / Learn Why',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">${rows.map(([a,b,c])=>`<div style="background:${C.cardHigh};border-radius:10px;padding:10px;"><div class="v2lbl">${a}</div><div style="color:${C.text};font-size:13px;font-weight:900;">${b}</div><div style="color:${C.textSub};font-size:11.5px;line-height:1.45;margin-top:4px;">${c}</div></div>`).join('')}</div>`); }
 function marketPanel(s,pb){ const t=marketTailwind(s); return panel('Market & Sector',`<div style="display:flex;justify-content:space-between;align-items:center;"><div><div style="color:${t.ok?C.green:C.text};font-size:14px;font-weight:900;">Tailwind: ${t.label}</div><div style="color:${C.textSub};font-size:12.5px;margin-top:4px;line-height:1.5;">${t.text}</div></div><div style="color:${C.textSub};font-size:11px;font-weight:800;">${pb.market||'—'}</div></div>`); }
 function entryPanel(s,pb,st){ const sig=curVal(s,'price'),max=buyUpTo(s); return panel('Entry Plan',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;"><div><div class="v2lbl">Signal Price</div><div class="v2big">${money(sig)}</div></div><div><div class="v2lbl">Buy Up To</div><div class="v2big" style="color:${C.green};">${money(max)}</div></div></div><div style="color:${C.textSub};font-size:12.5px;line-height:1.55;margin-top:10px;">At or below ${money(max)}: OK to buy. Above it: don’t chase. A sharp gap down should be reviewed before entering.</div>`); }
