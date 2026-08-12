@@ -8227,12 +8227,52 @@ function showV2BuyFlow(id,signalTier){
   showModal(`<div style="background:${C.card};border-radius:20px;padding:22px;border:1px solid ${C.border};"><div style="display:flex;align-items:center;gap:9px;margin-bottom:14px;"><div style="color:${C.text};font-size:19px;font-weight:900;">Record ${tier}: ${s.ticker}</div><span style="padding:4px 8px;border-radius:999px;background:${tier==='A+ BUY'?C.green+'22':C.cardHigh};border:1px solid ${tier==='A+ BUY'?C.green:C.border};color:${tier==='A+ BUY'?C.green:C.textSub};font-size:10px;font-weight:900;">${tier}</span></div><label class="v2lbl">Actual Buy Price</label><input id="v2-entry" data-stop-pct="${stopPct}" type="number" step="0.01" value="${px}" oninput="updateV2BuyCalc('entry')" style="width:100%;box-sizing:border-box;margin:5px 0 12px;background:${C.cardHigh};border:1px solid ${C.border};border-radius:10px;color:${C.text};padding:11px;"><label class="v2lbl">Total Amount to Invest</label><input id="v2-amount" type="number" min="0" step="0.01" placeholder="e.g. 1500" oninput="updateV2BuyCalc('amount')" style="width:100%;box-sizing:border-box;margin:5px 0 12px;background:${C.cardHigh};border:1px solid ${C.border};border-radius:10px;color:${C.text};padding:11px;"><label class="v2lbl">Shares</label><input id="v2-shares" type="number" min="0" step="0.01" placeholder="Calculated automatically" oninput="updateV2BuyCalc('shares')" style="width:100%;box-sizing:border-box;margin:5px 0 12px;background:${C.cardHigh};border:1px solid ${C.border};border-radius:10px;color:${C.text};padding:11px;"><div id="v2-risk-preview" style="background:${C.cardHigh};border:1px solid ${C.border};border-radius:10px;padding:10px 12px;color:${C.textSub};font-size:11.5px;line-height:1.45;margin-bottom:15px;">Enter an amount or share quantity to see estimated risk.</div><button onclick="saveV2Buy('${s.id}','${tier}')" style="width:100%;padding:12px;border:none;border-radius:10px;background:${C.green};color:#000;font-weight:900;cursor:pointer;">Save ${tier} Position</button></div>`);
 }
 async function saveV2Buy(id,signalTier){
-  const s=stocks.find(x=>String(x.id)===String(id)); if(!s)return;
-  const entry=parseFloat(document.getElementById('v2-entry').value),shares=parseFloat(document.getElementById('v2-shares').value),amount=parseFloat(document.getElementById('v2-amount')?.value);
-  if(!entry||!shares||entry<=0||shares<=0)return;
-  const d=latestSnap(s)?.date||today(), tier=signalTier==='A+ BUY'?'A+ BUY':'BUY', stopPct=Number(pbFor(s)?.stopPct||0), recordedStop=entry*(1-stopPct/100);
-  const u={...s,position:{...(s.position||{}),entry,shares,date:d,signalTier:tier,investmentAmount:(amount>0?amount:entry*shares),recordedStop},prepWatch:null,type:'Swing Trade'};
-  stocks=stocks.map(x=>String(x.id)===String(id)?u:x); closeAllOverlays(); await fbSaveStock(u); renderHome(); openDetail(id);
+  const s=stocks.find(x=>String(x.id)===String(id));
+  if(!s){ alert('StockIQ could not find this stock. Please reopen the ticker and try again.'); return; }
+
+  const entryEl=document.getElementById('v2-entry');
+  const sharesEl=document.getElementById('v2-shares');
+  const amountEl=document.getElementById('v2-amount');
+  const entry=parseFloat(entryEl?.value||'');
+  let shares=parseFloat(sharesEl?.value||'');
+  let amount=parseFloat(amountEl?.value||'');
+
+  if(!entry || entry<=0){ alert('Enter the actual buy price.'); return; }
+
+  // IMPORTANT: Do not depend on the on-screen calculator having fired.
+  // If the user entered a dollar amount, calculate shares again at SAVE time.
+  if((!shares || shares<=0) && amount>0){
+    shares=amount/entry;
+    if(sharesEl) sharesEl.value=shares.toFixed(4);
+  }
+  if((!amount || amount<=0) && shares>0){
+    amount=shares*entry;
+    if(amountEl) amountEl.value=amount.toFixed(2);
+  }
+  if(!shares || shares<=0){ alert('Enter either the total amount to invest or the number of shares.'); return; }
+
+  const d=latestSnap(s)?.date||today();
+  const tier=signalTier==='A+ BUY'?'A+ BUY':'BUY';
+  const stopPct=Number(pbFor(s)?.stopPct||0);
+  const recordedStop=stopPct>0 ? entry*(1-stopPct/100) : null;
+  const finalAmount=amount>0 ? amount : entry*shares;
+
+  const u={...s,position:{...(s.position||{}),entry,shares,date:d,signalTier:tier,investmentAmount:finalAmount,recordedStop},prepWatch:null,type:'Swing Trade'};
+
+  // Optimistic local update first so a Bench buy immediately moves into BOUGHT.
+  stocks=stocks.map(x=>String(x.id)===String(id)?u:x);
+  closeAllOverlays();
+  renderHome();
+  openDetail(id);
+
+  try{
+    await fbSaveStock(u);
+    showSaveStatus('saved');
+  }catch(e){
+    console.error('BUY save failed',e);
+    showSaveStatus('error');
+    alert(`The ${s.ticker} position was recorded on this screen, but StockIQ could not save it to your account. Please keep this page open and try again.`);
+  }
 }
 function showV2StopFlow(id){ const s=stocks.find(x=>String(x.id)===String(id)); if(!s)return; const sug=suggestedStop(s); showModal(`<div style="background:${C.card};border-radius:20px;padding:22px;border:1px solid ${C.border};"><div style="color:${C.text};font-size:18px;font-weight:900;margin-bottom:12px;">Update Recorded Stop</div><div style="color:${C.textSub};font-size:13px;margin-bottom:12px;">Suggested: ${money(sug.price)} (${sug.type})</div><input id="v2-stop" type="number" step="0.01" value="${s.position?.recordedStop||sug.price||''}" style="width:100%;box-sizing:border-box;background:${C.cardHigh};border:1px solid ${C.border};border-radius:10px;color:${C.text};padding:11px;margin-bottom:14px;"><button onclick="saveV2Stop('${id}')" style="width:100%;padding:12px;border:none;border-radius:10px;background:${C.text};color:${C.bg};font-weight:900;">Save Stop</button></div>`); }
 async function saveV2Stop(id){ const s=stocks.find(x=>String(x.id)===String(id)); if(!s)return; const v=parseFloat(document.getElementById('v2-stop').value); const u={...s,position:{...s.position,recordedStop:v}}; stocks=stocks.map(x=>String(x.id)===String(id)?u:x); closeAllOverlays(); await fbSaveStock(u); renderHome(); openDetail(id); }
@@ -8298,7 +8338,7 @@ function showAddFlow(){ if(_origShowAddFlow)_origShowAddFlow(); setTimeout(()=>{
 // ── v2 initialization ────────────────────────────────────────────────────────
 (function initStockIQV2(){
   const style=document.createElement('style'); style.textContent=`.v2lbl{color:${C.textSub};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}.v2val{color:${C.text};font-size:14px;font-weight:900}.v2big{color:${C.text};font-size:18px;font-weight:950}`; document.head.appendChild(style);
-  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.1 · Readiness + Live Learning';
+  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.2 · Readiness + Live Learning';
   const topButtons=[...document.querySelectorAll('button')]; const add=topButtons.find(b=>b.textContent.includes('Add Stock')); if(add)add.innerHTML='<span style="font-size:16px;">+</span> Research'; const scan=topButtons.find(b=>b.textContent.includes('Import Scan')); if(scan){scan.textContent='Daily Data';scan.onclick=showDailyDataFlow;scan.setAttribute('aria-label','Upload daily multi-ticker data');}
   activeTag='Ready Now'; sortMode='opportunity';
 })();
