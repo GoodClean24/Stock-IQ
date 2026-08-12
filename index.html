@@ -7443,6 +7443,9 @@ async function saveAccuracy(stockId, date, pct) {
 const STOCKIQ_V2 = true;
 const CORE_TICKERS = ['ONTO','HWM','MTSI','THC','DELL','VRT','FTAI','MOD','PLTR','DVN','MPC'];
 const BENCH_TICKERS = ['CVNA','PBF','SEI','GTX','MP','HOOD','HUT','RKLB','DINO','ETSY','KTOS','VIAV'];
+const ACTIVE_BENCH_MAX = 8;
+const RESERVE_BENCH_MAX = 10;
+const PROFIT_CHECKPOINT_PCT = 6;
 const MARKET_TICKERS = ['SPY','QQQ','SOXX','XLE','XLK','XLI','XLY','XLF','XLV','VIX','^VIX'];
 const DEFAULT_MAX_POSITIONS = 5;
 const DEFAULT_MAX_RISK_DOLLARS = 100;
@@ -7586,6 +7589,29 @@ function isBenchStock(s){ return BENCH_TICKERS.includes(String(s?.ticker||'').to
 function isValidatedStock(s){ return (isCoreStock(s)||isBenchStock(s)) && !s.archived; }
 function isMarketStock(s){ return MARKET_TICKERS.includes(String(s?.ticker||'').toUpperCase()); }
 function isResearchStock(s){ return !isCoreStock(s) && !isBenchStock(s) && !isMarketStock(s) && !s.archived; }
+function benchCandidateScore(s){
+  if(!isBenchStock(s)||s.position)return -99999;
+  const st=stockState(s)?.state||'WAIT';
+  const pb=pbFor(s)||{};
+  const price=curVal(s,'price');
+  const stateScore={'A+ BUY':1000,'BUY':950,'PREPARING':800,'WAIT':200}[st]??0;
+  const priceBonus=price!=null&&price<=50?80:(price!=null&&price<=100?30:0);
+  const histBonus=(pb.stats?.win||0)*1.2+(pb.stats?.avg||0)*4+Math.min(pb.stats?.trades||0,30);
+  return stateScore+priceBonus+histBonus;
+}
+function getActiveBenchStocks(){
+  return stocks.filter(s=>isBenchStock(s)&&!s.position&&['BUY','A+ BUY','PREPARING'].includes(stockState(s)?.state))
+    .sort((a,b)=>benchCandidateScore(b)-benchCandidateScore(a))
+    .slice(0,ACTIVE_BENCH_MAX);
+}
+function getReserveBenchStocks(){
+  const activeIds=new Set(getActiveBenchStocks().map(s=>String(s.id)));
+  return stocks.filter(s=>isBenchStock(s)&&!s.position&&!activeIds.has(String(s.id)))
+    .sort((a,b)=>benchCandidateScore(b)-benchCandidateScore(a))
+    .slice(0,RESERVE_BENCH_MAX);
+}
+function isActiveBenchStock(s){ return getActiveBenchStocks().some(x=>String(x.id)===String(s.id)); }
+function isReserveBenchStock(s){ return getReserveBenchStocks().some(x=>String(x.id)===String(s.id)); }
 function nvl(v,alt=null){ return v==null || Number.isNaN(v) ? alt : v; }
 function pctFmt(v,d=1){ return v==null?'—':`${v>=0?'+':''}${Number(v).toFixed(d)}%`; }
 function money(v){ return v==null?'—':fmtP(v); }
@@ -7812,22 +7838,30 @@ function suggestedStop(s){
   }
   return {price:base,type:'Emergency Stop',active:false,why:'Original capital-protection stop.'};
 }
-function runnerHealthy(s){ const pb=pbFor(s),p=curVal(s,'price'),m50=curVal(s,'ma50'),e20=curVal(s,'ma20','ema20'),h=macdHist(s); if(!pb)return false;
-  if(s.ticker==='ONTO')return p>m50&&h>0; if(s.ticker==='MTSI')return p>m50&&p>e20&&h>0; if(s.ticker==='DELL')return p>e20&&h>0; if(s.ticker==='VRT')return p>e20&&h>0; return false; }
+function runnerHealthy(s){ const pb=pbFor(s),p=curVal(s,'price'),m50=curVal(s,'ma50'),e20=curVal(s,'ma20','ema20'),h=macdHist(s),reg=regressionStats(s); if(!pb||p==null)return false;
+  if(pb.tier==='BENCH') return e20!=null&&p>e20&&reg.slope!=null&&reg.slope>0;
+  if(s.ticker==='ONTO')return m50!=null&&p>m50&&h>0; if(s.ticker==='MTSI')return m50!=null&&e20!=null&&p>m50&&p>e20&&h>0; if(s.ticker==='DELL')return e20!=null&&p>e20&&h>0; if(s.ticker==='VRT')return e20!=null&&p>e20&&h>0;
+  return e20!=null&&p>e20&&reg.slope!=null&&reg.slope>0;
+}
 function positionState(s){
   const pb=pbFor(s); if(!pb||!s.position)return null; const d=positionDays(s)||1, price=curVal(s,'price'), stop=suggestedStop(s), earn=earningsState(s);
-  if(price!=null&&stop.price!=null&&price<=stop.price) return {state:'EXIT',reason:`Price is at/below the ${stop.type.toLowerCase()}.`,day:d,stop};
-  if(earn?.rule==='EXIT BEFORE EARNINGS'&&earn.days!=null&&earn.days<=1&&earn.days>=0) return {state:'EXIT',reason:'Earnings rule says exit before the report.',day:d,stop};
-  if(d>=pb.hold){ if(pb.maxHold>pb.hold&&runnerHealthy(s)&&d<pb.maxHold)return {state:'RUNNER',reason:`Normal ${pb.hold}-day trade is complete and strength still supports an extension.`,day:d,stop}; return {state:'DECISION DAY',reason:`Normal ${pb.hold}-day hold is complete. Review and exit unless runner conditions are met.`,day:d,stop}; }
-  const checks=setupChecks(s), red=checks.filter(x=>!x.ok).length; if(red>=Math.max(2,Math.ceil(checks.length/2))) return {state:'WATCH EXIT',reason:'Several setup conditions have weakened, but the emergency stop is still intact.',day:d,stop};
-  return {state:'BOUGHT',reason:'Position is open. Follow the trade plan and watch the exit signals.',day:d,stop};
+  const gainPct=price!=null&&s.position.entry?((price/s.position.entry)-1)*100:null;
+  if(price!=null&&stop.price!=null&&price<=stop.price) return {state:'EXIT',reason:`Price is at/below the ${stop.type.toLowerCase()}.`,day:d,stop,gainPct};
+  if(earn?.rule==='EXIT BEFORE EARNINGS'&&earn.days!=null&&earn.days<=1&&earn.days>=0) return {state:'EXIT',reason:'Earnings rule says exit before the report.',day:d,stop,gainPct};
+  if(gainPct!=null&&gainPct>=PROFIT_CHECKPOINT_PCT){
+    if(runnerHealthy(s)) return {state:'RUNNER',reason:`Profit checkpoint reached at ${pctFmt(gainPct)}. Trend strength is still healthy — protect profit and let the winner run. There is no automatic 6–7% exit.`,day:d,stop,gainPct};
+    return {state:'PROFIT CHECKPOINT',reason:`Profit checkpoint reached at ${pctFmt(gainPct)}, but runner strength is not fully confirmed. Review whether to harvest profit or tighten protection.`,day:d,stop,gainPct};
+  }
+  if(d>=pb.hold){ if(pb.maxHold>pb.hold&&runnerHealthy(s)&&d<pb.maxHold)return {state:'RUNNER',reason:`Normal ${pb.hold}-day trade is complete and strength still supports an extension.`,day:d,stop,gainPct}; return {state:'DECISION DAY',reason:`Normal ${pb.hold}-day hold is complete. Review and exit unless runner conditions are met.`,day:d,stop,gainPct}; }
+  const checks=setupChecks(s), red=checks.filter(x=>x.required&&!x.ok).length; if(red>=Math.max(2,Math.ceil(checks.filter(x=>x.required).length/2))) return {state:'WATCH EXIT',reason:'Several required setup conditions have weakened, but the emergency stop is still intact.',day:d,stop,gainPct};
+  return {state:'BOUGHT',reason:'Position is open. Follow the trade plan and watch the exit signals.',day:d,stop,gainPct};
 }
 function stockState(s){ return s.position?positionState(s):preEntryState(s); }
-function statePriority(state){ return ({'EXIT':0,'DECISION DAY':1,'RUNNER':2,'WATCH EXIT':3,'BOUGHT':4,'A+ BUY':5,'BUY':6,'PREPARING':7,'WAIT':8,'RESEARCH ONLY':9}[state]??10); }
+function statePriority(state){ return ({'EXIT':0,'PROFIT CHECKPOINT':1,'DECISION DAY':2,'RUNNER':3,'WATCH EXIT':4,'BOUGHT':5,'A+ BUY':6,'BUY':7,'PREPARING':8,'WAIT':9,'RESEARCH ONLY':10}[state]??11); }
 function stateStyle(state){
   const map={
     'A+ BUY':{c:C.green,b:C.greenDim},'BUY':{c:C.green,b:C.greenDim},'PREPARING':{c:C.yellow,b:C.yellowDim},'WAIT':{c:C.textSub,b:C.cardHigh},
-    'BOUGHT':{c:C.teal,b:C.tealDim},'WATCH EXIT':{c:C.yellow,b:C.yellowDim},'DECISION DAY':{c:C.orange,b:C.orangeDim},'RUNNER':{c:C.purple,b:C.purpleDim},'EXIT':{c:C.red,b:C.redDim},'RESEARCH ONLY':{c:C.teal,b:C.tealDim}
+    'BOUGHT':{c:C.teal,b:C.tealDim},'WATCH EXIT':{c:C.yellow,b:C.yellowDim},'PROFIT CHECKPOINT':{c:C.green,b:C.greenDim},'DECISION DAY':{c:C.orange,b:C.orangeDim},'RUNNER':{c:C.purple,b:C.purpleDim},'EXIT':{c:C.red,b:C.redDim},'RESEARCH ONLY':{c:C.teal,b:C.tealDim}
   }; return map[state]||{c:C.textSub,b:C.cardHigh};
 }
 function badge(state){ const st=stateStyle(state); return `<span style="background:${st.b};border:1px solid ${st.c}55;color:${st.c};font-size:10px;font-weight:900;padding:3px 8px;border-radius:6px;letter-spacing:.04em;white-space:nowrap;">${state}</span>`; }
@@ -7867,7 +7901,7 @@ function renderTonightsOpportunities(){
     .sort((a,b)=>statePriority(a.state?.state)-statePriority(b.state?.state));
 
   const arr=stocks
-    .filter(s=>isValidatedStock(s)&&!s.position)
+    .filter(s=>isValidatedStock(s)&&!s.position&&(isCoreStock(s)||isActiveBenchStock(s)))
     .map(s=>({s,state:stockState(s)}))
     .filter(x=>['A+ BUY','BUY','PREPARING'].includes(x.state?.state))
     .sort((a,b)=>statePriority(a.state.state)-statePriority(b.state.state))
@@ -7912,25 +7946,26 @@ function renderTonightsOpportunities(){
   el.innerHTML=ownedBox+actionBox;
 }
 function renderFilterBar(){
-  const el=document.getElementById('filter-bar'); if(!el)return; const opts=['All','Core','Bench','Buy','Preparing','Positions','Wait','Research'];
+  const el=document.getElementById('filter-bar'); if(!el)return; const opts=['All','Core','Active Bench','Reserve','Buy','Preparing','Positions','Wait','Research'];
   el.innerHTML=`<div style="display:flex;gap:7px;overflow-x:auto;">${opts.map(t=>`<button onclick="setTag('${t}')" style="padding:7px 14px;border-radius:22px;font-size:11.5px;font-weight:800;border:1px solid ${activeTag===t?C.green:C.border};background:${activeTag===t?C.greenDim:'none'};color:${activeTag===t?C.green:C.textSub};cursor:pointer;white-space:nowrap;">${t}</button>`).join('')}</div>`;
 }
-function renderListHeader(){ const el=document.getElementById('list-header'); if(!el)return; const core=stocks.filter(isCoreStock),bench=stocks.filter(isBenchStock),research=stocks.filter(isResearchStock); el.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;"><span style="color:${C.textMuted};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;">Core ${core.length}/${CORE_TICKERS.length} · Bench ${bench.length}/${BENCH_TICKERS.length}</span><span style="color:${C.textMuted};font-size:10px;">Research ${research.length}</span></div>`; }
+function renderListHeader(){ const el=document.getElementById('list-header'); if(!el)return; const core=stocks.filter(isCoreStock),active=getActiveBenchStocks(),reserve=getReserveBenchStocks(),research=stocks.filter(isResearchStock); el.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;"><span style="color:${C.textMuted};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;">Core ${core.length}/${CORE_TICKERS.length} · Active Bench ${active.length}/${ACTIVE_BENCH_MAX} · Reserve ${reserve.length}/${RESERVE_BENCH_MAX}</span><span style="color:${C.textMuted};font-size:10px;">Research ${research.length}</span></div>`; }
 function renderStockList(){
   const el=document.getElementById('stock-list'); if(!el)return; let list=getRanked(); const q=searchQuery||''; if(q)list=list.filter(s=>String(s.ticker).toLowerCase().includes(q)||String(s.name||'').toLowerCase().includes(q));
   if(activeTag==='Core') list=list.filter(isCoreStock);
-  else if(activeTag==='Bench') list=list.filter(isBenchStock);
+  else if(activeTag==='Active Bench') list=getActiveBenchStocks();
+  else if(activeTag==='Reserve') list=getReserveBenchStocks();
   else if(activeTag==='Buy')list=list.filter(s=>isValidatedStock(s)&&['BUY','A+ BUY'].includes(stockState(s)?.state));
-  else if(activeTag==='Preparing')list=list.filter(s=>isValidatedStock(s)&&stockState(s)?.state==='PREPARING');
+  else if(activeTag==='Preparing')list=list.filter(s=>isValidatedStock(s)&&stockState(s)?.state==='PREPARING'&&(isCoreStock(s)||isActiveBenchStock(s)));
   else if(activeTag==='Positions')list=list.filter(s=>s.position&&isValidatedStock(s));
-  else if(activeTag==='Wait')list=list.filter(s=>isValidatedStock(s)&&stockState(s)?.state==='WAIT');
+  else if(activeTag==='Wait')list=list.filter(s=>isCoreStock(s)&&stockState(s)?.state==='WAIT');
   else if(activeTag==='Research')list=list.filter(isResearchStock);
-  else list=list.filter(s=>isValidatedStock(s));
+  else list=list.filter(s=>isCoreStock(s)||s.position||isActiveBenchStock(s));
 
   if(activeTag==='All' && !q){
-    const core=list.filter(isCoreStock), bench=list.filter(isBenchStock);
+    const core=list.filter(isCoreStock), bench=getActiveBenchStocks();
     const section=(title,subtitle,items,color)=>items.length?`<div style="margin:14px 2px 8px;display:flex;justify-content:space-between;align-items:end;"><div><div style="color:${color};font-size:11px;font-weight:950;text-transform:uppercase;letter-spacing:.08em;">${title}</div><div style="color:${C.textMuted};font-size:10px;margin-top:2px;">${subtitle}</div></div><div style="color:${C.textMuted};font-size:10px;">${items.length}</div></div>${items.map(renderStockCard).join('')}`:'';
-    el.innerHTML=section('Core Playbooks','Ticker-specific, highest-confidence rules',core,C.green)+section('Weekly Bench','Broader setup families · forward-test candidates',bench,C.teal);
+    el.innerHTML=section('Core Playbooks','Permanent ticker-specific playbooks',core,C.green)+section('Active Bench','Best-of-the-best candidates close to a trade · reserve stays hidden',bench,C.teal);
   } else {
     el.innerHTML=list.map(renderStockCard).join('')||`<div style="color:${C.textSub};font-size:13px;padding:20px 4px;">Nothing in this view.</div>`;
   }
@@ -7939,7 +7974,7 @@ function renderStockCard(s){
   const st=stockState(s), pb=pbFor(s), price=curVal(s,'price'), reg=regressionStats(s), conflict=portfolioConflict(s); if(!pb){return `<div onclick="openDetail('${s.id}')" style="background:${C.card};border:1px solid ${C.border};border-radius:15px;padding:14px 16px;cursor:pointer;"><div style="display:flex;justify-content:space-between;"><div><span style="color:${C.text};font-weight:900;">${s.ticker}</span> ${badge('RESEARCH ONLY')}</div><span style="color:${C.text};font-weight:800;">${money(price)}</span></div><div style="color:${C.textSub};font-size:11px;margin-top:6px;">No validated StockIQ playbook yet.</div></div>`;}
   const pos=s.position; const plPct=pos&&price&&pos.entry?((price/pos.entry)-1)*100:null; const stop=pos?suggestedStop(s):null;
   return `<div onclick="openDetail('${s.id}')" style="background:${C.card};border:1px solid ${C.border};border-radius:15px;padding:14px 16px;cursor:pointer;">
-    <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;"><div><div style="display:flex;align-items:center;gap:8px;"><span style="color:${C.text};font-size:16px;font-weight:900;">${s.ticker}</span>${badge(st.state)}</div><div style="color:${C.textSub};font-size:11px;margin-top:4px;">${pb.name}${isBenchStock(s)?` · <span style="color:${C.teal};font-weight:850;">BENCH</span>`:''}</div></div><div style="text-align:right;"><div style="color:${C.text};font-size:14px;font-weight:900;">${money(price)}</div>${plPct!=null?`<div style="color:${plPct>=0?C.green:C.red};font-size:11px;font-weight:800;">${pctFmt(plPct)}</div>`:''}</div></div>
+    <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;"><div><div style="display:flex;align-items:center;gap:8px;"><span style="color:${C.text};font-size:16px;font-weight:900;">${s.ticker}</span>${badge(st.state)}</div><div style="color:${C.textSub};font-size:11px;margin-top:4px;">${pb.name}${isBenchStock(s)?` · <span style="color:${isActiveBenchStock(s)?C.teal:C.textMuted};font-weight:850;">${isActiveBenchStock(s)?'ACTIVE BENCH':'RESERVE'}</span>`:''}</div></div><div style="text-align:right;"><div style="color:${C.text};font-size:14px;font-weight:900;">${money(price)}</div>${plPct!=null?`<div style="color:${plPct>=0?C.green:C.red};font-size:11px;font-weight:800;">${pctFmt(plPct)}</div>`:''}</div></div>
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:11px;padding-top:10px;border-top:1px solid ${C.border};">
       ${pos?`<div><div class="v2lbl">Day</div><div class="v2val">${positionDays(s)}/${pb.hold}</div></div><div><div class="v2lbl">${stop.type}</div><div class="v2val">${money(stop.price)}</div></div><div><div class="v2lbl">Entry</div><div class="v2val">${money(pos.entry)}</div></div>`:`<div><div class="v2lbl">Regression</div><div class="v2val">${reg.z==null?'—':reg.z.toFixed(2)}</div></div><div><div class="v2lbl">Confidence</div><div class="v2val">${pb.confidence}</div></div><div><div class="v2lbl">${['BUY','A+ BUY'].includes(st.state)?'Buy Up To':'Key Detail'}</div><div class="v2val">${['BUY','A+ BUY'].includes(st.state)?money(buyUpTo(s)):st.state}</div></div>`}
     </div>${conflict?`<div style="color:${C.yellow};font-size:11px;margin-top:9px;font-weight:700;">Portfolio conflict: ${conflict}</div>`:''}
@@ -7949,7 +7984,7 @@ function renderHome(){ ensureCorePlaceholders(); renderMarket(); renderPortfolio
 
 // ── v2 DETAIL ───────────────────────────────────────────────────────────────
 function calloutBox(kind,title,text){ const cfg={green:{bg:C.greenDim,border:C.green+'66',title:C.green},yellow:{bg:C.yellowDim,border:C.yellow+'66',title:C.yellow},red:{bg:C.redDim,border:C.red+'66',title:C.red},blue:{bg:C.blueDim,border:C.blue+'66',title:C.blue},purple:{bg:C.purpleDim,border:C.purple+'66',title:C.purple},teal:{bg:C.tealDim,border:C.teal+'66',title:C.teal}}[kind]||{bg:C.cardHigh,border:C.border,title:C.text}; return `<div style="background:${cfg.bg};border:1px solid ${cfg.border};border-radius:14px;padding:14px 15px;margin:0 16px 12px;"><div style="color:${cfg.title};font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;">${title}</div><div style="color:${C.text};font-size:14px;font-weight:800;line-height:1.45;">${text}</div></div>`; }
-function topCallout(s,pb,st){ if(!st||!st.state) return ''; if(s.position){ if(st.state==='EXIT') return calloutBox('red','Action Needed',st.reason||'Exit the position.'); if(st.state==='DECISION DAY') return calloutBox('purple','Decision Day',st.reason||'The normal hold has been reached.'); if(st.state==='RUNNER') return calloutBox('purple','Runner Active',st.reason||'The stock is strong enough to keep running.'); if(st.state==='WATCH EXIT') return calloutBox('yellow','Pay Attention',st.reason||'The trade is weakening but not broken.'); return calloutBox('teal','Current Plan',st.reason||'Hold the position unless the stop is hit.'); } if(st.state==='A+ BUY') return calloutBox('green','Best Opportunity',st.reason||'The setup is valid and the environment is supportive.'); if(st.state==='BUY') return calloutBox('green','Ready To Buy',st.reason||'The setup is valid.'); if(st.state==='PREPARING') return calloutBox('yellow','What Needs To Happen',st.reason||'The setup is close but still missing a trigger.'); return calloutBox('blue','Why It Is Waiting',st.reason||'The setup is not ready yet.'); }
+function topCallout(s,pb,st){ if(!st||!st.state) return ''; if(s.position){ if(st.state==='EXIT') return calloutBox('red','Action Needed',st.reason||'Exit the position.'); if(st.state==='PROFIT CHECKPOINT') return calloutBox('green','Profit Checkpoint',st.reason||'The trade has reached the first profit checkpoint.'); if(st.state==='DECISION DAY') return calloutBox('purple','Decision Day',st.reason||'The normal hold has been reached.'); if(st.state==='RUNNER') return calloutBox('purple','Runner / Profit Protected',st.reason||'The stock is strong enough to keep running.'); if(st.state==='WATCH EXIT') return calloutBox('yellow','Pay Attention',st.reason||'The trade is weakening but not broken.'); return calloutBox('teal','Current Plan',st.reason||'Hold the position unless the stop is hit.'); } if(st.state==='A+ BUY') return calloutBox('green','Best Opportunity',st.reason||'The setup is valid and the environment is supportive.'); if(st.state==='BUY') return calloutBox('green','Ready To Buy',st.reason||'The setup is valid.'); if(st.state==='PREPARING') return calloutBox('yellow','What Needs To Happen',st.reason||'The setup is close but still missing a trigger.'); return calloutBox('blue','Why It Is Waiting',st.reason||'The setup is not ready yet.'); }
 function checklistHTML(checks){
   const required=checks.filter(x=>x.required);
   const aplus=checks.filter(x=>!x.required && x.tier==='A+');
