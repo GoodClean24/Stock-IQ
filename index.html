@@ -8237,17 +8237,25 @@ function renderPortfolioBox(){
     <div style="display:flex;gap:7px;flex-wrap:wrap;">${Object.entries(exp).map(([k,v])=>`<span style="background:${C.cardHigh};border:1px solid ${C.border};padding:5px 8px;border-radius:7px;color:${C.textSub};font-size:10px;font-weight:700;">${k}: ${v}</span>`).join('')}</div>
   </div></div>`;
 }
+function safeStockState(s){
+  try{
+    return stockState(s);
+  }catch(e){
+    console.error('StockIQ readiness error for', s?.ticker||s?.id, e);
+    return {state:'WAIT',reason:'Readiness calculation could not be completed for this ticker. It is being kept out of PREPARING until the calculation is valid.',checks:[]};
+  }
+}
 function renderTonightsOpportunities(){
   const el=document.getElementById('tonights-opportunities');
   if(!el)return;
 
-  const owned=stocks.filter(s=>isValidatedStock(s)&&s.position).map(s=>({s,state:stockState(s)}))
+  const owned=stocks.filter(s=>isValidatedStock(s)&&s.position).map(s=>({s,state:safeStockState(s)}))
     .sort((a,b)=>statePriority(a.state?.state)-statePriority(b.state?.state));
 
   const visiblePool=stocks.filter(s=>isValidatedStock(s)&&!s.position&&(isCoreStock(s)||isActiveBenchStock(s)));
-  const buys=visiblePool.map(s=>({s,state:stockState(s)})).filter(x=>['A+ BUY','BUY'].includes(x.state?.state))
+  const buys=visiblePool.map(s=>({s,state:safeStockState(s)})).filter(x=>['A+ BUY','BUY'].includes(x.state?.state))
     .sort((a,b)=>statePriority(a.state.state)-statePriority(b.state.state));
-  const preparing=visiblePool.map(s=>({s,state:stockState(s)})).filter(x=>x.state?.state==='PREPARING')
+  const preparing=visiblePool.map(s=>({s,state:safeStockState(s)})).filter(x=>x.state?.state==='PREPARING')
     .sort((a,b)=>benchCandidateScore(b.s)-benchCandidateScore(a.s));
 
   const ownedBox=owned.length?`<div style="background:${C.card};border-radius:16px;border:1.5px solid ${C.teal}77;padding:16px;margin:0 16px 12px;box-shadow:0 0 0 1px ${C.teal}11;">
@@ -8269,7 +8277,7 @@ function renderFilterBar(){
 function renderListHeader(){
   const el=document.getElementById('list-header'); if(!el)return;
   const core=stocks.filter(isCoreStock),activePool=getActiveBenchPoolStocks(),activeNow=getActiveBenchStocks(),reserve=getReserveBenchStocks();
-  const ready=stocks.filter(s=>isValidatedStock(s)&&!s.position&&(isCoreStock(s)||isActiveBenchStock(s))&&['A+ BUY','BUY','PREPARING'].includes(stockState(s)?.state)).length;
+  const ready=stocks.filter(s=>isValidatedStock(s)&&!s.position&&(isCoreStock(s)||isActiveBenchStock(s))&&['A+ BUY','BUY','PREPARING'].includes(safeStockState(s)?.state)).length;
   el.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;"><span style="color:${C.textMuted};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;">Ready now ${ready} · Core pool ${core.length}/${CORE_TICKERS.length} · Active Bench ${activePool.length}/${ACTIVE_BENCH_MAX}</span><span style="color:${C.textMuted};font-size:10px;">Reserve ${reserve.length}/${RESERVE_BENCH_MAX}</span></div>`;
 }
 function renderStockList(){
@@ -8277,19 +8285,19 @@ function renderStockList(){
   let list=getRanked(); const q=searchQuery||'';
   if(q) list=list.filter(s=>String(s.ticker).toLowerCase().includes(q)||String(s.name||'').toLowerCase().includes(q));
 
-  if(activeTag==='Buy') list=list.filter(s=>isValidatedStock(s)&&!s.position&&['BUY','A+ BUY'].includes(stockState(s)?.state)&&(isCoreStock(s)||isActiveBenchStock(s)));
-  else if(activeTag==='Preparing') list=list.filter(s=>isValidatedStock(s)&&!s.position&&stockState(s)?.state==='PREPARING'&&(isCoreStock(s)||isActiveBenchStock(s)));
+  if(activeTag==='Buy') list=list.filter(s=>isValidatedStock(s)&&!s.position&&['BUY','A+ BUY'].includes(safeStockState(s)?.state)&&(isCoreStock(s)||isActiveBenchStock(s)));
+  else if(activeTag==='Preparing') list=list.filter(s=>isValidatedStock(s)&&!s.position&&safeStockState(s)?.state==='PREPARING'&&(isCoreStock(s)||isActiveBenchStock(s)));
   else if(activeTag==='Positions') list=list.filter(s=>s.position&&isValidatedStock(s));
   else if(activeTag==='Core Pool') list=list.filter(isCoreStock);
   else if(activeTag==='Active Bench') list=getActiveBenchPoolStocks();
   else if(activeTag==='Reserve') list=getReserveBenchStocks();
   else if(activeTag==='Watch Pool') list=list.filter(s=>isCoreStock(s)||isActiveBenchStock(s)||isReserveBenchStock(s)||s.position);
   else if(activeTag==='Research') list=list.filter(isResearchStock);
-  else list=list.filter(s=>isValidatedStock(s)&&!s.position&&(isCoreStock(s)||isActiveBenchStock(s))&&['A+ BUY','BUY','PREPARING'].includes(stockState(s)?.state));
+  else list=list.filter(s=>isValidatedStock(s)&&!s.position&&(isCoreStock(s)||isActiveBenchStock(s))&&['A+ BUY','BUY','PREPARING'].includes(safeStockState(s)?.state));
 
   if(activeTag==='Ready Now' && !q){
-    const buy=list.filter(s=>['BUY','A+ BUY'].includes(stockState(s)?.state));
-    const prep=list.filter(s=>stockState(s)?.state==='PREPARING');
+    const buy=list.filter(s=>['BUY','A+ BUY'].includes(safeStockState(s)?.state));
+    const prep=list.filter(s=>safeStockState(s)?.state==='PREPARING');
     const section=(title,subtitle,items,color)=>items.length?`<div style="margin:14px 2px 8px;display:flex;justify-content:space-between;align-items:end;"><div><div style="color:${color};font-size:11px;font-weight:950;text-transform:uppercase;letter-spacing:.08em;">${title}</div><div style="color:${C.textMuted};font-size:10px;margin-top:2px;">${subtitle}</div></div><div style="color:${C.textMuted};font-size:10px;">${items.length}</div></div>${items.map(renderStockCard).join('')}`:'';
     el.innerHTML=section('Buy / A+ Buy','Actionable setups only',buy,C.green)+section('Getting Ready','Core + Active Bench in PREPARING only',prep,C.yellow);
     if(!buy.length&&!prep.length) el.innerHTML=`<div style="color:${C.textSub};font-size:13px;padding:20px 4px;">No stocks are close enough right now. WAIT names are hidden but still monitored.</div>`;
@@ -8298,7 +8306,7 @@ function renderStockList(){
   }
 }
 function renderStockCard(s){
-  const st=stockState(s), pb=pbFor(s), price=curVal(s,'price'), reg=regressionStats(s), conflict=portfolioConflict(s); if(!pb){return `<div onclick="openDetail('${s.id}')" style="background:${C.card};border:1px solid ${C.border};border-radius:15px;padding:14px 16px;cursor:pointer;"><div style="display:flex;justify-content:space-between;"><div><span style="color:${C.text};font-weight:900;">${s.ticker}</span> ${badge('RESEARCH ONLY')}</div><span style="color:${C.text};font-weight:800;">${money(price)}</span></div><div style="color:${C.textSub};font-size:11px;margin-top:6px;">No validated StockIQ playbook yet.</div></div>`;}
+  const st=safeStockState(s), pb=pbFor(s), price=curVal(s,'price'), reg=regressionStats(s), conflict=portfolioConflict(s); if(!pb){return `<div onclick="openDetail('${s.id}')" style="background:${C.card};border:1px solid ${C.border};border-radius:15px;padding:14px 16px;cursor:pointer;"><div style="display:flex;justify-content:space-between;"><div><span style="color:${C.text};font-weight:900;">${s.ticker}</span> ${badge('RESEARCH ONLY')}</div><span style="color:${C.text};font-weight:800;">${money(price)}</span></div><div style="color:${C.textSub};font-size:11px;margin-top:6px;">No validated StockIQ playbook yet.</div></div>`;}
   const pos=s.position; const plPct=pos&&price&&pos.entry?((price/pos.entry)-1)*100:null; const stop=pos?suggestedStop(s):null;
   return `<div onclick="openDetail('${s.id}')" style="background:${C.card};border:1px solid ${C.border};border-radius:15px;padding:14px 16px;cursor:pointer;">
     <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;"><div><div style="display:flex;align-items:center;gap:8px;"><span style="color:${C.text};font-size:16px;font-weight:900;">${s.ticker}</span>${badge(st.state)}</div><div style="color:${C.textSub};font-size:11px;margin-top:4px;">${pb.name}${isBenchStock(s)?` · <span style="color:${isActiveBenchStock(s)?C.teal:C.textMuted};font-weight:850;">${isActiveBenchStock(s)?'ACTIVE BENCH':'RESERVE'}</span>`:''}</div></div><div style="text-align:right;"><div style="color:${C.text};font-size:14px;font-weight:900;">${money(price)}</div>${plPct!=null?`<div style="color:${plPct>=0?C.green:C.red};font-size:11px;font-weight:800;">${pctFmt(plPct)}</div>`:''}</div></div>
@@ -8706,7 +8714,7 @@ function showAddFlow(){ if(_origShowAddFlow)_origShowAddFlow(); setTimeout(()=>{
 // ── v2 initialization ────────────────────────────────────────────────────────
 (function initStockIQV2(){
   const style=document.createElement('style'); style.textContent=`.v2lbl{color:${C.textSub};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}.v2val{color:${C.text};font-size:14px;font-weight:900}.v2big{color:${C.text};font-size:18px;font-weight:950}`; document.head.appendChild(style);
-  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.14 · Readiness + Live Learning';
+  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.15 · Readiness + Live Learning';
   const topButtons=[...document.querySelectorAll('button')]; const add=topButtons.find(b=>b.textContent.includes('Add Stock')); if(add)add.innerHTML='<span style="font-size:16px;">+</span> Research'; const scan=topButtons.find(b=>b.textContent.includes('Import Scan')); if(scan){scan.textContent='Daily Data';scan.onclick=showDailyDataFlow;scan.setAttribute('aria-label','Upload daily multi-ticker data');}
   activeTag='Ready Now'; sortMode='opportunity';
 })();
