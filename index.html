@@ -177,7 +177,7 @@ let currentUser = null;
 let unsubStocks = null;
 let saveTimer   = null;
 let bulkDailySaveInProgress = false;
-// v2.9.35: Daily market data is a LOCAL overlay, not a Firestore mirror.
+// v2.9.36: Daily market data is a LOCAL overlay, not a Firestore mirror.
 // This prevents a 95-ticker CSV refresh from becoming 95 cloud writes.
 // User-owned state (positions, favorites, notes, realized trades, manual edits)
 // continues to save normally through fbSaveStock().
@@ -8322,7 +8322,7 @@ function strictPreparingProximity(s,pb,missingCheck){
   if(!missingCheck) return {ok:false,reason:'No single near-term trigger is identified.'};
   const label=String(missingCheck.label||'');
   const p=curVal(s,'price'), e20=curVal(s,'ma20'), m50=curVal(s,'ma50');
-  const rsi=curVal(s,'rsi'), rv=relVol(s), ch20=changeN(s,20), offHi=from52High(s), reg=regressionStats(s,126);
+  const rsi=curVal(s,'rsi'), rv=relativeVolume(s), ch20=changeN(s,20), offHi=from52High(s), reg=regressionStats(s,126);
   const fam=String(s.setupFamily||'').toUpperCase();
 
   // Regression pullbacks must already be right beside the valid BUY zone.
@@ -9274,7 +9274,7 @@ const _origShowAddFlow = typeof showAddFlow==='function'?showAddFlow:null;
 function showAddFlow(){ if(_origShowAddFlow)_origShowAddFlow(); setTimeout(()=>{ const root=document.getElementById('modal-content'); if(root){ root.innerHTML=root.innerHTML.replace(/Add Stock/g,'Add Research Ticker').replace(/Position Trade|Long-Term Hold/g,'Swing Trade').replace(/Choose.*strategy/gi,'Research ticker'); }},0); }
 
 
-// ── DAILY DATA ARCHITECTURE · v2.9.35 ───────────────────────────────────────
+// ── DAILY DATA ARCHITECTURE · v2.9.36 ───────────────────────────────────────
 // Daily CSV = local current-market overlay (also cached in localStorage).
 // Firestore = user-owned persistent state only. This intentionally removes the
 // bulk daily save operation that was hanging after the dynamic universe grew.
@@ -9290,7 +9290,7 @@ function showAddFlow(){ if(_origShowAddFlow)_origShowAddFlow(); setTimeout(()=>{
 // ── v2 initialization ────────────────────────────────────────────────────────
 (function initStockIQV2(){
   const style=document.createElement('style'); style.textContent=`.v2lbl{color:${C.textSub};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}.v2val{color:${C.text};font-size:14px;font-weight:900}.v2big{color:${C.text};font-size:18px;font-weight:950}`; document.head.appendChild(style);
-  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.35 · Daily Import Repair';
+  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.36 · Daily Import Repair';
   const topButtons=[...document.querySelectorAll('button')]; const add=topButtons.find(b=>b.textContent.includes('Add Stock')); if(add)add.innerHTML='<span style="font-size:16px;">+</span> Research'; const scan=topButtons.find(b=>b.textContent.includes('Import Scan')); if(scan){scan.textContent='Daily Data';scan.onclick=showDailyDataFlow;scan.setAttribute('aria-label','Upload daily multi-ticker data');}
   activeTag='Ready Now'; sortMode='opportunity';
 })();
