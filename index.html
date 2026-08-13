@@ -177,7 +177,7 @@ let currentUser = null;
 let unsubStocks = null;
 let saveTimer   = null;
 let bulkDailySaveInProgress = false;
-// v2.9.36: Daily market data is a LOCAL overlay, not a Firestore mirror.
+// v2.9.37: Daily market data is a LOCAL overlay, not a Firestore mirror.
 // This prevents a 95-ticker CSV refresh from becoming 95 cloud writes.
 // User-owned state (positions, favorites, notes, realized trades, manual edits)
 // continues to save normally through fbSaveStock().
@@ -7761,7 +7761,7 @@ function researchPromotionLabel(s){
 function genericPromotedPlaybook(ticker, ev){
   if(!ev || !ev.promotionReady) return null;
   const family=ev.family;
-  const base={name:`Validated · ${String(family||'').replaceAll('_',' ')}`,family,tier:'BENCH',confidence:ev.grade||'VALIDATED',cluster:'Research promotion',market:'SPY',earnings:'WAIT FOR REACTION',teach:'Promoted from the research pool only after passing the StockIQ evidence gate.'};
+  const base={name:`Validated · ${String(family||'').replaceAll('_',' ')}`,family,tier:'BENCH',confidence:ev.grade||'VALIDATED',cluster:'Research promotion',market:'SPY',earnings:'WAIT FOR REACTION',teach:'Promoted from the research pool only after passing the StockIQ evidence gate.',evidenceSummary:ev.summary||''};
   if(family==='EMA20_RECLAIM') return {...base,hold:14,maxHold:20,stopPct:10};
   if(family==='SMA50_RECLAIM') return {...base,hold:10,maxHold:20,stopPct:10};
   if(family==='MOMENTUM') return {...base,hold:20,maxHold:25,stopPct:12};
@@ -7967,7 +7967,7 @@ function nvl(v,alt=null){ return v==null || Number.isNaN(v) ? alt : v; }
 function pctFmt(v,d=1){ return v==null?'—':`${v>=0?'+':''}${Number(v).toFixed(d)}%`; }
 function money(v){ return v==null?'—':fmtP(v); }
 function dayDiff(a,b){ if(!a||!b)return null; const x=new Date(a),y=new Date(b); if(isNaN(x)||isNaN(y))return null; return Math.floor((y-x)/86400000); }
-function latestSnap(s){ const a=s.snapshots||[]; return a.length?a[a.length-1]:null; }
+function latestSnap(s){ const a=s?.snapshots||[]; return a.length?a[a.length-1]:null; }
 function prevSnap(s,n=1){ const a=s.snapshots||[]; return a.length>n?a[a.length-1-n]:null; }
 function snapVal(sn,...keys){ for(const k of keys){ if(sn && sn[k]!=null && !Number.isNaN(Number(sn[k]))) return Number(sn[k]); } return null; }
 function curVal(s,...keys){ for(const k of keys){ if(s && s[k]!=null && !Number.isNaN(Number(s[k]))) return Number(s[k]); } const l=latestSnap(s); return snapVal(l,...keys); }
@@ -8322,7 +8322,7 @@ function strictPreparingProximity(s,pb,missingCheck){
   if(!missingCheck) return {ok:false,reason:'No single near-term trigger is identified.'};
   const label=String(missingCheck.label||'');
   const p=curVal(s,'price'), e20=curVal(s,'ma20'), m50=curVal(s,'ma50');
-  const rsi=curVal(s,'rsi'), rv=relativeVolume(s), ch20=changeN(s,20), offHi=from52High(s), reg=regressionStats(s,126);
+  const rsi=curVal(s,'rsi'), rv=relativeVolume(s), ch20=changeN(s,20), offHi=pctFrom52High(s), reg=regressionStats(s,126);
   const fam=String(s.setupFamily||'').toUpperCase();
 
   // Regression pullbacks must already be right beside the valid BUY zone.
@@ -8969,7 +8969,7 @@ function high52BehaviorPanel(s){
   `);
 }
 
-function historyPanel(pb){ return panel('Historical Proof',`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;"><div style="color:${C.text};font-size:15px;font-weight:900;">${pb.confidence} CONFIDENCE</div><div style="color:${C.textSub};font-size:11px;">${pb.tier==='BENCH'?'Bench backtest · forward testing':'Validated playbook'}</div></div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;"><div><div class="v2lbl">Trades</div><div class="v2big">${pb.stats.trades}</div></div><div><div class="v2lbl">Win Rate</div><div class="v2big">~${pb.stats.win}%</div></div><div><div class="v2lbl">Avg Return</div><div class="v2big">~${pb.stats.avg}%</div></div></div><div style="margin-top:12px;color:${C.textSub};font-size:12.5px;line-height:1.6;">Normal drawdown ${pb.stats.drawdown}. ${pb.tier==='BENCH'?'Bench results are used to choose what to forward-test; they are not promoted to Core yet.':'The setup survived holdout testing, best-trade removal, best-year removal, and nearby-rule checks.'} Historical results are evidence, not a guarantee.</div>`); }
+function historyPanel(pb){ const st=pb?.stats||null; const trades=st?.trades??'—', win=st?.win!=null?`~${st.win}%`:'—', avg=st?.avg!=null?`~${st.avg}%`:'—'; const proof=st?`Normal drawdown ${st.drawdown??'not separately summarized'}. ${pb.tier==='BENCH'?'Bench results are used to choose what to forward-test; they are not promoted to Core yet.':'The setup survived holdout testing, best-trade removal, best-year removal, and nearby-rule checks.'}`:(pb?.evidenceSummary||'This playbook was promoted through the StockIQ evidence gate; detailed summary statistics were not embedded in this playbook object.'); return panel('Historical Proof',`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;"><div style="color:${C.text};font-size:15px;font-weight:900;">${pb?.confidence||'VALIDATED'} CONFIDENCE</div><div style="color:${C.textSub};font-size:11px;">${pb?.tier==='BENCH'?'Validated research playbook':'Validated playbook'}</div></div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;"><div><div class="v2lbl">Trades</div><div class="v2big">${trades}</div></div><div><div class="v2lbl">Win Rate</div><div class="v2big">${win}</div></div><div><div class="v2lbl">Avg Return</div><div class="v2big">${avg}</div></div></div><div style="margin-top:12px;color:${C.textSub};font-size:12.5px;line-height:1.6;">${proof} Historical results are evidence, not a guarantee.</div>`); }
 function sweetSpotTiles(s,pb){
   const p=curVal(s,'price'), e20=curVal(s,'ma20','ema20'), m50=curVal(s,'ma50'), m200=curVal(s,'ma200'), rsi=curVal(s,'rsi');
   const reg=regressionStats(s), ch20=changeN(s,20), rv=relativeVolume(s), offHi=pctFrom52High(s), hist=macdHist(s), prevHist=macdHist(s,prevSnap(s));
@@ -9194,7 +9194,7 @@ async function previewV2Daily(input){
   const parsed={groups:merged,headers}, dates=[]; merged.forEach(rows=>{if(rows.length)dates.push(rows[rows.length-1].date)});
   const corePresent=CORE_TICKERS.filter(t=>merged.has(t)); const benchPresent=BENCH_TICKERS.filter(t=>merged.has(t)); const marketPresent=MARKET_TICKERS.filter(t=>merged.has(t));
   const dynamicResearch=[...merged.keys()].filter(t=>!CORE_TICKERS.includes(t)&&!BENCH_TICKERS.includes(t)&&!MARKET_TICKERS.includes(t)); window._v2PendingDaily=parsed;
-  showModal(`<div style="background:${C.card};border-radius:20px;padding:24px;border:1px solid ${C.border};"><div style="color:${C.text};font-size:19px;font-weight:900;margin-bottom:14px;">Ready to Update</div><div style="color:${C.textSub};font-size:12px;line-height:1.7;margin-bottom:14px;">${files.length} file${files.length===1?'':'s'} · ${merged.size} tickers · ${corePresent.length}/${CORE_TICKERS.length} legacy validated · ${benchPresent.length}/${BENCH_TICKERS.length} bench/reserve · ${dynamicResearch.length} dynamic research · ${marketPresent.length} market ETFs · latest date ${dates.sort().slice(-1)[0]||'—'}</div><div style="color:${C.yellow};font-size:11.5px;line-height:1.55;margin-bottom:14px;">Dynamic research names will be saved automatically for review, but they stay off the live trading screen until their playbook is validated.</div><button onclick="applyV2Daily()" style="width:100%;padding:13px;border:none;border-radius:11px;background:${C.green};color:#000;font-weight:900;">Update StockIQ</button></div>`);
+  showModal(`<div style="background:${C.card};border-radius:20px;padding:24px;border:1px solid ${C.border};"><div style="color:${C.text};font-size:19px;font-weight:900;margin-bottom:14px;">Ready to Update</div><div style="color:${C.textSub};font-size:12px;line-height:1.7;margin-bottom:14px;">${files.length} file${files.length===1?'':'s'} · ${merged.size} tickers · ${corePresent.length}/${CORE_TICKERS.length} legacy validated · ${benchPresent.length}/${BENCH_TICKERS.length} bench/reserve · ${dynamicResearch.length} dynamic research · ${marketPresent.length} market ETFs · latest date ${dates.sort().slice(-1)[0]||'—'}</div><div style="color:${C.yellow};font-size:11.5px;line-height:1.55;margin-bottom:14px;">Dynamic research names are loaded into the local daily-data layer for review, but they stay off the live trading screen until their playbook is validated.</div><button onclick="applyV2Daily()" style="width:100%;padding:13px;border:none;border-radius:11px;background:${C.green};color:#000;font-weight:900;">Update StockIQ</button></div>`);
 }
 function dailyPersistenceCopy(stock){
   // Keep the rich in-memory object for analysis, but do NOT rewrite hundreds
@@ -9210,9 +9210,29 @@ function dailyPersistenceCopy(stock){
   return u;
 }
 
+function validateDailyRuntime(updateList){
+  const failures=[];
+  for(const s of (updateList||[])){
+    try{
+      pbFor(s);
+      setupChecks(s);
+      stockState(s);
+    }catch(e){
+      failures.push(`${s?.ticker||'?'}: ${e?.message||String(e)}`);
+    }
+  }
+  if(failures.length){
+    const shown=failures.slice(0,5).join('; ');
+    const extra=failures.length>5?` (+${failures.length-5} more)`:'';
+    throw new Error(`Daily runtime preflight failed — ${shown}${extra}`);
+  }
+  return true;
+}
+
 async function applyV2Daily(){
   const parsed=window._v2PendingDaily;
   if(!parsed) return;
+  let stocksBeforeApply=null;
   closeAllOverlays();
   const statusEl=document.getElementById('save-status');
   if(statusEl){ statusEl.style.display='block'; statusEl.style.color=C.yellow; statusEl.textContent='Processing daily data…'; }
@@ -9247,7 +9267,11 @@ async function applyV2Daily(){
     }
     updates.push(u);
   }
-  const updMap=new Map(updates.map(x=>[String(x.ticker).toUpperCase(),x])); stocks=stocks.map(s=>updMap.get(String(s.ticker).toUpperCase())||s); updates.forEach(u=>{if(!byTicker.has(String(u.ticker).toUpperCase()))stocks.push(u);});
+  stocksBeforeApply=stocks; const updMap=new Map(updates.map(x=>[String(x.ticker).toUpperCase(),x])); stocks=stocks.map(s=>updMap.get(String(s.ticker).toUpperCase())||s); updates.forEach(u=>{if(!byTicker.has(String(u.ticker).toUpperCase()))stocks.push(u);});
+  // Runtime preflight: exercise the live playbook/state engine against every
+  // imported ticker before caching the overlay. If any helper is missing or a
+  // ticker crashes the engine, abort atomically and report the ticker/error.
+  validateDailyRuntime(updates);
   // v2.9.34: DO NOT write the entire daily market universe to Firestore.
   // Store a lightweight market-data overlay locally; user-owned state still
   // saves to Firestore through normal BUY/SELL/favorite/manual-edit actions.
@@ -9262,6 +9286,7 @@ async function applyV2Daily(){
   }
   renderHome();
   } catch(e) {
+    if(stocksBeforeApply) stocks=stocksBeforeApply;
     console.error('Daily import failed', e);
     const statusEl=document.getElementById('save-status');
     if(statusEl){ statusEl.style.display='block'; statusEl.style.color=C.red; statusEl.textContent='Daily import failed: '+(e?.message||String(e)); }
@@ -9274,7 +9299,7 @@ const _origShowAddFlow = typeof showAddFlow==='function'?showAddFlow:null;
 function showAddFlow(){ if(_origShowAddFlow)_origShowAddFlow(); setTimeout(()=>{ const root=document.getElementById('modal-content'); if(root){ root.innerHTML=root.innerHTML.replace(/Add Stock/g,'Add Research Ticker').replace(/Position Trade|Long-Term Hold/g,'Swing Trade').replace(/Choose.*strategy/gi,'Research ticker'); }},0); }
 
 
-// ── DAILY DATA ARCHITECTURE · v2.9.36 ───────────────────────────────────────
+// ── DAILY DATA ARCHITECTURE · v2.9.37 ───────────────────────────────────────
 // Daily CSV = local current-market overlay (also cached in localStorage).
 // Firestore = user-owned persistent state only. This intentionally removes the
 // bulk daily save operation that was hanging after the dynamic universe grew.
@@ -9290,7 +9315,7 @@ function showAddFlow(){ if(_origShowAddFlow)_origShowAddFlow(); setTimeout(()=>{
 // ── v2 initialization ────────────────────────────────────────────────────────
 (function initStockIQV2(){
   const style=document.createElement('style'); style.textContent=`.v2lbl{color:${C.textSub};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}.v2val{color:${C.text};font-size:14px;font-weight:900}.v2big{color:${C.text};font-size:18px;font-weight:950}`; document.head.appendChild(style);
-  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.36 · Daily Import Repair';
+  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.37 · Daily Import Repair';
   const topButtons=[...document.querySelectorAll('button')]; const add=topButtons.find(b=>b.textContent.includes('Add Stock')); if(add)add.innerHTML='<span style="font-size:16px;">+</span> Research'; const scan=topButtons.find(b=>b.textContent.includes('Import Scan')); if(scan){scan.textContent='Daily Data';scan.onclick=showDailyDataFlow;scan.setAttribute('aria-label','Upload daily multi-ticker data');}
   activeTag='Ready Now'; sortMode='opportunity';
 })();
