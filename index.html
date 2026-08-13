@@ -176,6 +176,7 @@ const googleProvider = new firebase.auth.GoogleAuthProvider();
 let currentUser = null;
 let unsubStocks = null;
 let saveTimer   = null;
+let bulkDailySaveInProgress = false;
 
 function stocksRef(uid) { return db.collection('users').doc(uid).collection('stocks'); }
 function stockRef(uid, id) { return stocksRef(uid).doc(String(id)); }
@@ -217,45 +218,48 @@ async function fbSaveStock(stock) {
 async function fbBatchSaveStocks(stockList, onProgress) {
   if (!currentUser) throw new Error('You are not signed in to StockIQ.');
   const list = Array.isArray(stockList) ? stockList : [];
-  if (!list.length) return;
+  if (!list.length) return {saved:0, failed:[]};
 
-  // v2.9.32: Firestore also has a request-size limit. A single 95-stock batch
-  // can be huge because validated names may carry hundreds of snapshot rows.
-  // Build small batches by BOTH write-count and approximate payload size.
-  const MAX_WRITES = 18;
-  const TARGET_BYTES = 2_250_000; // deliberately well below Firestore's request ceiling
-  let saved = 0;
-  let chunk = [];
-  let chunkBytes = 0;
+  // v2.9.33: return to the proven Firestore path — normal document .set() —
+  // but run a small worker pool instead of one-at-a-time. Batch commits were
+  // the wrong fix here: the daily universe grew from ~30 records to ~95 and
+  // each stock can carry snapshot history, so large batch payloads could sit
+  // pending for a long time. Small parallel writes are faster and isolate a
+  // bad/oversized document instead of blocking the whole import.
+  const CONCURRENCY = 6;
+  let cursor = 0, saved = 0;
+  const failed = [];
 
-  const approxBytes = obj => {
-    try {
-      const txt = JSON.stringify(obj);
-      return (typeof TextEncoder !== 'undefined') ? new TextEncoder().encode(txt).length : txt.length * 2;
-    } catch(e) { return 250000; }
-  };
+  const timeout = (promise, ms, label) => Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} timed out after ${Math.round(ms/1000)}s`)), ms))
+  ]);
 
-  async function commitChunk(items) {
-    if (!items.length) return;
-    const batch = db.batch();
-    for (const item of items) batch.set(stockRef(currentUser.uid, item.id), item);
-    await batch.commit();
-    saved += items.length;
-    if (typeof onProgress === 'function') onProgress(saved, list.length);
-  }
-
-  for (const stock of list) {
-    const cleanStock = cleanForFirestore(stock);
-    const bytes = approxBytes(cleanStock);
-    if (chunk.length && (chunk.length >= MAX_WRITES || chunkBytes + bytes > TARGET_BYTES)) {
-      await commitChunk(chunk);
-      chunk = [];
-      chunkBytes = 0;
+  async function worker() {
+    while (true) {
+      const i = cursor++;
+      if (i >= list.length) return;
+      const stock = list[i];
+      const cleanStock = cleanForFirestore(stock);
+      try {
+        await timeout(stockRef(currentUser.uid, stock.id).set(cleanStock), 20000, stock.ticker || stock.id);
+        saved++;
+      } catch (e) {
+        failed.push({ticker:stock.ticker || stock.id, error:e});
+        console.error('Daily save failed for', stock.ticker || stock.id, e);
+      }
+      if (typeof onProgress === 'function') onProgress(saved + failed.length, list.length, saved, failed.length);
     }
-    chunk.push(cleanStock);
-    chunkBytes += bytes;
   }
-  await commitChunk(chunk);
+
+  await Promise.all(Array.from({length:Math.min(CONCURRENCY,list.length)}, () => worker()));
+  if (failed.length) {
+    const err = new Error(`${failed.length} of ${list.length} stocks failed to save. First failure: ${failed[0].ticker} — ${failed[0].error?.message || failed[0].error}`);
+    err.failed = failed;
+    err.saved = saved;
+    throw err;
+  }
+  return {saved, failed};
 }
 async function fbDeleteStock(id) {
   if (!currentUser) return;
@@ -635,6 +639,12 @@ auth.onAuthStateChanged(user => {
     showSaveStatus('loading');
     if(unsubStocks) unsubStocks();
     unsubStocks = stocksRef(user.uid).onSnapshot(snap => {
+      // During a bulk daily import, dozens of Firestore acknowledgements can
+      // arrive back-to-back. Rebuilding/reranking the entire app on every one
+      // was a major source of the apparent "Saving..." freeze. The import
+      // already owns the authoritative local state, so ignore listener echoes
+      // until the bulk save finishes; normal realtime listening resumes after.
+      if (bulkDailySaveInProgress) return;
       stocks = [];
       snap.forEach(doc => { const d = doc.data(); d.type = migrateStockType(d); stocks.push(d); });
       showSaveStatus('ready');
@@ -9127,6 +9137,20 @@ async function previewV2Daily(input){
   const dynamicResearch=[...merged.keys()].filter(t=>!CORE_TICKERS.includes(t)&&!BENCH_TICKERS.includes(t)&&!MARKET_TICKERS.includes(t)); window._v2PendingDaily=parsed;
   showModal(`<div style="background:${C.card};border-radius:20px;padding:24px;border:1px solid ${C.border};"><div style="color:${C.text};font-size:19px;font-weight:900;margin-bottom:14px;">Ready to Update</div><div style="color:${C.textSub};font-size:12px;line-height:1.7;margin-bottom:14px;">${files.length} file${files.length===1?'':'s'} · ${merged.size} tickers · ${corePresent.length}/${CORE_TICKERS.length} legacy validated · ${benchPresent.length}/${BENCH_TICKERS.length} bench/reserve · ${dynamicResearch.length} dynamic research · ${marketPresent.length} market ETFs · latest date ${dates.sort().slice(-1)[0]||'—'}</div><div style="color:${C.yellow};font-size:11.5px;line-height:1.55;margin-bottom:14px;">Dynamic research names will be saved automatically for review, but they stay off the live trading screen until their playbook is validated.</div><button onclick="applyV2Daily()" style="width:100%;padding:13px;border:none;border-radius:11px;background:${C.green};color:#000;font-weight:900;">Update StockIQ</button></div>`);
 }
+function dailyPersistenceCopy(stock){
+  // Keep the rich in-memory object for analysis, but do NOT rewrite hundreds
+  // of historical bars to Firestore every day. The current app already embeds
+  // baseline history for the legacy validated set, and daily readiness uses
+  // the imported indicator fields directly. Owned/validated names retain a
+  // larger recent tail for position management; research/market names need far
+  // less. This is the real payload fix.
+  const u={...stock};
+  const snaps=Array.isArray(u.snapshots)?u.snapshots:[];
+  const keep = u.position ? 90 : (isValidatedStock(u) ? 60 : (isMarketStock(u) ? 25 : 12));
+  u.snapshots = snaps.slice(-keep);
+  return u;
+}
+
 async function applyV2Daily(){ const parsed=window._v2PendingDaily; if(!parsed)return; closeAllOverlays(); showSaveStatus('saving'); const groups=parsed.groups, byTicker=new Map(stocks.map(s=>[String(s.ticker||'').toUpperCase(),s])), updates=[];
   // Dynamic-universe hardening: trust the file as the refresh universe. Every ticker
   // present gets current data. Unknown stock symbols are auto-created as RESEARCH ONLY.
@@ -9158,15 +9182,23 @@ async function applyV2Daily(){ const parsed=window._v2PendingDaily; if(!parsed)r
     updates.push(u);
   }
   const updMap=new Map(updates.map(x=>[String(x.ticker).toUpperCase(),x])); stocks=stocks.map(s=>updMap.get(String(s.ticker).toUpperCase())||s); updates.forEach(u=>{if(!byTicker.has(String(u.ticker).toUpperCase()))stocks.push(u);});
+  bulkDailySaveInProgress=true;
   try{
     const statusEl=document.getElementById('save-status');
-    if(statusEl){ statusEl.style.display='block'; statusEl.style.color=C.yellow; statusEl.textContent=`Saving ${updates.length} stocks…`; }
-    await fbBatchSaveStocks(updates,(done,total)=>{
-      if(statusEl){ statusEl.style.display='block'; statusEl.style.color=C.yellow; statusEl.textContent=`Saving ${done}/${total} stocks…`; }
+    const persistUpdates=updates.map(dailyPersistenceCopy);
+    if(statusEl){ statusEl.style.display='block'; statusEl.style.color=C.yellow; statusEl.textContent=`Saving 0/${updates.length} stocks…`; }
+    await fbBatchSaveStocks(persistUpdates,(done,total,saved,failed)=>{
+      if(statusEl){ statusEl.style.display='block'; statusEl.style.color=failed?C.yellow:C.yellow; statusEl.textContent=`Saving ${done}/${total} stocks…`; }
     });
     showSaveStatus('saved');
     setTimeout(()=>showSaveStatus('ready'),1800);
-  }catch(e){console.error(e);showSaveStatus('error');}
+  }catch(e){
+    console.error(e);
+    const statusEl=document.getElementById('save-status');
+    if(statusEl){ statusEl.style.display='block'; statusEl.style.color=C.red; statusEl.textContent=e?.message?`Save issue: ${e.message}`:'Save failed — check connection'; }
+  }finally{
+    bulkDailySaveInProgress=false;
+  }
   renderHome(); }
 
 // ── Swing-only add / research labels ────────────────────────────────────────
@@ -9185,7 +9217,7 @@ function showAddFlow(){ if(_origShowAddFlow)_origShowAddFlow(); setTimeout(()=>{
 // ── v2 initialization ────────────────────────────────────────────────────────
 (function initStockIQV2(){
   const style=document.createElement('style'); style.textContent=`.v2lbl{color:${C.textSub};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}.v2val{color:${C.text};font-size:14px;font-weight:900}.v2big{color:${C.text};font-size:18px;font-weight:950}`; document.head.appendChild(style);
-  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.32 · Fast Save Compacted';
+  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.33 · Daily Save Repair';
   const topButtons=[...document.querySelectorAll('button')]; const add=topButtons.find(b=>b.textContent.includes('Add Stock')); if(add)add.innerHTML='<span style="font-size:16px;">+</span> Research'; const scan=topButtons.find(b=>b.textContent.includes('Import Scan')); if(scan){scan.textContent='Daily Data';scan.onclick=showDailyDataFlow;scan.setAttribute('aria-label','Upload daily multi-ticker data');}
   activeTag='Ready Now'; sortMode='opportunity';
 })();
