@@ -177,7 +177,7 @@ let currentUser = null;
 let unsubStocks = null;
 let saveTimer   = null;
 let bulkDailySaveInProgress = false;
-// v2.9.34: Daily market data is a LOCAL overlay, not a Firestore mirror.
+// v2.9.35: Daily market data is a LOCAL overlay, not a Firestore mirror.
 // This prevents a 95-ticker CSV refresh from becoming 95 cloud writes.
 // User-owned state (positions, favorites, notes, realized trades, manual edits)
 // continues to save normally through fbSaveStock().
@@ -9210,7 +9210,14 @@ function dailyPersistenceCopy(stock){
   return u;
 }
 
-async function applyV2Daily(){ const parsed=window._v2PendingDaily; if(!parsed)return; closeAllOverlays(); showSaveStatus('saving'); const groups=parsed.groups, byTicker=new Map(stocks.map(s=>[String(s.ticker||'').toUpperCase(),s])), updates=[];
+async function applyV2Daily(){
+  const parsed=window._v2PendingDaily;
+  if(!parsed) return;
+  closeAllOverlays();
+  const statusEl=document.getElementById('save-status');
+  if(statusEl){ statusEl.style.display='block'; statusEl.style.color=C.yellow; statusEl.textContent='Processing daily data…'; }
+  try {
+  const groups=parsed.groups, byTicker=new Map(stocks.map(s=>[String(s.ticker||'').toUpperCase(),s])), updates=[];
   // Dynamic-universe hardening: trust the file as the refresh universe. Every ticker
   // present gets current data. Unknown stock symbols are auto-created as RESEARCH ONLY.
   const wanted=new Set([...groups.keys()]);
@@ -9253,14 +9260,21 @@ async function applyV2Daily(){ const parsed=window._v2PendingDaily; if(!parsed)r
     statusEl.textContent=`Daily data loaded ✓ · ${updates.length} tickers · ${marketDate}`;
     setTimeout(()=>showSaveStatus('ready'),2200);
   }
-  renderHome(); }
+  renderHome();
+  } catch(e) {
+    console.error('Daily import failed', e);
+    const statusEl=document.getElementById('save-status');
+    if(statusEl){ statusEl.style.display='block'; statusEl.style.color=C.red; statusEl.textContent='Daily import failed: '+(e?.message||String(e)); }
+    alert('Daily import failed: '+(e?.message||String(e)));
+  }
+}
 
 // ── Swing-only add / research labels ────────────────────────────────────────
 const _origShowAddFlow = typeof showAddFlow==='function'?showAddFlow:null;
 function showAddFlow(){ if(_origShowAddFlow)_origShowAddFlow(); setTimeout(()=>{ const root=document.getElementById('modal-content'); if(root){ root.innerHTML=root.innerHTML.replace(/Add Stock/g,'Add Research Ticker').replace(/Position Trade|Long-Term Hold/g,'Swing Trade').replace(/Choose.*strategy/gi,'Research ticker'); }},0); }
 
 
-// ── DAILY DATA ARCHITECTURE · v2.9.34 ───────────────────────────────────────
+// ── DAILY DATA ARCHITECTURE · v2.9.35 ───────────────────────────────────────
 // Daily CSV = local current-market overlay (also cached in localStorage).
 // Firestore = user-owned persistent state only. This intentionally removes the
 // bulk daily save operation that was hanging after the dynamic universe grew.
@@ -9276,7 +9290,7 @@ function showAddFlow(){ if(_origShowAddFlow)_origShowAddFlow(); setTimeout(()=>{
 // ── v2 initialization ────────────────────────────────────────────────────────
 (function initStockIQV2(){
   const style=document.createElement('style'); style.textContent=`.v2lbl{color:${C.textSub};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}.v2val{color:${C.text};font-size:14px;font-weight:900}.v2big{color:${C.text};font-size:18px;font-weight:950}`; document.head.appendChild(style);
-  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.33 · Daily Save Repair';
+  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.35 · Daily Import Repair';
   const topButtons=[...document.querySelectorAll('button')]; const add=topButtons.find(b=>b.textContent.includes('Add Stock')); if(add)add.innerHTML='<span style="font-size:16px;">+</span> Research'; const scan=topButtons.find(b=>b.textContent.includes('Import Scan')); if(scan){scan.textContent='Daily Data';scan.onclick=showDailyDataFlow;scan.setAttribute('aria-label','Upload daily multi-ticker data');}
   activeTag='Ready Now'; sortMode='opportunity';
 })();
