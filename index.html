@@ -177,6 +177,64 @@ let currentUser = null;
 let unsubStocks = null;
 let saveTimer   = null;
 let bulkDailySaveInProgress = false;
+// v2.9.34: Daily market data is a LOCAL overlay, not a Firestore mirror.
+// This prevents a 95-ticker CSV refresh from becoming 95 cloud writes.
+// User-owned state (positions, favorites, notes, realized trades, manual edits)
+// continues to save normally through fbSaveStock().
+let dailyOverlayByTicker = new Map();
+const DAILY_OVERLAY_STORAGE_KEY = 'stockiq_daily_overlay_v1';
+
+function dailyOverlayFields(u){
+  if(!u) return null;
+  const keep = [
+    'id','ticker','name','type','coreStatus','price','change','pct','rsi','vol','avgvol',
+    'ma20','ema20','ma50','ma200','macdLine','signalLine','atr','hi52','lo52',
+    'regZ126','regSlope126','regCenter126','regResidualSD126','sector','industry',
+    'lastEarningsDate','earningsDate','earningsTime','earningsVerified','earningsSource',
+    'nearHighSamples','nearHighAvg10','nearHighWin10','nearHighBreakout10','nearHighFailure10',
+    'nearHighBehavior','analyzed','prepWatch','missedOpportunities','_v2Placeholder'
+  ];
+  const o={};
+  for(const k of keep) if(u[k]!==undefined) o[k]=u[k];
+  // Keep only the tiny imported tail needed for recent-cross logic. Never copy
+  // the large historical snapshot library into local storage.
+  if(Array.isArray(u.snapshots)) o.snapshots=u.snapshots.slice(-3);
+  return o;
+}
+function persistDailyOverlayLocal(){
+  try{
+    const obj={};
+    for(const [t,v] of dailyOverlayByTicker.entries()) obj[t]=v;
+    localStorage.setItem(DAILY_OVERLAY_STORAGE_KEY, JSON.stringify(obj));
+  }catch(e){ console.warn('Could not persist daily overlay locally',e); }
+}
+function restoreDailyOverlayLocal(){
+  try{
+    const raw=localStorage.getItem(DAILY_OVERLAY_STORAGE_KEY);
+    if(!raw) return;
+    const obj=JSON.parse(raw);
+    dailyOverlayByTicker=new Map(Object.entries(obj||{}));
+  }catch(e){ dailyOverlayByTicker=new Map(); }
+}
+function applyDailyOverlayToStocks(baseStocks){
+  const base=Array.isArray(baseStocks)?baseStocks:[];
+  const byTicker=new Map(base.map(s=>[String(s.ticker||'').toUpperCase(),s]));
+  const merged=base.map(s=>{
+    const t=String(s.ticker||'').toUpperCase();
+    const ov=dailyOverlayByTicker.get(t);
+    if(!ov) return s;
+    // Preserve cloud/user state, overlay only current market fields. Merge the
+    // tiny recent daily tail onto whatever saved history exists.
+    const snaps=mergeSnapshotHistory(s.snapshots||[], ov.snapshots||[]);
+    return {...s,...ov,snapshots:snaps};
+  });
+  for(const [t,ov] of dailyOverlayByTicker.entries()){
+    if(byTicker.has(t)) continue;
+    merged.push({...ov,id:ov.id||`v2_${t}`,ticker:ov.ticker||t,name:ov.name||t,type:'Swing Trade',starred:false,notes:'',realized:[],scannerSources:[],snapshots:ov.snapshots||[]});
+  }
+  return merged;
+}
+restoreDailyOverlayLocal();
 
 function stocksRef(uid) { return db.collection('users').doc(uid).collection('stocks'); }
 function stockRef(uid, id) { return stocksRef(uid).doc(String(id)); }
@@ -645,8 +703,9 @@ auth.onAuthStateChanged(user => {
       // already owns the authoritative local state, so ignore listener echoes
       // until the bulk save finishes; normal realtime listening resumes after.
       if (bulkDailySaveInProgress) return;
-      stocks = [];
-      snap.forEach(doc => { const d = doc.data(); d.type = migrateStockType(d); stocks.push(d); });
+      const persisted = [];
+      snap.forEach(doc => { const d = doc.data(); d.type = migrateStockType(d); persisted.push(d); });
+      stocks = applyDailyOverlayToStocks(persisted);
       showSaveStatus('ready');
       renderHome();
     }, err => {
@@ -9182,22 +9241,17 @@ async function applyV2Daily(){ const parsed=window._v2PendingDaily; if(!parsed)r
     updates.push(u);
   }
   const updMap=new Map(updates.map(x=>[String(x.ticker).toUpperCase(),x])); stocks=stocks.map(s=>updMap.get(String(s.ticker).toUpperCase())||s); updates.forEach(u=>{if(!byTicker.has(String(u.ticker).toUpperCase()))stocks.push(u);});
-  bulkDailySaveInProgress=true;
-  try{
-    const statusEl=document.getElementById('save-status');
-    const persistUpdates=updates.map(dailyPersistenceCopy);
-    if(statusEl){ statusEl.style.display='block'; statusEl.style.color=C.yellow; statusEl.textContent=`Saving 0/${updates.length} stocks…`; }
-    await fbBatchSaveStocks(persistUpdates,(done,total,saved,failed)=>{
-      if(statusEl){ statusEl.style.display='block'; statusEl.style.color=failed?C.yellow:C.yellow; statusEl.textContent=`Saving ${done}/${total} stocks…`; }
-    });
-    showSaveStatus('saved');
-    setTimeout(()=>showSaveStatus('ready'),1800);
-  }catch(e){
-    console.error(e);
-    const statusEl=document.getElementById('save-status');
-    if(statusEl){ statusEl.style.display='block'; statusEl.style.color=C.red; statusEl.textContent=e?.message?`Save issue: ${e.message}`:'Save failed — check connection'; }
-  }finally{
-    bulkDailySaveInProgress=false;
+  // v2.9.34: DO NOT write the entire daily market universe to Firestore.
+  // Store a lightweight market-data overlay locally; user-owned state still
+  // saves to Firestore through normal BUY/SELL/favorite/manual-edit actions.
+  dailyOverlayByTicker = new Map(updates.map(u=>[String(u.ticker||'').toUpperCase(), dailyOverlayFields(u)]));
+  persistDailyOverlayLocal();
+  const statusEl=document.getElementById('save-status');
+  if(statusEl){
+    const marketDate = updates.map(u=>u.analyzed).filter(Boolean).sort().slice(-1)[0] || 'latest day';
+    statusEl.style.display='block'; statusEl.style.color=C.green;
+    statusEl.textContent=`Daily data loaded ✓ · ${updates.length} tickers · ${marketDate}`;
+    setTimeout(()=>showSaveStatus('ready'),2200);
   }
   renderHome(); }
 
@@ -9205,6 +9259,11 @@ async function applyV2Daily(){ const parsed=window._v2PendingDaily; if(!parsed)r
 const _origShowAddFlow = typeof showAddFlow==='function'?showAddFlow:null;
 function showAddFlow(){ if(_origShowAddFlow)_origShowAddFlow(); setTimeout(()=>{ const root=document.getElementById('modal-content'); if(root){ root.innerHTML=root.innerHTML.replace(/Add Stock/g,'Add Research Ticker').replace(/Position Trade|Long-Term Hold/g,'Swing Trade').replace(/Choose.*strategy/gi,'Research ticker'); }},0); }
 
+
+// ── DAILY DATA ARCHITECTURE · v2.9.34 ───────────────────────────────────────
+// Daily CSV = local current-market overlay (also cached in localStorage).
+// Firestore = user-owned persistent state only. This intentionally removes the
+// bulk daily save operation that was hanging after the dynamic universe grew.
 
 // ── FULL-SYSTEM AUDIT · v2.9.30 ────────────────────────────────────────────
 // Fixed four cross-system contradictions:
