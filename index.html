@@ -6925,6 +6925,12 @@ function parseScanCSV(text) {
     lastEarnDate:['LastEarningsDate','last earnings date'],
     hi52:       ['High52W','high52w','52WHigh','Hi52'],
     lo52:       ['Low52W','low52w','52WLow','Lo52'],
+    nearHighSamples:['NearHigh5PctSamples','nearhigh5pctsamples'],
+    nearHighAvg10:['NearHighAvgReturn10D','nearhighavgreturn10d'],
+    nearHighWin10:['NearHighWinRate10D','nearhighwinrate10d'],
+    nearHighBreakout10:['NearHighBreakoutRate10D','nearhighbreakoutrate10d'],
+    nearHighFailure10:['NearHighFailureRate10D','nearhighfailurerate10d'],
+    nearHighBehavior:['NearHighBehavior','nearhighbehavior'],
   };
   const idx = {};
   Object.keys(colMap).forEach(key=>{
@@ -6965,6 +6971,12 @@ function parseScanCSV(text) {
       earnVerified: str('earnVerified')==null ? null : /^(yes|true|1|verified)$/i.test(String(str('earnVerified')).trim()),
       earnSource: str('earnSource'),
       lastEarnDate: normalizeEarningsDate(str('lastEarnDate')),
+      nearHighSamples: num('nearHighSamples'),
+      nearHighAvg10: num('nearHighAvg10'),
+      nearHighWin10: num('nearHighWin10'),
+      nearHighBreakout10: num('nearHighBreakout10'),
+      nearHighFailure10: num('nearHighFailure10'),
+      nearHighBehavior: str('nearHighBehavior'),
     });
   }
   return rows;
@@ -7071,6 +7083,9 @@ async function doBulkImportScan() {
       type,
       buyZone:'Run full analysis', invested:0,
       hi52: r.hi52, lo52: r.lo52,
+      nearHighSamples:r.nearHighSamples, nearHighAvg10:r.nearHighAvg10,
+      nearHighWin10:r.nearHighWin10, nearHighBreakout10:r.nearHighBreakout10,
+      nearHighFailure10:r.nearHighFailure10, nearHighBehavior:r.nearHighBehavior||null,
       ma20: r.ma20, ma50: r.ma50, ma200: r.ma200,
       rsi: r.rsi, vol: r.vol, avgvol: r.avgvol, atr: r.atr,
       macdLine: r.macdLine, signalLine: r.signalLine,
@@ -7109,6 +7124,12 @@ async function doBulkImportScan() {
       atr: r.atr ?? s.atr,
       hi52: r.hi52 ?? s.hi52,
       lo52: r.lo52 ?? s.lo52,
+      nearHighSamples: r.nearHighSamples ?? s.nearHighSamples,
+      nearHighAvg10: r.nearHighAvg10 ?? s.nearHighAvg10,
+      nearHighWin10: r.nearHighWin10 ?? s.nearHighWin10,
+      nearHighBreakout10: r.nearHighBreakout10 ?? s.nearHighBreakout10,
+      nearHighFailure10: r.nearHighFailure10 ?? s.nearHighFailure10,
+      nearHighBehavior: r.nearHighBehavior || s.nearHighBehavior || null,
       ema20: r.ma20 ?? s.ema20,
       sector: r.sector ?? s.sector,
       industry: r.industry ?? s.industry,
@@ -7217,6 +7238,12 @@ function parseCSV(text) {
     avgvol:    ['AvgVol20','avgvol20','AvgVolume20','AverageVolume20'],
     sector:    ['Sector','sector'],
     industry:  ['Industry','industry'],
+    nearHighSamples:['NearHigh5PctSamples','nearhigh5pctsamples'],
+    nearHighAvg10:['NearHighAvgReturn10D','nearhighavgreturn10d'],
+    nearHighWin10:['NearHighWinRate10D','nearhighwinrate10d'],
+    nearHighBreakout10:['NearHighBreakoutRate10D','nearhighbreakoutrate10d'],
+    nearHighFailure10:['NearHighFailureRate10D','nearhighfailurerate10d'],
+    nearHighBehavior:['NearHighBehavior','nearhighbehavior'],
   };
 
   Object.keys(colMap).forEach(key => {
@@ -7250,6 +7277,11 @@ function parseCSV(text) {
       const v = parseFloat(cols[idx[k]]);
       return isNaN(v) ? null : v;
     };
+    const ps = (k) => {
+      if(idx[k] === undefined || idx[k] < 0) return null;
+      const v = cols[idx[k]];
+      return v==null || String(v).trim()==='' ? null : String(v).trim();
+    };
 
     const dateStr = idx.date !== undefined ? cols[idx.date]?.trim() : null;
     if(!dateStr) continue;
@@ -7280,6 +7312,12 @@ function parseCSV(text) {
       ema20live:  pf('ema20live'),
       ema20:      pf('ema20'),
       avgvol:     pf('avgvol'),
+      nearHighSamples:pf('nearHighSamples'),
+      nearHighAvg10:pf('nearHighAvg10'),
+      nearHighWin10:pf('nearHighWin10'),
+      nearHighBreakout10:pf('nearHighBreakout10'),
+      nearHighFailure10:pf('nearHighFailure10'),
+      nearHighBehavior:ps('nearHighBehavior'),
     });
   }
 
@@ -7429,6 +7467,12 @@ async function doImportCSV(stockId) {
     hi52:       row.hi52,
     ema20live:  row.ema20live,
     ema20:      row.ema20,
+    nearHighSamples: row.nearHighSamples ?? null,
+    nearHighAvg10: row.nearHighAvg10 ?? null,
+    nearHighWin10: row.nearHighWin10 ?? null,
+    nearHighBreakout10: row.nearHighBreakout10 ?? null,
+    nearHighFailure10: row.nearHighFailure10 ?? null,
+    nearHighBehavior: row.nearHighBehavior ?? null,
   }));
 
   // ThinkorSwim's export gives raw daily volume, not a pre-computed average —
@@ -7468,6 +7512,12 @@ async function doImportCSV(stockId) {
     earningsTime: latest.earnTime || (s.earningsTime||''),
     earningsVerified: latest.earnVerified!=null ? latest.earnVerified : (latest.earnDate||latest.earnOffset!=null ? true : earningsIsVerified(s)),
     earningsSource: latest.earnSource || (latest.earnDate?'CSV date':(latest.earnOffset!=null?'CSV offset':(latest.earnVerified===false?'Unverified':(s.earningsSource||'')))),
+    nearHighSamples: latest.nearHighSamples ?? s.nearHighSamples,
+    nearHighAvg10: latest.nearHighAvg10 ?? s.nearHighAvg10,
+    nearHighWin10: latest.nearHighWin10 ?? s.nearHighWin10,
+    nearHighBreakout10: latest.nearHighBreakout10 ?? s.nearHighBreakout10,
+    nearHighFailure10: latest.nearHighFailure10 ?? s.nearHighFailure10,
+    nearHighBehavior: latest.nearHighBehavior || s.nearHighBehavior || null,
     snapshots:  cleanRows,
   };
   try { const _bt = tickerBacktest(updated); updated.provenStars = starRating(_bt); } catch(e){ updated.provenStars = 0; }
@@ -8273,6 +8323,41 @@ function yourTradeProofPanel(s,pb){
   if(missed.length){ body+=`<div style="margin-top:11px;padding-top:10px;border-top:1px solid ${C.border};"><div style="color:${C.yellow};font-size:11px;font-weight:900;text-transform:uppercase;margin-bottom:5px;">Missed Opportunity Study</div><div style="color:${C.textSub};font-size:11.5px;line-height:1.5;">${missed.length} PREPARING setup${missed.length===1?' has':'s have'} moved +6% before BUY. This is logged for rule research only; StockIQ will not loosen the setup automatically.</div></div>`; }
   return panel('Your Trade Proof',body);
 }
+function high52BehaviorPanel(s){
+  const offHi=(s.price!=null&&s.hi52)?(s.price/s.hi52-1)*100:null;
+  const n=Number(s.nearHighSamples||0);
+  const avg=s.nearHighAvg10!=null?Number(s.nearHighAvg10):null;
+  const win=s.nearHighWin10!=null?Number(s.nearHighWin10):null;
+  const br=s.nearHighBreakout10!=null?Number(s.nearHighBreakout10):null;
+  const fail=s.nearHighFailure10!=null?Number(s.nearHighFailure10):null;
+  const near=offHi!=null&&offHi>=-5;
+  let verdict=s.nearHighBehavior||'';
+  if(!verdict){
+    if(n<5) verdict='Limited history near the high';
+    else if(avg!=null&&win!=null&&br!=null&&fail!=null&&avg>=2&&win>=60&&br>=50&&fail<=35) verdict='Historically handles 52-week highs well';
+    else if((avg!=null&&avg<=0)||(win!=null&&win<45)||(fail!=null&&fail>=50)) verdict='Historically tends to stall or pull back near highs';
+    else verdict='Mixed behavior near the 52-week high';
+  }
+  if(!n || avg==null || win==null || br==null || fail==null){
+    return panel('52-Week High Behavior',`<div style="color:${C.textSub};font-size:12.5px;line-height:1.6;">Current: <b style="color:${C.text};">${offHi==null?'—':Math.abs(offHi).toFixed(1)+'% below the 52-week high'}</b>${s.hi52?` · High ${fmtP(s.hi52)}`:''}</div><div style="margin-top:10px;padding:10px;border-radius:10px;background:${C.cardHigh};color:${C.textSub};font-size:12px;line-height:1.55;">Historical near-high behavior is not loaded yet. Run the updated daily exporter and upload the CSV to populate it.</div>`);
+  }
+  const verdictColor=/handles/i.test(verdict)?C.green:(/stall|pull back/i.test(verdict)?C.red:C.yellow);
+  const currentLabel=near?'WITHIN 5% OF HIGH':`${Math.abs(offHi||0).toFixed(1)}% BELOW HIGH`;
+  return panel('52-Week High Behavior',`
+    <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:12px;">
+      <div><div class="v2lbl">Current Position</div><div style="color:${near?C.green:C.text};font-size:16px;font-weight:950;">${currentLabel}</div><div style="color:${C.textMuted};font-size:11px;margin-top:3px;">${s.hi52?`52-week high ${fmtP(s.hi52)}`:'52-week high unavailable'}</div></div>
+      <div style="text-align:right;"><div class="v2lbl">Historical Read</div><div style="color:${verdictColor};font-size:12.5px;font-weight:900;max-width:260px;line-height:1.35;">${verdict}</div></div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;">
+      <div style="background:${C.cardHigh};border-radius:10px;padding:10px;"><div class="v2lbl">Avg 10-Day Return</div><div class="v2big" style="color:${avg>=0?C.green:C.red};">${avg>=0?'+':''}${avg.toFixed(1)}%</div></div>
+      <div style="background:${C.cardHigh};border-radius:10px;padding:10px;"><div class="v2lbl">10-Day Win Rate</div><div class="v2big">${win.toFixed(0)}%</div></div>
+      <div style="background:${C.cardHigh};border-radius:10px;padding:10px;"><div class="v2lbl">New-High Continuation</div><div class="v2big">${br.toFixed(0)}%</div></div>
+      <div style="background:${C.cardHigh};border-radius:10px;padding:10px;"><div class="v2lbl">5% Pullback Rate</div><div class="v2big" style="color:${fail>=50?C.red:C.text};">${fail.toFixed(0)}%</div></div>
+    </div>
+    <div style="margin-top:10px;color:${C.textSub};font-size:11.5px;line-height:1.55;">Based on <b style="color:${C.text};">${n}</b> non-overlapping historical observations when the stock closed within 5% of its rolling 52-week high. We then measured the next 10 trading days. This is context, not a BUY trigger.</div>
+  `);
+}
+
 function historyPanel(pb){ return panel('Historical Proof',`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;"><div style="color:${C.text};font-size:15px;font-weight:900;">${pb.confidence} CONFIDENCE</div><div style="color:${C.textSub};font-size:11px;">${pb.tier==='BENCH'?'Bench backtest · forward testing':'Validated playbook'}</div></div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;"><div><div class="v2lbl">Trades</div><div class="v2big">${pb.stats.trades}</div></div><div><div class="v2lbl">Win Rate</div><div class="v2big">~${pb.stats.win}%</div></div><div><div class="v2lbl">Avg Return</div><div class="v2big">~${pb.stats.avg}%</div></div></div><div style="margin-top:12px;color:${C.textSub};font-size:12.5px;line-height:1.6;">Normal drawdown ${pb.stats.drawdown}. ${pb.tier==='BENCH'?'Bench results are used to choose what to forward-test; they are not promoted to Core yet.':'The setup survived holdout testing, best-trade removal, best-year removal, and nearby-rule checks.'} Historical results are evidence, not a guarantee.</div>`); }
 function sweetSpotTiles(s,pb){
   const p=curVal(s,'price'), e20=curVal(s,'ma20','ema20'), m50=curVal(s,'ma50'), m200=curVal(s,'ma200'), rsi=curVal(s,'rsi');
@@ -8383,7 +8468,7 @@ function renderDetail(s){
   const el=document.getElementById('detail-content'); if(!el)return; const pb=pbFor(s); if(!pb){ el.innerHTML=`<div style="padding:16px;"><button onclick="showScreen('home')" style="background:none;border:none;color:${C.textSub};padding:0 0 12px;">← Back</button><h2 style="color:${C.text};margin:0;">${s.ticker}</h2>${companyNameFor(s)?`<div style="color:${C.textSub};font-size:13px;margin-top:4px;">${companyNameFor(s)}</div>`:''}<div style="margin-top:12px;">${badge('RESEARCH ONLY')}</div><p style="color:${C.textSub};font-size:13px;line-height:1.65;">This ticker can show indicators, but StockIQ will not issue trading signals until it has a validated playbook.</p>${indicatorPanel(s,{})}</div>`; return; }
   const st=stockState(s),checks=setupChecks(s),conflict=portfolioConflict(s);
   let html=s.position?positionTop(s,pb,st):preTop(s,pb,st); html+=topCallout(s,pb,st);
-  if(s.position){ html+=riskPanel(s,pb); html+=panel('Trade Health',checklistHTML(checks)); html+=earningsPanel(s,pb); html+=regressionPanel(s,pb); if(pb.maxHold>pb.hold)html+=panel('Decision / Runner',`<div style="color:${C.text};font-size:13px;font-weight:800;">Normal hold: ${pb.hold} days · Max runner window: ${pb.maxHold} days</div><div style="color:${C.textSub};font-size:11px;margin-top:6px;">At decision day, StockIQ checks whether this ticker’s proven runner conditions are still healthy.</div>`); html+=historyPanel(pb); html+=yourTradeProofPanel(s,pb); html+=sweetSpotPanel(s,pb); html+=indicatorPanel(s,pb); html+=marketPanel(s,pb); html+=panel('Manage Position',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;"><button onclick="showV2CloseFlow('${s.id}')" style="padding:11px;border-radius:10px;border:1px solid ${C.red}66;background:${C.redDim};color:${C.red};font-weight:800;cursor:pointer;">Sell</button><button onclick="showV2StopFlow('${s.id}')" style="padding:11px;border-radius:10px;border:1px solid ${C.border};background:${C.cardHigh};color:${C.text};font-weight:800;cursor:pointer;">Update Stop</button></div>`); }
+  if(s.position){ html+=riskPanel(s,pb); html+=panel('Trade Health',checklistHTML(checks)); html+=earningsPanel(s,pb); html+=regressionPanel(s,pb); if(pb.maxHold>pb.hold)html+=panel('Decision / Runner',`<div style="color:${C.text};font-size:13px;font-weight:800;">Normal hold: ${pb.hold} days · Max runner window: ${pb.maxHold} days</div><div style="color:${C.textSub};font-size:11px;margin-top:6px;">At decision day, StockIQ checks whether this ticker’s proven runner conditions are still healthy.</div>`); html+=high52BehaviorPanel(s); html+=high52BehaviorPanel(s); html+=historyPanel(pb); html+=yourTradeProofPanel(s,pb); html+=sweetSpotPanel(s,pb); html+=indicatorPanel(s,pb); html+=marketPanel(s,pb); html+=panel('Manage Position',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;"><button onclick="showV2CloseFlow('${s.id}')" style="padding:11px;border-radius:10px;border:1px solid ${C.red}66;background:${C.redDim};color:${C.red};font-weight:800;cursor:pointer;">Sell</button><button onclick="showV2StopFlow('${s.id}')" style="padding:11px;border-radius:10px;border:1px solid ${C.border};background:${C.cardHigh};color:${C.text};font-weight:800;cursor:pointer;">Update Stop</button></div>`); }
   else { html+=panel('Setup Requirements',checklistHTML(checks)); if(['BUY','A+ BUY'].includes(st.state))html+=entryPanel(s,pb,st); html+=riskPanel(s,pb); html+=regressionPanel(s,pb); html+=earningsPanel(s,pb); html+=marketPanel(s,pb); if(conflict)html+=panel('Portfolio Conflict',`<div style="color:${C.yellow};font-size:12.5px;line-height:1.55;font-weight:700;">${conflict}</div>`); html+=historyPanel(pb); html+=yourTradeProofPanel(s,pb); html+=sweetSpotPanel(s,pb); html+=indicatorPanel(s,pb); }
   el.innerHTML=html;
 }
