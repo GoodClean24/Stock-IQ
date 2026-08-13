@@ -8054,18 +8054,98 @@ function entryEarningsGate(s,pb){
   return {ok:true};
 }
 
+function strictPreparingProximity(s,pb,missingCheck){
+  if(!missingCheck) return {ok:false,reason:'No single near-term trigger is identified.'};
+  const label=String(missingCheck.label||'');
+  const p=curVal(s,'price'), e20=curVal(s,'ma20'), m50=curVal(s,'ma50');
+  const rsi=curVal(s,'rsi'), rv=relVol(s), ch20=changeN(s,20), offHi=from52High(s), reg=regressionStats(s,126);
+  const fam=String(s.setupFamily||'').toUpperCase();
+
+  // Regression pullbacks must already be right beside the valid BUY zone.
+  if(label.includes('Regression inside')){
+    let range=pb?.buyRegRange||pb?.regRange||null;
+    if(!range && fam==='REG_PULLBACK') range=[-2.5,-0.5];
+    if(!range || reg.z==null) return {ok:false,reason:'Regression proximity cannot be verified.'};
+    const gap=reg.z<range[0] ? range[0]-reg.z : reg.z>range[1] ? reg.z-range[1] : 0;
+    return {ok:gap<=0.30,reason:`RegZ is ${reg.z.toFixed(2)}; it must be within 0.30 Z of the BUY range ${range[0]} to ${range[1]} to count as PREPARING.`};
+  }
+
+  // RSI can be the one missing trigger only when it is barely outside the required band.
+  if(label.includes('RSI')){
+    const nums=label.match(/-?\d+(?:\.\d+)?/g)?.map(Number)||[];
+    let lo=null,hi=null;
+    if(label.includes('preferred') && pb?.rsi){ lo=pb.rsi[0]; hi=pb.rsi[1]; }
+    else if(nums.length>=2){ lo=Math.min(nums[0],nums[1]); hi=Math.max(nums[0],nums[1]); }
+    if(rsi==null || lo==null || hi==null) return {ok:false,reason:'RSI proximity cannot be verified.'};
+    const gap=rsi<lo ? lo-rsi : rsi>hi ? rsi-hi : 0;
+    return {ok:gap<=2,reason:`RSI is ${rsi.toFixed(1)}; PREPARING requires it to be within 2 RSI points of ${lo}–${hi}.`};
+  }
+
+  // Reclaims must be almost touching the moving average from below.
+  if(label.includes('50-day average')){
+    if(p==null||m50==null||p>=m50) return {ok:false,reason:'A fresh 50-day reclaim is not immediately set up from below.'};
+    const gap=(m50/p-1)*100;
+    return {ok:gap<=1.5,reason:`Price is ${gap.toFixed(2)}% below the 50-day average; PREPARING requires 1.5% or less.`};
+  }
+  if(label.includes('20-day average')){
+    if(p==null||e20==null||p>=e20) return {ok:false,reason:'A fresh 20-day reclaim is not immediately set up from below.'};
+    const gap=(e20/p-1)*100;
+    return {ok:gap<=1.5,reason:`Price is ${gap.toFixed(2)}% below the 20-day average; PREPARING requires 1.5% or less.`};
+  }
+
+  // Momentum must be just shy of its trigger, not several percentage points away.
+  if(label.includes('20-day momentum at least')){
+    const m=label.match(/\+(\d+(?:\.\d+)?)%/); const target=m?Number(m[1]):null;
+    if(ch20==null||target==null) return {ok:false,reason:'Momentum proximity cannot be verified.'};
+    const gap=target-ch20;
+    return {ok:gap>=0&&gap<=1.5,reason:`20-day momentum is ${ch20.toFixed(1)}%; PREPARING requires it to be within 1.5 points of +${target}%.`};
+  }
+
+  // Volume can move quickly, but still needs to be reasonably close after the completed daily bar.
+  if(label.includes('volume') || label.includes('Volume')){
+    const m=label.match(/(\d+(?:\.\d+)?)×/); const target=m?Number(m[1]):null;
+    if(rv==null||target==null) return {ok:false,reason:'Relative-volume proximity cannot be verified.'};
+    const gap=target-rv;
+    return {ok:gap>=0&&gap<=0.15,reason:`Relative volume is ${rv.toFixed(2)}×; PREPARING requires it to be within 0.15× of ${target.toFixed(2)}×.`};
+  }
+
+  // Deep-pullback setups must already be close to the required depth.
+  if(label.includes('below 52-week high')){
+    const m=label.match(/(\d+(?:\.\d+)?)%/); const target=m?Number(m[1]):null;
+    if(offHi==null||target==null) return {ok:false,reason:'52-week pullback proximity cannot be verified.'};
+    const depth=-offHi, gap=target-depth;
+    return {ok:gap>=0&&gap<=2,reason:`The stock is ${depth.toFixed(1)}% below its 52-week high; PREPARING requires it to be within 2 points of the ${target}% pullback trigger.`};
+  }
+
+  // Breakouts must be almost at the actual breakout level.
+  if(label.includes('20-day breakout')){
+    const ph=priorHighN(s,20);
+    if(p==null||ph==null||p>=ph) return {ok:false,reason:'A fresh breakout is not immediately set up below the trigger.'};
+    const gap=(ph/p-1)*100;
+    return {ok:gap<=2,reason:`Price is ${gap.toFixed(2)}% below the 20-day breakout level; PREPARING requires 2% or less.`};
+  }
+
+  return {ok:false,reason:`${label} is still missing, but StockIQ does not classify this condition as a near-term PREPARING trigger.`};
+}
+
 function preEntryState(s){
   if(!isValidatedStock(s)) return {state:'RESEARCH ONLY',reason:'No validated StockIQ playbook yet.'};
   if(s._v2Placeholder || !(s.snapshots||[]).length) return {state:'WAIT',reason:'Daily data has not been loaded for this playbook yet.',checks:setupChecks(s)};
   const checks=setupChecks(s), required=checks.filter(x=>x.required), missing=required.filter(x=>!x.ok);
+  const pb=pbFor(s);
   if(required.length && missing.length===0){
-    const pb=pbFor(s), eg=entryEarningsGate(s,pb);
-    if(!eg.ok) return {state:eg.state||'PREPARING',reason:eg.reason,checks};
+    const eg=entryEarningsGate(s,pb);
+    if(!eg.ok) return {state:eg.state==='PREPARING'?'WAIT':(eg.state||'WAIT'),reason:eg.reason,checks};
     const tail=marketTailwind(s), sweet=sweetSpotFit(s,checks); const aplus=tail.ok&&sweet;
     return {state:aplus?'A+ BUY':'BUY',reason:aplus?'Required setup is ready, the historical sweet spot is aligned, and the market/sector tailwind is supportive.':sweet?'Required setup is ready. Sweet spot is aligned; market/sector boost is not required.':'Required setup is ready. Some A+ preferences are not aligned, but they do not block the trade.',checks};
   }
+
+  // PREPARING is intentionally strict: all structure must already pass and
+  // exactly ONE entry trigger may be missing — and that trigger must be close.
   const structuralLabels=[
     'Price above 20-day average',
+    '20-day above 50-day',
+    '20 > 50 > 200 trend stack',
     '20-day above 50-day',
     '50-day above 200-day',
     'Price above 200-day average',
@@ -8073,11 +8153,23 @@ function preEntryState(s){
   ];
   const missingStructural=missing.filter(x=>structuralLabels.includes(x.label));
   const missingEntry=missing.filter(x=>!structuralLabels.includes(x.label));
-  if(missing.length===1 || (missingStructural.length===0 && missingEntry.length<=2)){
-    const reason=missing.map(x=>`${x.label}. ${x.teach||''}`).join('<br><br>');
-    return {state:'PREPARING',reason,checks};
+
+  if(missingStructural.length===0 && missingEntry.length===1 && missing.length===1){
+    // Earnings must already be clear enough for this stock to become actionable soon.
+    const rule=pb?.earnings||'WAIT FOR REACTION', verified=earningsIsVerified(s), days=earningsDays(s), reaction=postEarningsReaction(s), hold=pb?.maxHold||pb?.hold||20;
+    if(rule!=='HOLD THROUGH' && !verified && !reaction) return {state:'WAIT',reason:'Only one technical trigger is close, but earnings are not verified. This does not qualify as PREPARING.',checks};
+    if(rule==='EXIT BEFORE EARNINGS' && days!=null && days>=0 && days<=hold) return {state:'WAIT',reason:`The setup is technically close, but earnings are in ${days} day${days===1?'':'s'} and this playbook exits before earnings.`,checks};
+    if(rule==='WAIT FOR REACTION' && days!=null && days>=0 && days<=hold) return {state:'WAIT',reason:`The setup is technically close, but earnings are in ${days} day${days===1?'':'s'}. Wait for the earnings reaction.`,checks};
+    if(rule==='WAIT FOR REACTION' && reaction && reaction.daysSince<=2 && !reaction.pass) return {state:'WAIT',reason:`Post-earnings reaction is only ${reaction.score}/3 confirmed. It is not close enough to call PREPARING yet.`,checks};
+
+    const prox=strictPreparingProximity(s,pb,missingEntry[0]);
+    if(prox.ok){
+      return {state:'PREPARING',reason:`${missingEntry[0].label}. ${prox.reason}`,checks};
+    }
+    return {state:'WAIT',reason:`Not close enough for PREPARING. ${prox.reason}`,checks};
   }
-  return {state:'WAIT',reason:missing.length?`${missing.length} setup requirements are not ready yet.`:'Not enough data yet.',checks};
+
+  return {state:'WAIT',reason:missing.length?`${missing.length} setup requirements are not ready yet. PREPARING now requires all structure to pass and only one near-term trigger to remain.`:'Not enough data yet.',checks};
 }
 
 function positionDays(s){ if(!s.position?.date)return null; const start=new Date(s.position.date); if(isNaN(start))return null; const snaps=(s.snapshots||[]).filter(x=>x.date&&new Date(x.date)>=start); return Math.max(1,snaps.length||1); }
@@ -8614,7 +8706,7 @@ function showAddFlow(){ if(_origShowAddFlow)_origShowAddFlow(); setTimeout(()=>{
 // ── v2 initialization ────────────────────────────────────────────────────────
 (function initStockIQV2(){
   const style=document.createElement('style'); style.textContent=`.v2lbl{color:${C.textSub};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}.v2val{color:${C.text};font-size:14px;font-weight:900}.v2big{color:${C.text};font-size:18px;font-weight:950}`; document.head.appendChild(style);
-  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.13 · Readiness + Live Learning';
+  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.14 · Readiness + Live Learning';
   const topButtons=[...document.querySelectorAll('button')]; const add=topButtons.find(b=>b.textContent.includes('Add Stock')); if(add)add.innerHTML='<span style="font-size:16px;">+</span> Research'; const scan=topButtons.find(b=>b.textContent.includes('Import Scan')); if(scan){scan.textContent='Daily Data';scan.onclick=showDailyDataFlow;scan.setAttribute('aria-label','Upload daily multi-ticker data');}
   activeTag='Ready Now'; sortMode='opportunity';
 })();
