@@ -1509,7 +1509,9 @@ function fmtEarnDate(v){
   const iso=normalizeEarningsDate(v);
   if(!iso) return v||'—';
   const m=iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  return `${m[2]}/${m[3]}/${m[1]}`;
+  if(!m) return v||'—';
+  const d=new Date(parseInt(m[1]), parseInt(m[2])-1, parseInt(m[3]));
+  return d.toLocaleDateString('en-US',{month:'long',day:'2-digit',year:'numeric'});
 }
 function setEarningsDate(id){
   const s = stocks.find(x=>String(x.id)===String(id)); if(!s) return;
@@ -7936,9 +7938,22 @@ function dateOnlyDiffDays(dateStr, baseDate=new Date()){
 function earningsDays(s){ return dateOnlyDiffDays(s.earningsDate,new Date()); }
 function latestMarketDateStr(s){ return latestSnap(s)?.date || today(); }
 function recentEarningsDate(s){
-  const latest=latestMarketDateStr(s);
-  const cands=[s.lastEarningsDate,s.earningsDate].filter(Boolean).filter(d=>String(d)<=String(latest));
-  return cands.length?cands.sort().slice(-1)[0]:null;
+  const latestStr=latestMarketDateStr(s);
+  const latestDate=parseAppDateStr(latestStr)||new Date(latestStr);
+  if(!latestDate||isNaN(latestDate)) return null;
+  latestDate.setHours(23,59,59,999);
+
+  const cands=[s.lastEarningsDate,s.earningsDate]
+    .filter(Boolean)
+    .map(raw=>{
+      const d=parseAppDateStr(raw)||new Date(raw);
+      return (!d||isNaN(d)) ? null : {raw:normalizeEarningsDate(raw)||raw,date:d};
+    })
+    .filter(Boolean)
+    .filter(x=>x.date<=latestDate)
+    .sort((a,b)=>a.date-b.date);
+
+  return cands.length?cands[cands.length-1].raw:null;
 }
 function postEarningsReaction(s){
   const eventDate=recentEarningsDate(s);
@@ -8353,9 +8368,9 @@ function earningsPanel(s,pb){
   else if(e?.days===0){ status='EARNINGS TODAY · WAIT FOR REACTION BAR'; statusColor=C.yellow; }
   else if(e?.days!=null && e.days>0){ status=`${e.days} day${e.days===1?'':'s'} until earnings`; }
   else if(e?.days!=null && e.days<0){ status=`Last listed earnings date was ${Math.abs(e.days)} day${Math.abs(e.days)===1?'':'s'} ago`; }
-  const eventDate=rx?.eventDate || s.earningsDate || '';
+  const eventDate=rx?.eventDate || s.lastEarningsDate || s.earningsDate || '';
   const reactionBlock=e?.rule==='WAIT FOR REACTION' ? `<div style="margin-top:12px;padding-top:10px;border-top:1px solid ${C.border};"><div style="display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:8px;"><div style="color:${C.text};font-size:12.5px;font-weight:900;">Post-Earnings Plan</div><div style="color:${rx?.pass?C.green:C.yellow};font-size:12px;font-weight:950;">${rx?`${rx.score}/3 confirmed`:'Waiting for reaction data'}</div></div><div style="color:${C.textSub};font-size:12px;line-height:1.55;margin-bottom:9px;">We require at least <b style="color:${C.text};">2 of 3</b> to improve versus the prior completed daily bar. If 2/3 improve <b>and</b> the normal setup requirements still pass, StockIQ can allow an entry for the next session. If fewer than 2 improve, stay PREPARING and recheck after the next daily close.</div>${checklistHTML(rx?.items||[{label:'Regression improving',ok:false,teach:'Needs a completed post-earnings daily bar.'},{label:'RSI improving',ok:false,teach:'Needs a completed post-earnings daily bar.'},{label:'MACD improving',ok:false,teach:'Needs a completed post-earnings daily bar.'}])}<div style="margin-top:9px;padding:9px 10px;border-radius:9px;background:${rx?.pass?C.greenDim:C.cardHigh};border:1px solid ${rx?.pass?C.green+'55':C.border};color:${rx?.pass?C.green:C.textSub};font-size:12px;font-weight:800;line-height:1.45;">${rx?(rx.pass?'PLAN: Reaction confirmed. Re-run the normal BUY requirements; if they all pass, entry is allowed for the next session.':'PLAN: Do not buy yet. Keep it PREPARING and recheck after the next completed daily bar.'):'PLAN: Wait for the first completed post-earnings daily bar.'}</div></div>` : '';
-  return panel('Earnings',`<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;"><div><div style="color:${C.text};font-size:14px;font-weight:900;">${e?.rule||'No rule'}</div><div style="color:${statusColor};font-size:12.5px;margin-top:4px;font-weight:850;">${status}</div>${s.earningsSource?`<div style="color:${C.textMuted};font-size:10.5px;margin-top:3px;">Source: ${s.earningsSource}${s.earningsTime?` · ${s.earningsTime}`:''}</div>`:''}</div>${eventDate?`<div style="color:${C.text};font-size:12px;font-weight:800;text-align:right;"><div>${fmtEarnDate(eventDate)}</div><div style="color:${C.textMuted};font-size:10px;margin-top:2px;">event date</div></div>`:''}</div>${!verified&&!rx&&e?.rule!=='HOLD THROUGH'?`<div style="margin-top:12px;padding:10px;border-radius:10px;background:${C.red}16;border:1px solid ${C.red}44;color:#F5A3A3;font-size:12px;line-height:1.5;">BUY is blocked until earnings are verified. Tap the earnings date control to enter it manually if the daily exporter cannot verify it.</div>`:''}${reactionBlock}`);
+  return panel('Earnings',`<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;"><div><div style="color:${C.text};font-size:14px;font-weight:900;">${e?.rule||'No rule'}</div><div style="color:${statusColor};font-size:12.5px;margin-top:4px;font-weight:850;">${status}</div>${s.earningsSource?`<div style="color:${C.textMuted};font-size:10.5px;margin-top:3px;">Source: ${s.earningsSource}${s.earningsTime?` · ${s.earningsTime}`:''}</div>`:''}</div>${eventDate?`<div style="color:${C.text};font-size:12px;font-weight:800;text-align:right;"><div>${fmtEarnDate(eventDate)}</div><div style="color:${C.textMuted};font-size:10px;margin-top:2px;">${rx||s.lastEarningsDate?'reported earnings':'next earnings'}</div></div>`:''}</div>${!verified&&!rx&&e?.rule!=='HOLD THROUGH'?`<div style="margin-top:12px;padding:10px;border-radius:10px;background:${C.red}16;border:1px solid ${C.red}44;color:#F5A3A3;font-size:12px;line-height:1.5;">BUY is blocked until earnings are verified. Tap the earnings date control to enter it manually if the daily exporter cannot verify it.</div>`:''}${reactionBlock}`);
 }
 function indicatorPanel(s,pb){ const r=regressionStats(s),rv=relativeVolume(s),h=macdHist(s),atr=curVal(s,'atr'),price=curVal(s,'price'),atrp=atr&&price?atr/price*100:null; const rows=[['EMA20',curVal(s,'ma20','ema20')!=null?money(curVal(s,'ma20','ema20')):'—','Short-term trend'],['SMA50',curVal(s,'ma50')!=null?money(curVal(s,'ma50')):'—','Medium-term trend'],['SMA200',curVal(s,'ma200')!=null?money(curVal(s,'ma200')):'—','Long-term trend'],['RSI',curVal(s,'rsi')!=null?curVal(s,'rsi').toFixed(1):'—','Momentum'],['MACD Hist',h!=null?h.toFixed(2):'—','Momentum direction'],['ATR%',atrp!=null?atrp.toFixed(1)+'%':'—','Typical daily movement'],['Rel Volume',rv!=null?rv.toFixed(2)+'×':'—','Participation'],['Reg Z',r.z!=null?r.z.toFixed(2):'—','Position vs normal trend']]; return panel('Indicators / Learn Why',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">${rows.map(([a,b,c])=>`<div style="background:${C.cardHigh};border-radius:10px;padding:10px;"><div class="v2lbl">${a}</div><div style="color:${C.text};font-size:13px;font-weight:900;">${b}</div><div style="color:${C.textSub};font-size:11.5px;line-height:1.45;margin-top:4px;">${c}</div></div>`).join('')}</div>`); }
 function marketPanel(s,pb){ const t=marketTailwind(s); return panel('Market & Sector',`<div style="display:flex;justify-content:space-between;align-items:center;"><div><div style="color:${t.ok?C.green:C.text};font-size:14px;font-weight:900;">Tailwind: ${t.label}</div><div style="color:${C.textSub};font-size:12.5px;margin-top:4px;line-height:1.5;">${t.text}</div></div><div style="color:${C.textSub};font-size:11px;font-weight:800;">${pb.market||'—'}</div></div>`); }
