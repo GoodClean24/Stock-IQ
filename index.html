@@ -9453,5 +9453,153 @@ loadSundayDiscoveryState();
 })();
 
 </script>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════════
+   STOCKIQ v2.9.40 · RESEARCH VALIDATION PIPELINE
+   Sunday scan -> source-aware queue -> 6Y pull -> validation import ->
+   evidence registry. Only PROVEN + PromotionReady=YES becomes live-eligible.
+   Other grades remain research/shadow only.
+   ═══════════════════════════════════════════════════════════════════════════════ */
+const DYNAMIC_EVIDENCE_STORAGE_KEY='stockiq_dynamic_research_evidence_v1';
+let DYNAMIC_RESEARCH_EVIDENCE={};
+function loadDynamicEvidence(){
+  try{DYNAMIC_RESEARCH_EVIDENCE=JSON.parse(localStorage.getItem(DYNAMIC_EVIDENCE_STORAGE_KEY)||'{}')||{};}catch(e){DYNAMIC_RESEARCH_EVIDENCE={};}
+}
+function saveDynamicEvidence(){try{localStorage.setItem(DYNAMIC_EVIDENCE_STORAGE_KEY,JSON.stringify(DYNAMIC_RESEARCH_EVIDENCE));}catch(e){console.warn('Dynamic evidence save failed',e);}}
+loadDynamicEvidence();
+
+function evidenceFor(s){
+  const t=String(s?.ticker||'').toUpperCase();
+  if(DYNAMIC_RESEARCH_EVIDENCE[t]) return DYNAMIC_RESEARCH_EVIDENCE[t];
+  if(RESEARCH_PROMOTION_EVIDENCE[t]) return RESEARCH_PROMOTION_EVIDENCE[t];
+  if(VALIDATED_EVIDENCE_CLASS[t]) {
+    const summary = t==='VIST'
+      ? 'REGIME-STRONG · the deep-pullback edge remains profitable and robust across nearby parameters, but expectancy weakened materially in newer history. Valid BUY setups can still compete; A+ is withheld until newer/forward evidence improves.'
+      : t==='ASX'
+      ? 'PROVEN · standardized six-year replay produced 28 non-overlapping trades at ~64% wins / ~+4.7% friction-adjusted average, with positive older and newer periods, ~-5.9% average adverse excursion, and 27/27 full-period nearby parameter variants profitable. Newer-period robustness was 24/27, so ASX remains proven but ranks below a cleaner TIGO when both are ready.'
+      : t==='RELY'
+      ? 'PROMISING · standardized EMA20-reclaim replay produced 14 non-overlapping trades at ~64% wins / ~+4.7% friction-adjusted average. Older history was only ~56% wins / +3.6%, while the five 2025+ trades improved to ~80% / +10.0%. Nearby rule variations stayed profitable, but the sample is still limited and one historical gap-through-stop loss was about -25%. Keep valid BUYs tradeable, rank them below proven names, and withhold A+.'
+      : 'Validated StockIQ playbook; evidence class is used for context, not as a new hard entry trigger.';
+    return {grade:VALIDATED_EVIDENCE_CLASS[t],promotionReady:true,summary};
+  }
+  return null;
+}
+function pbFor(s){
+  if(!s) return null;
+  const t=String(s.ticker||'').toUpperCase();
+  const dyn=DYNAMIC_RESEARCH_EVIDENCE[t];
+  return PLAYBOOKS[t] || genericPromotedPlaybook(t,dyn||RESEARCH_PROMOTION_EVIDENCE[t]) || null;
+}
+function isValidatedStock(s){
+  const t=String(s?.ticker||'').toUpperCase();
+  const dyn=DYNAMIC_RESEARCH_EVIDENCE[t];
+  if(dyn && dyn.promotionReady===true && pbFor(s) && !s.archived) return true;
+  const ev=RESEARCH_PROMOTION_EVIDENCE[t];
+  if(ev && ev.promotionReady===false) return false;
+  const promoted=!!(ev?.promotionReady && pbFor(s));
+  return (isCoreStock(s)||isBenchStock(s)||promoted) && !s.archived;
+}
+function sundayTickerClass(ticker){
+  const t=String(ticker||'').trim().toUpperCase();
+  const dyn=DYNAMIC_RESEARCH_EVIDENCE[t]||null;
+  if(dyn){
+    if(dyn.promotionReady===true) return {bucket:'validated',label:'Qualified by 6-Year Validation',color:C.green};
+    if(String(dyn.grade||'').toUpperCase()==='REJECTED') return {bucket:'rejected',label:'Previously rejected',color:C.red};
+    return {bucket:'research',label:`Research · ${dyn.grade||'RESEARCH'}`,color:C.yellow};
+  }
+  const ev=RESEARCH_PROMOTION_EVIDENCE[t]||null;
+  if(CORE_TICKERS.includes(t)||BENCH_TICKERS.includes(t)||(ev&&ev.promotionReady===true)||VALIDATED_EVIDENCE_CLASS[t]) return {bucket:'validated',label:'Already qualified',color:C.green};
+  if(ev&&ev.promotionReady===false && String(ev.grade||'').toUpperCase()==='REJECTED') return {bucket:'rejected',label:'Previously rejected',color:C.red};
+  if(ev&&ev.promotionReady===false) return {bucket:'research',label:'Already in research',color:C.yellow};
+  const existing=stocks.find(x=>String(x.ticker||'').toUpperCase()===t);
+  if(existing && !isMarketStock(existing)) return {bucket:'research',label:'Already in research',color:C.yellow};
+  if(sundayResearchQueue.some(x=>x.ticker===t)) return {bucket:'research',label:'Already queued',color:C.yellow};
+  return {bucket:'new',label:'Needs 6-Year Validation',color:C.teal};
+}
+function mergeScannerSource(oldSource,newSource){
+  const vals=[...(String(oldSource||'').split('|')),...(String(newSource||'').split('|'))].map(x=>x.trim()).filter(Boolean);
+  return [...new Set(vals)].join(' | ');
+}
+function applySundayDiscovery(){
+  const p=window._v2PendingSunday; if(!p)return;
+  loadSundayDiscoveryState();
+  const byTicker=new Map(sundayResearchQueue.map(x=>[x.ticker,x]));
+  const added=[];
+  // Preserve every discovery source. A ticker found by two different Sunday scans
+  // carries both sources into the validator, preventing blind six-family shopping.
+  for(const r of p.rows){
+    const t=r.ticker; const cls=sundayTickerClass(t);
+    if(cls.bucket==='new'){
+      const rec={ticker:t,description:r.description||'',sector:r.sector||'',industry:r.industry||'',discoveredOn:today(),source:p.source,status:'NEEDS_6YR_VALIDATION'};
+      sundayResearchQueue.push(rec); byTicker.set(t,rec); added.push(t);
+    } else if(byTicker.has(t)){
+      const rec=byTicker.get(t); rec.source=mergeScannerSource(rec.source,p.source);
+    }
+  }
+  sundayDiscoveryHistory.push({date:today(),fileName:p.fileName,total:p.rows.length,newCount:p.buckets.new.length,validatedCount:p.buckets.validated.length,researchCount:p.buckets.research.length,rejectedCount:p.buckets.rejected.length,added});
+  saveSundayDiscoveryState(); window._v2PendingSunday=null;
+  showModal(`<div style="background:${C.card};border-radius:20px;padding:24px;border:1px solid ${C.green}55;"><div style="color:${C.green};font-size:19px;font-weight:950;margin-bottom:7px;">Sunday discovery loaded ✓</div><div style="color:${C.textSub};font-size:12.5px;line-height:1.65;margin-bottom:14px;">${p.rows.length} scan names reviewed. <b style="color:${C.text};">${added.length}</b> genuinely new ticker${added.length===1?'':'s'} added. If a queued ticker appeared in more than one official Sunday scan, StockIQ retained all scanner sources for source-aware validation.</div>${sundayResearchQueue.length?`<button onclick="downloadSundayResearchQueue()" style="width:100%;padding:12px;border-radius:10px;border:none;background:${C.teal};color:#000;font-weight:950;cursor:pointer;">Download 6-Year Research Queue (${sundayResearchQueue.length})</button>`:''}<button onclick="closeAllOverlays()" style="width:100%;padding:11px;margin-top:9px;border-radius:10px;border:1px solid ${C.border};background:transparent;color:${C.textSub};font-weight:850;cursor:pointer;">Done</button></div>`);
+}
+function downloadSundayResearchQueue(){
+  loadSundayDiscoveryState(); if(!sundayResearchQueue.length)return;
+  const hdr=['Symbol','DiscoveryDate','ScannerSource','Status','Company','Sector','Industry'];
+  const lines=[hdr.join(',')].concat(sundayResearchQueue.map(x=>[x.ticker,x.discoveredOn,x.source,x.status,x.description,x.sector,x.industry].map(csvEscape).join(',')));
+  const blob=new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`StockIQ_Sunday_Research_Queue_${today()}.csv`; document.body.appendChild(a); a.click(); setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},0);
+}
+function validationCSVRows(text){
+  text=String(text||'').replace(/^\uFEFF/,''); const raw=text.split(/\r?\n/).filter(x=>x.trim()); if(raw.length<2)return [];
+  const delim=raw[0].includes('\t')?'\t':','; const h=splitCSVLine(raw[0],delim);
+  return raw.slice(1).map(line=>{const vals=splitCSVLine(line,delim),o={};h.forEach((k,i)=>o[k]=vals[i]??'');return o;});
+}
+async function importValidationResults(input){
+  const f=input?.files?.[0]; if(!f)return;
+  try{
+    const rows=validationCSVRows(await f.text());
+    const required=['Symbol','BestFamily','EvidenceGrade','PromotionReady','Trades','WinRatePct','AvgReturnPct','RobustPct','EvidenceSummary'];
+    if(!rows.length || required.some(k=>!(k in rows[0]))) throw new Error('This is not a StockIQ Validation Results CSV. Run the Research Validation Engine and upload its StockIQ_Validation_Results file.');
+    loadDynamicEvidence(); loadSundayDiscoveryState();
+    const accepted=[];
+    for(const r of rows){
+      const t=String(r.Symbol||'').trim().toUpperCase(); if(!t)continue;
+      const grade=String(r.EvidenceGrade||'REJECTED').trim().toUpperCase();
+      const promote=String(r.PromotionReady||'').trim().toUpperCase()==='YES' && grade==='PROVEN';
+      const low=Number(r.RegSweetLow), high=Number(r.RegSweetHigh);
+      DYNAMIC_RESEARCH_EVIDENCE[t]={
+        family:String(r.BestFamily||'').trim(),grade,promotionReady:promote,
+        summary:String(r.EvidenceSummary||''),source:String(r.DiscoverySource||''),
+        stats:{trades:Number(r.Trades)||0,win:Number(r.WinRatePct)||0,avg:Number(r.AvgReturnPct)||0,drawdown:`Avg MAE ${Number(r.AvgMAEPct||0).toFixed(1)}%`,worst:`${Number(r.WorstReturnPct||0).toFixed(1)}%`},
+        regContext:(Number.isFinite(low)&&Number.isFinite(high))?{range:[low,high],grade:String(r.RegSweetGrade||'CONTEXT'),n:Number(r.RegSweetN)||0}:null,
+        validation:{robustPct:Number(r.RobustPct)||0,olderAvg:Number(r.OlderAvgPct),newerAvg:Number(r.NewerAvgPct),engine:String(r.EngineVersion||'')},
+        importedOn:today()
+      };
+      sundayResearchQueue=sundayResearchQueue.filter(x=>x.ticker!==t);
+      accepted.push({ticker:t,grade,promote,family:DYNAMIC_RESEARCH_EVIDENCE[t].family});
+    }
+    saveDynamicEvidence(); saveSundayDiscoveryState();
+    const proven=accepted.filter(x=>x.promote), research=accepted.filter(x=>!x.promote&&x.grade!=='REJECTED'), rejected=accepted.filter(x=>x.grade==='REJECTED');
+    renderHome();
+    showModal(`<div style="background:${C.card};border-radius:20px;padding:24px;border:1px solid ${C.green}55;max-height:82vh;overflow:auto;"><div style="color:${C.text};font-size:20px;font-weight:950;margin-bottom:6px;">Validation imported ✓</div><div style="color:${C.textSub};font-size:12.5px;line-height:1.6;margin-bottom:14px;">${accepted.length} ticker${accepted.length===1?'':'s'} processed. Only <b style="color:${C.green};">PROVEN</b> names are allowed into the live qualified universe automatically. Everything else stays research/shadow.</div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px;"><div style="background:${C.greenDim};padding:11px;border-radius:10px;"><div style="color:${C.green};font-size:20px;font-weight:950;">${proven.length}</div><div class="v2lbl">PROVEN · qualified</div></div><div style="background:${C.yellowDim};padding:11px;border-radius:10px;"><div style="color:${C.yellow};font-size:20px;font-weight:950;">${research.length}</div><div class="v2lbl">research / shadow</div></div><div style="background:${C.redDim};padding:11px;border-radius:10px;"><div style="color:${C.red};font-size:20px;font-weight:950;">${rejected.length}</div><div class="v2lbl">rejected</div></div></div>${accepted.map(x=>`<div style="padding:8px 0;border-top:1px solid ${C.border};display:flex;justify-content:space-between;gap:10px;"><div style="color:${C.text};font-weight:900;">${x.ticker}</div><div style="color:${x.promote?C.green:(x.grade==='REJECTED'?C.red:C.yellow)};font-size:11px;font-weight:900;">${x.grade} · ${String(x.family).replaceAll('_',' ')}</div></div>`).join('')}<button onclick="downloadQualifiedUniverse()" style="width:100%;padding:12px;margin-top:14px;border-radius:10px;border:none;background:${C.teal};color:#000;font-weight:950;cursor:pointer;">Download Daily Refresh Universe</button><button onclick="closeAllOverlays()" style="width:100%;padding:11px;margin-top:8px;border-radius:10px;border:1px solid ${C.border};background:transparent;color:${C.textSub};font-weight:850;cursor:pointer;">Done</button></div>`);
+  }catch(e){console.error(e);alert(`Validation import failed: ${e.message||e}`);}
+  finally{input.value='';}
+}
+function downloadQualifiedUniverse(){
+  loadDynamicEvidence();
+  const built=[...CORE_TICKERS,...BENCH_TICKERS,...Object.entries(RESEARCH_PROMOTION_EVIDENCE).filter(([t,e])=>e?.promotionReady).map(([t])=>t)];
+  const dyn=Object.entries(DYNAMIC_RESEARCH_EVIDENCE).filter(([t,e])=>e?.promotionReady===true).map(([t])=>t);
+  const syms=[...new Set([...built,...dyn])].sort();
+  const lines=['Symbol,Source'].concat(syms.map(t=>`${csvEscape(t)},${csvEscape(DYNAMIC_RESEARCH_EVIDENCE[t]?'Sunday Validation':'StockIQ Library')}`));
+  const blob=new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`StockIQ_Daily_Refresh_Universe_${today()}.csv`;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},0);
+}
+function showSundayDiscoveryFlow(){
+  loadSundayDiscoveryState(); loadDynamicEvidence();
+  const q=sundayResearchQueue; const last=sundayDiscoveryHistory.length?sundayDiscoveryHistory[sundayDiscoveryHistory.length-1]:null;
+  const dynVals=Object.entries(DYNAMIC_RESEARCH_EVIDENCE);
+  const proven=dynVals.filter(([t,e])=>e?.promotionReady===true).length;
+  showModal(`<div style="background:${C.card};border-radius:20px;padding:24px;border:1px solid ${C.purple}55;max-height:84vh;overflow:auto;"><div style="color:${C.text};font-size:20px;font-weight:950;margin-bottom:6px;">Sunday Discovery + Validation</div><div style="color:${C.textSub};font-size:13px;line-height:1.6;margin-bottom:14px;">Run the five official Sunday scans and upload each export here. Repeated tickers are merged and retain every scanner source. Scanner appearance never creates a trade signal.</div>${last?`<div style="background:${C.cardHigh};border-radius:12px;padding:12px;margin-bottom:12px;color:${C.textSub};font-size:12px;line-height:1.6;"><b style="color:${C.text};">Last scan:</b> ${last.date} · ${last.total} results · ${last.newCount} new</div>`:''}<input id="v2-sunday-file" type="file" accept=".csv,.txt" style="display:none" onchange="previewSundayDiscovery(this)"><button onclick="document.getElementById('v2-sunday-file').click()" style="width:100%;padding:13px;border:none;border-radius:11px;background:${C.purple};color:#fff;font-weight:900;cursor:pointer;">Upload One Sunday Scan</button><div style="margin-top:14px;padding-top:13px;border-top:1px solid ${C.border};"><div style="display:flex;justify-content:space-between;gap:10px;align-items:center;"><div><div class="v2lbl">Research Queue</div><div style="color:${C.text};font-size:16px;font-weight:950;">${q.length} need 6-year validation</div></div>${q.length?`<button onclick="downloadSundayResearchQueue()" style="padding:9px 11px;border-radius:9px;border:1px solid ${C.teal};background:${C.tealDim};color:${C.teal};font-size:11px;font-weight:900;cursor:pointer;">Download Queue</button>`:''}</div>${q.length?`<div style="margin-top:8px;display:flex;flex-direction:column;gap:6px;">${q.slice(0,30).map(x=>`<div style="background:${C.cardHigh};padding:8px 9px;border-radius:8px;"><b style="color:${C.text};">${x.ticker}</b><div style="color:${C.textMuted};font-size:10px;margin-top:2px;">${x.source||'Source not recorded'}</div></div>`).join('')}</div>`:''}</div><div style="margin-top:14px;padding-top:13px;border-top:1px solid ${C.border};"><div class="v2lbl">After the 6-Year Pull + Validation Engine</div><div style="color:${C.textSub};font-size:11.5px;line-height:1.55;margin:5px 0 10px;">Upload the compact <b style="color:${C.text};">StockIQ_Validation_Results</b> CSV. PROVEN names can join the qualified universe; every other grade remains research/shadow.</div><input id="v2-validation-file" type="file" accept=".csv" style="display:none" onchange="importValidationResults(this)"><button onclick="document.getElementById('v2-validation-file').click()" style="width:100%;padding:12px;border-radius:10px;border:1px solid ${C.green};background:${C.greenDim};color:${C.green};font-weight:950;cursor:pointer;">Import Validation Results</button><button onclick="downloadQualifiedUniverse()" style="width:100%;padding:10px;margin-top:8px;border-radius:10px;border:1px solid ${C.border};background:transparent;color:${C.textSub};font-weight:850;cursor:pointer;">Download Daily Refresh Universe · ${proven} new PROVEN</button></div></div>`);
+}
+(function v2940Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.40 · Research Validation Engine';})();
+</script>
+
 </body>
 </html>
