@@ -9058,6 +9058,55 @@ function sweetSpotTiles(s,pb){
       add(`~${pb.hold} DAYS`,'Typical Hold', `Playbook: ${pb.hold}d`, null, 'Normal swing-trade window from the backtest.');
       break; }
   }
+  // Newer/promoted playbooks may not have old ticker-specific display rows.
+  // Build an evidence-based entry comparison from the actual playbook family instead
+  // of rendering an empty table. These are display/context rows only.
+  if(!tiles.length && pb){
+    const fam=String(pb.family||'').toUpperCase();
+    const ctx=regressionContextFor(s,pb);
+    const addCtx=()=>{ if(ctx?.range){ const [lo,hi]=ctx.range; add(`${lo.toFixed(2)} to ${hi.toFixed(2)}`,'Regression Context',reg.z==null?'—':reg.z.toFixed(2),reg.z!=null&&reg.z>=lo&&reg.z<=hi,`${ctx.grade==='PLAYBOOK'?'Validated playbook sweet spot':'Historical context only'} · ${ctx.note||''}`); } };
+    if(fam==='REG_PULLBACK'){
+      add('ABOVE','Price vs SMA200',p!=null&&m200!=null?`${money(p)} vs ${money(m200)}`:'—',longTrend,'Larger uptrend should remain intact.');
+      add('50 > 200','Trend Structure',m50!=null&&m200!=null?`${money(m50)} vs ${money(m200)}`:'—',stack,'Medium-term trend should remain above the long-term trend.');
+      add('RISING','Regression Trend',reg.slope==null?'—':(regUp?'Rising':'Falling'),regUp,'The 126-day regression path should still be rising.');
+      addCtx();
+      add('35–55','RSI',rsi==null?'—':rsi.toFixed(1),rsi!=null&&rsi>=35&&rsi<=55,'Preferred pullback momentum range for the Bench regression family.');
+    }else if(fam==='DEEP_PULLBACK'){
+      add('ABOVE','Price vs SMA200',p!=null&&m200!=null?`${money(p)} vs ${money(m200)}`:'—',longTrend,'Long-term structure should remain intact.');
+      add('50 > 200','Trend Structure',m50!=null&&m200!=null?`${money(m50)} vs ${money(m200)}`:'—',stack,'The larger trend stack should remain healthy.');
+      add('RISING','Regression Trend',reg.slope==null?'—':(regUp?'Rising':'Falling'),regUp,'A deep pullback is only useful if the larger path is still healthy.');
+      add('14%+ BELOW HIGH','52W Pullback',offHi==null?'—':pctFmt(offHi),offHi!=null&&offHi<=-14,'The family requires a meaningful reset from the 52-week high.');
+      add('35–60','RSI',rsi==null?'—':rsi.toFixed(1),rsi!=null&&rsi>=35&&rsi<=60,'Preferred pullback momentum range.');
+      addCtx();
+    }else if(fam==='MOMENTUM'){
+      add('ABOVE','Price vs EMA20',p!=null&&e20!=null?`${money(p)} vs ${money(e20)}`:'—',p!=null&&e20!=null&&p>e20,'Momentum trades should remain above the short-term trend.');
+      add('20 > 50 > 200','Trend Stack',e20!=null&&m50!=null&&m200!=null?`${money(e20)} / ${money(m50)} / ${money(m200)}`:'—',e20!=null&&m50!=null&&m200!=null&&e20>m50&&m50>m200,'Short-, medium- and long-term trends should be aligned.');
+      add('55–75','RSI',rsi==null?'—':rsi.toFixed(1),rsi!=null&&rsi>=55&&rsi<=75,'Strong momentum without extreme overheating.');
+      add('+5%+','20-Day Change',ch20==null?'—':pctFmt(ch20),ch20!=null&&ch20>=5,'Momentum should be meaningfully positive.');
+      add('0.8×+','Relative Volume',rv==null?'—':`${rv.toFixed(2)}×`,rv!=null&&rv>=0.8,'Participation should be adequate.');
+      addCtx();
+    }else if(fam==='SMA50_RECLAIM'){
+      add('ABOVE','Price vs SMA200',p!=null&&m200!=null?`${money(p)} vs ${money(m200)}`:'—',longTrend,'Long-term trend should remain intact.');
+      add('RISING','Regression Trend',reg.slope==null?'—':(regUp?'Rising':'Falling'),regUp,'The larger path should still be rising.');
+      add('35–65','RSI',rsi==null?'—':rsi.toFixed(1),rsi!=null&&rsi>=35&&rsi<=65,'Preferred reclaim momentum range.');
+      add('FRESH CROSS','SMA50 Reclaim',p==null||m50==null?'—':`${money(p)} vs ${money(m50)}`,crossUp(s,'price','ma50'),'The actual entry trigger is a fresh reclaim of the 50-day average.');
+      addCtx();
+    }else if(fam==='EMA20_RECLAIM'){
+      add('ABOVE','Price vs SMA200',p!=null&&m200!=null?`${money(p)} vs ${money(m200)}`:'—',longTrend,'Long-term trend should remain intact.');
+      add('RISING','Regression Trend',reg.slope==null?'—':(regUp?'Rising':'Falling'),regUp,'The larger path should still be rising.');
+      add('35–60','RSI',rsi==null?'—':rsi.toFixed(1),rsi!=null&&rsi>=35&&rsi<=60,'Preferred reclaim momentum range.');
+      add('FRESH CROSS','EMA20 Reclaim',p==null||e20==null?'—':`${money(p)} vs ${money(e20)}`,crossUp(s,'price','ma20'),'The actual entry trigger is a fresh reclaim of the 20-day average.');
+      addCtx();
+    }else if(fam==='BREAKOUT'){
+      const ph=priorHighN(s,20);
+      add('ABOVE','Price vs EMA20',p!=null&&e20!=null?`${money(p)} vs ${money(e20)}`:'—',p!=null&&e20!=null&&p>e20,'Breakouts should remain above the short-term trend.');
+      add('20 > 50 > 200','Trend Stack',e20!=null&&m50!=null&&m200!=null?`${money(e20)} / ${money(m50)} / ${money(m200)}`:'—',e20!=null&&m50!=null&&m200!=null&&e20>m50&&m50>m200,'The trend stack should be aligned.');
+      add('NEW 20D HIGH','Breakout Trigger',p==null||ph==null?'—':`${money(p)} vs ${money(ph)}`,p!=null&&ph!=null&&p>ph,'Price must clear the prior 20-day high.');
+      add('55–75','RSI',rsi==null?'—':rsi.toFixed(1),rsi!=null&&rsi>=55&&rsi<=75,'Strong but not excessively overheated momentum.');
+      add('0.9×+','Relative Volume',rv==null?'—':`${rv.toFixed(2)}×`,rv!=null&&rv>=0.9,'Breakout participation should be adequate.');
+      addCtx();
+    }
+  }
   return tiles;
 }
 function sweetSpotSummary(s){
@@ -9078,31 +9127,156 @@ function sweetSpotSummary(s){
 }
 function sweetSpotPanel(s,pb){
   const tiles=sweetSpotTiles(s,pb);
+  const measured=tiles.filter(t=>t.ok!==null), matched=measured.filter(t=>t.ok).length;
+  const owned=!!s.position;
   const statusPill=(ok)=> ok===null
-    ? `<span style="display:inline-flex;align-items:center;justify-content:center;padding:5px 10px;border-radius:999px;background:${C.cardHigh};border:1px solid ${C.border};color:${C.textSub};font-size:11px;font-weight:900;min-width:54px;">INFO</span>`
-    : `<span style="display:inline-flex;align-items:center;justify-content:center;padding:5px 10px;border-radius:999px;background:${ok?C.greenDim:C.redDim};border:1px solid ${ok?C.green+'66':C.red+'66'};color:${ok?C.green:C.red};font-size:13px;font-weight:900;min-width:54px;">${ok?'✓':'✕'}</span>`;
-  const rowHTML=(t,i)=>`<div style="display:grid;grid-template-columns:minmax(138px,1.25fr) minmax(110px,.95fr) minmax(110px,.95fr) 64px;gap:12px;align-items:center;padding:12px 14px;background:${i%2===0?'rgba(255,255,255,.02)':C.cardHigh};border:${i===0?'1px solid '+C.border:'1px solid transparent'};border-top:${i===0?'1px solid '+C.border:'1px solid '+C.border};border-radius:${i===0?'12px 12px 0 0':i===tiles.length-1?'0 0 12px 12px':'0'};">`
-    + `<div><div style="color:${C.text};font-size:13px;font-weight:900;line-height:1.2;">${t.label}</div><div style="color:${C.textSub};font-size:11.5px;line-height:1.45;margin-top:4px;">${t.desc}</div></div>`
-    + `<div><div style="color:#8FD3FF;font-size:10.5px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;">Sweet Spot</div><div style="color:${C.text};font-size:15px;font-weight:950;line-height:1.15;">${t.sweet}</div></div>`
-    + `<div><div style="color:#F8C66C;font-size:10.5px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;">Today</div><div style="color:${C.text};font-size:15px;font-weight:900;line-height:1.15;">${t.today}</div></div>`
+    ? `<span style="display:inline-flex;align-items:center;justify-content:center;padding:5px 9px;border-radius:999px;background:${C.cardHigh};border:1px solid ${C.border};color:${C.textSub};font-size:10.5px;font-weight:900;min-width:82px;">INFO</span>`
+    : `<span style="display:inline-flex;align-items:center;justify-content:center;padding:5px 9px;border-radius:999px;background:${ok?C.greenDim:C.redDim};border:1px solid ${ok?C.green+'66':C.red+'66'};color:${ok?C.green:C.red};font-size:10.5px;font-weight:950;min-width:82px;">${ok?'✓ MATCH':'✕ OUTSIDE'}</span>`;
+  if(!tiles.length){
+    return panel('Today vs Historical Winning Conditions',
+      `<div style="padding:12px;border-radius:12px;background:${C.cardHigh};border:1px solid ${C.border};color:${C.textSub};font-size:12.5px;line-height:1.6;"><b style="color:${C.text};">No validated ticker-specific entry-condition table is available for this playbook yet.</b><br>StockIQ will not invent a sweet spot just to fill the card. The live BUY/PREPARING engine still uses the validated playbook requirements.</div>`);
+  }
+  const rowHTML=(t,i)=>`<div style="display:grid;grid-template-columns:minmax(138px,1.25fr) minmax(110px,.95fr) minmax(110px,.95fr) 92px;gap:12px;align-items:center;padding:12px 14px;background:${i%2===0?'rgba(255,255,255,.02)':C.cardHigh};border-top:1px solid ${C.border};${i===tiles.length-1?'border-bottom:1px solid '+C.border+';':''}">`
+    + `<div><div style="color:${C.text};font-size:13px;font-weight:900;line-height:1.2;">${t.label}</div><div style="color:${C.textSub};font-size:11.3px;line-height:1.42;margin-top:4px;">${t.desc}</div></div>`
+    + `<div><div style="color:#8FD3FF;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;">Historical / Playbook</div><div style="color:${C.text};font-size:14px;font-weight:950;line-height:1.15;">${t.sweet}</div></div>`
+    + `<div><div style="color:#F8C66C;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;">Today</div><div style="color:${C.text};font-size:14px;font-weight:900;line-height:1.15;">${t.today}</div></div>`
     + `<div style="display:flex;justify-content:flex-end;">${statusPill(t.ok)}</div></div>`;
-  return panel('Backtest Sweet Spot',
-    `<div style="background:linear-gradient(180deg, rgba(143,211,255,.12), rgba(248,198,108,.06));border:1px solid rgba(143,211,255,.18);border-radius:14px;padding:12px 14px;margin-bottom:12px;"><div style="color:${C.text};font-size:13px;font-weight:800;line-height:1.5;">${sweetSpotSummary(s)}</div></div>`+
-    `<div style="overflow-x:auto;"><div style="min-width:620px;"><div style="display:grid;grid-template-columns:minmax(138px,1.25fr) minmax(110px,.95fr) minmax(110px,.95fr) 64px;gap:12px;padding:0 14px 8px;color:${C.textSub};font-size:10.5px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;"><div>Indicator</div><div>Backtest</div><div>Today</div><div style="text-align:right;">Fit</div></div>${tiles.map(rowHTML).join('')}</div></div>`
+  const context=owned
+    ? `You already own this stock. This section compares <b style="color:${C.text};">today</b> with the conditions around the original entry playbook; it is <b style="color:${C.text};">not</b> a new entry or exit command.`
+    : `This compares today with the conditions that historically supported this playbook. A perfect match is <b style="color:${C.text};">not required</b> unless the condition is also a live setup requirement.`;
+  return panel('Today vs Historical Winning Conditions',
+    `<div style="background:linear-gradient(180deg, rgba(143,211,255,.12), rgba(248,198,108,.06));border:1px solid rgba(143,211,255,.18);border-radius:14px;padding:12px 14px;margin-bottom:10px;"><div style="color:${C.text};font-size:13px;font-weight:850;line-height:1.5;">${sweetSpotSummary(s)}</div><div style="color:${C.textSub};font-size:11.5px;line-height:1.5;margin-top:6px;">${context}</div></div>`+
+    `<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;padding:0 2px 9px;"><div style="color:${C.textMuted};font-size:10.5px;font-weight:850;">CURRENT COMPARISON</div><div style="color:${matched===measured.length&&measured.length?C.green:C.textSub};font-size:11px;font-weight:900;">${matched} of ${measured.length} measurable conditions match today</div></div>`+
+    `<div style="overflow-x:auto;border-radius:12px;"><div style="min-width:660px;"><div style="display:grid;grid-template-columns:minmax(138px,1.25fr) minmax(110px,.95fr) minmax(110px,.95fr) 92px;gap:12px;padding:0 14px 8px;color:${C.textSub};font-size:10.5px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;"><div>Indicator</div><div>Backtest</div><div>Today</div><div style="text-align:right;">Match</div></div>${tiles.map(rowHTML).join('')}</div></div>`
   );
 }
+// ── Plain-English setup education (v2.9.43) ───────────────────────────────
+function setupFamilyEducation(pb){
+  const fam=String(pb?.family||pb?.name||'').toUpperCase();
+  if(fam.includes('REG_PULLBACK')||fam.includes('REGRESSION')) return {
+    title:'Regression Pullback',
+    what:'A strong stock has pulled back below its normal trend path without breaking the bigger uptrend.',
+    looking:'We want price in a historically favorable RegZ area, healthy long-term structure, and signs the pullback is stabilizing rather than collapsing.',
+    simple:'Think: a good stock temporarily on sale inside an intact trend.'
+  };
+  if(fam.includes('MOMENTUM')) return {
+    title:'Momentum Continuation',
+    what:'The stock is already moving strongly and we are trying to join that strength before it becomes overextended.',
+    looking:'We want a healthy uptrend, strong but not overheated momentum, and enough room for the move to continue. StockIQ blocks obvious chase entries.',
+    simple:'Think: strength that still has room to run.'
+  };
+  if(fam.includes('DEEP_PULLBACK')) return {
+    title:'Deep Pullback',
+    what:'The stock has fallen much farther than a normal dip, but the larger trend or recovery structure is still good enough to support a rebound.',
+    looking:'We want a meaningful reset, evidence the selloff is losing control, and enough historical upside to justify the extra volatility.',
+    simple:'Think: a harder reset with bigger rebound potential — and bigger risk.'
+  };
+  if(fam.includes('SMA50')||fam.includes('50-DAY')||fam.includes('50 DAY')) return {
+    title:'SMA50 Reclaim',
+    what:'Price fell to or below the 50-day average and then reclaimed it, suggesting buyers are taking control again.',
+    looking:'We want the long-term trend intact and the reclaim to look real — not a one-day bounce that immediately fails.',
+    simple:'Think: the stock lost an important support line, then won it back.'
+  };
+  if(fam.includes('EMA20')||fam.includes('20-DAY')||fam.includes('20 DAY')) return {
+    title:'EMA20 Reclaim',
+    what:'Price dipped below the faster 20-day trend line and then moved back above it, signaling a possible short-term reset and continuation.',
+    looking:'We want the larger trend healthy and the reclaim confirmed without the stock already being stretched.',
+    simple:'Think: a shorter, faster pullback that starts moving again.'
+  };
+  if(fam.includes('BREAKOUT')) return {
+    title:'Breakout / Trend Expansion',
+    what:'The stock pushes above a recent resistance area and begins a new leg higher.',
+    looking:'We want a real breakout with trend strength and participation, but we do not want to chase a move that has already run too far.',
+    simple:'Think: price breaks through a ceiling and proves buyers are in control.'
+  };
+  return {title:pb?.name||'Validated Setup',what:'This ticker has a StockIQ playbook built from historical behavior.',looking:'StockIQ waits for the specific conditions that made this setup historically useful.',simple:'The ticker must earn the trade — being on the watch universe is not enough.'};
+}
+function exitEducationFor(pb){
+  const fam=String(pb?.family||pb?.name||'').toUpperCase();
+  if(fam.includes('MOMENTUM')||fam.includes('DEEP_PULLBACK')||fam.includes('SMA50')||fam.includes('50-DAY')||fam.includes('50 DAY')||fam.includes('BREAKOUT')) return {
+    title:'Runner',
+    text:'These setup families historically kept producing meaningful upside after reaching about +6%. If the trade reaches that checkpoint, StockIQ protects the gain with the validated 3× ATR trailing stop and gives the winner room to keep running.'
+  };
+  if(fam.includes('EMA20')||fam.includes('20-DAY')||fam.includes('20 DAY')) return {
+    title:'Quicker Harvest',
+    text:'EMA20 reclaim trades tended to give back more of their gains after the +6% area. StockIQ therefore protects them more aggressively with the validated 2.5× ATR trail and is quicker to rotate if momentum stalls.'
+  };
+  return {
+    title:'Balanced',
+    text:'Regression-style trades often have additional upside after +6%, but not as consistently as the Runner families. StockIQ uses the validated 2.5× ATR trail and treats +6% as a decision checkpoint — not an automatic sell.'
+  };
+}
+function setupEducationPanel(s,pb){
+  const e=setupFamilyEducation(pb), x=exitEducationFor(pb);
+  return panel('How This Setup Works',
+    `<div style="background:${C.cardHigh};border:1px solid ${C.border};border-radius:12px;padding:12px 13px;margin-bottom:9px;">`+
+      `<div style="color:#8FD3FF;font-size:10.5px;font-weight:900;text-transform:uppercase;letter-spacing:.07em;margin-bottom:4px;">Setup Type</div>`+
+      `<div style="color:${C.text};font-size:15px;font-weight:950;">${e.title}</div>`+
+      `<div style="color:${C.textSub};font-size:12.5px;line-height:1.6;margin-top:7px;">${e.what}</div>`+
+      `<div style="color:${C.text};font-size:12px;font-weight:850;margin-top:8px;">What StockIQ is looking for</div>`+
+      `<div style="color:${C.textSub};font-size:12px;line-height:1.55;margin-top:3px;">${e.looking}</div>`+
+      `<div style="color:#F8C66C;font-size:11.5px;line-height:1.5;margin-top:8px;font-weight:800;">${e.simple}</div>`+
+    `</div>`+
+    `<div style="background:${C.cardHigh};border:1px solid ${C.border};border-radius:12px;padding:12px 13px;">`+
+      `<div style="color:${C.purple};font-size:10.5px;font-weight:900;text-transform:uppercase;letter-spacing:.07em;margin-bottom:4px;">Winner Management</div>`+
+      `<div style="color:${C.text};font-size:14px;font-weight:950;">${x.title}</div>`+
+      `<div style="color:${C.textSub};font-size:12.5px;line-height:1.6;margin-top:6px;">${x.text}</div>`+
+      `<div style="color:${C.textMuted};font-size:11px;line-height:1.45;margin-top:7px;">Runner, Balanced and Quicker Harvest describe how StockIQ manages a winning trade. They are not separate entry signals.</div>`+
+    `</div>`
+  );
+}
+
 function earningsPanel(s,pb){
-  const e=earningsState(s), verified=e?.verified, rx=e?.reaction;
+  const e=earningsState(s), verified=e?.verified, rx=e?.reaction, owned=!!s.position;
+  const rule=e?.rule||pb?.earnings||'WAIT FOR REACTION';
+  const days=e?.days;
+  const rxActive=!!(rx && rx.daysSince!=null && rx.daysSince>=0 && rx.daysSince<=2);
   let status='Date unavailable', statusColor=C.textSub;
-  if(rx && rx.eventDate===latestMarketDateStr(s)){ status='EARNINGS REPORTED TODAY · REACTION BAR LOADED'; statusColor=C.yellow; }
-  else if(rx && rx.daysSince<=2){ status=`POST-EARNINGS DAY ${rx.daysSince} · ${rx.score}/3 CONFIRMED`; statusColor=rx.pass?C.green:C.yellow; }
-  else if(!verified && !rx){ status='⚠ EARNINGS NOT VERIFIED'; statusColor=C.red; }
-  else if(e?.days===0){ status='EARNINGS TODAY · WAIT FOR REACTION BAR'; statusColor=C.yellow; }
-  else if(e?.days!=null && e.days>0){ status=`${e.days} day${e.days===1?'':'s'} until earnings`; }
-  else if(e?.days!=null && e.days<0){ status=`Last listed earnings date was ${Math.abs(e.days)} day${Math.abs(e.days)===1?'':'s'} ago`; }
-  const eventDate=rx?.eventDate || s.lastEarningsDate || s.earningsDate || '';
-  const reactionBlock=e?.rule==='WAIT FOR REACTION' ? `<div style="margin-top:12px;padding-top:10px;border-top:1px solid ${C.border};"><div style="display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:8px;"><div style="color:${C.text};font-size:12.5px;font-weight:900;">Post-Earnings Plan</div><div style="color:${rx?.pass?C.green:C.yellow};font-size:12px;font-weight:950;">${rx?`${rx.score}/3 confirmed`:'Waiting for reaction data'}</div></div><div style="color:${C.textSub};font-size:12px;line-height:1.55;margin-bottom:9px;">We require at least <b style="color:${C.text};">2 of 3</b> to improve versus the prior completed daily bar. If 2/3 improve <b>and</b> the normal setup requirements still pass, StockIQ can allow an entry for the next session. If fewer than 2 improve, stay PREPARING and recheck after the next daily close.</div>${checklistHTML(rx?.items||[{label:'Regression improving',ok:false,teach:'Needs a completed post-earnings daily bar.'},{label:'RSI improving',ok:false,teach:'Needs a completed post-earnings daily bar.'},{label:'MACD improving',ok:false,teach:'Needs a completed post-earnings daily bar.'}])}<div style="margin-top:9px;padding:9px 10px;border-radius:9px;background:${rx?.pass?C.greenDim:C.cardHigh};border:1px solid ${rx?.pass?C.green+'55':C.border};color:${rx?.pass?C.green:C.textSub};font-size:12px;font-weight:800;line-height:1.45;">${rx?(rx.pass?'PLAN: Reaction confirmed. Re-run the normal BUY requirements; if they all pass, entry is allowed for the next session.':'PLAN: Do not buy yet. Keep it PREPARING and recheck after the next completed daily bar.'):'PLAN: Wait for the first completed post-earnings daily bar.'}</div></div>` : '';
-  return panel('Earnings',`<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;"><div><div style="color:${C.text};font-size:14px;font-weight:900;">${e?.rule||'No rule'}</div><div style="color:${statusColor};font-size:12.5px;margin-top:4px;font-weight:850;">${status}</div>${s.earningsSource?`<div style="color:${C.textMuted};font-size:10.5px;margin-top:3px;">Source: ${s.earningsSource}${s.earningsTime?` · ${s.earningsTime}`:''}</div>`:''}</div>${eventDate?`<div style="color:${C.text};font-size:12px;font-weight:800;text-align:right;"><div>${fmtEarnDate(eventDate)}</div><div style="color:${C.textMuted};font-size:10px;margin-top:2px;">${rx||s.lastEarningsDate?'reported earnings':'next earnings'}</div></div>`:''}</div>${!verified&&!rx&&e?.rule!=='HOLD THROUGH'?`<div style="margin-top:12px;padding:10px;border-radius:10px;background:${C.red}16;border:1px solid ${C.red}44;color:#F5A3A3;font-size:12px;line-height:1.5;">BUY is blocked until earnings are verified. Tap the earnings date control to enter it manually if the daily exporter cannot verify it.</div>`:''}${reactionBlock}`);
+  if(rxActive){ status=`Post-earnings day ${rx.daysSince} · reaction check`; statusColor=rx.pass?C.green:C.yellow; }
+  else if(!verified){ status='⚠ EARNINGS NOT VERIFIED'; statusColor=C.red; }
+  else if(days===0){ status='EARNINGS TODAY'; statusColor=C.yellow; }
+  else if(days!=null && days>0){ status=`${days} day${days===1?'':'s'} until earnings`; }
+  else if(days!=null && days<0){ status=`Last listed earnings date was ${Math.abs(days)} day${Math.abs(days)===1?'':'s'} ago`; }
+
+  const nextDate=s.earningsDate||'';
+  const lastDate=s.lastEarningsDate||rx?.eventDate||'';
+  const dateBlock = nextDate
+    ? `<div style="color:${C.text};font-size:12px;font-weight:800;text-align:right;"><div>${fmtEarnDate(nextDate)}</div><div style="color:${C.textMuted};font-size:10px;margin-top:2px;">next earnings</div>${lastDate?`<div style="color:${C.textMuted};font-size:10px;margin-top:5px;">Last: ${fmtEarnDate(lastDate)}</div>`:''}</div>`
+    : (lastDate?`<div style="color:${C.text};font-size:12px;font-weight:800;text-align:right;"><div>${fmtEarnDate(lastDate)}</div><div style="color:${C.textMuted};font-size:10px;margin-top:2px;">last reported earnings</div></div>`:'');
+
+  let body='';
+  if(owned){
+    let action='Continue managing this position with its normal StockIQ stop and exit rules.';
+    let explain='You already own this stock, so entry restrictions and the post-earnings 2-of-3 entry check do not apply to this position.';
+    if(rule==='EXIT BEFORE EARNINGS'){
+      action=days!=null&&days>=0 ? `This playbook calls for exiting before earnings. Earnings are ${days===0?'today':`in ${days} day${days===1?'':'s'}`}; manage the exit before the report rather than opening new risk into the event.` : 'This playbook calls for exiting before the next earnings report.';
+      explain='This is a position-management rule, not an entry check.';
+    }else if(rule==='HOLD THROUGH'){
+      action='This playbook historically allows the position to be held through earnings, while the normal stop and risk rules remain active.';
+      explain='Holding through is part of this playbook; it is not a guarantee that the earnings reaction will be favorable.';
+    }else{
+      action='For an existing position, WAIT FOR REACTION is an entry rule only. Keep managing the trade with its normal stop/exit plan. As earnings approaches, StockIQ flags the event risk but does not invent a separate exit rule that was not validated.';
+    }
+    body=`<div style="margin-top:12px;padding:11px 12px;border-radius:11px;background:${C.cardHigh};border:1px solid ${C.border};"><div class="v2lbl">Position Management</div><div style="color:${C.text};font-size:12.5px;font-weight:850;line-height:1.55;margin-top:5px;">${action}</div><div style="color:${C.textSub};font-size:11.5px;line-height:1.5;margin-top:7px;">${explain}</div></div>`;
+  }else if(rule==='WAIT FOR REACTION'){
+    if(rxActive){
+      const items=rx?.items||[];
+      const readable=items.map((it,i)=>{
+        const names=['Regression / price structure','RSI momentum','MACD momentum'];
+        const label=names[i]||it.label||`Reaction check ${i+1}`;
+        return `<div style="display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-top:${i?'1px solid '+C.border:'none'};"><div><div style="color:${C.text};font-size:12px;font-weight:850;">${label}</div><div style="color:${C.textSub};font-size:10.8px;line-height:1.4;margin-top:2px;">${it.teach||'Compared with the completed daily bar before the earnings reaction.'}</div></div><div style="color:${it.ok?C.green:C.red};font-size:12px;font-weight:950;white-space:nowrap;">${it.ok?'✓ IMPROVED':'✕ NOT YET'}</div></div>`;
+      }).join('');
+      body=`<div style="margin-top:12px;padding-top:10px;border-top:1px solid ${C.border};"><div style="display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:7px;"><div style="color:${C.text};font-size:12.5px;font-weight:900;">Post-Earnings Entry Check</div><div style="color:${rx.pass?C.green:C.yellow};font-size:12px;font-weight:950;">${rx.score} of 3 improved</div></div><div style="color:${C.textSub};font-size:11.8px;line-height:1.5;margin-bottom:7px;">For a <b style="color:${C.text};">new entry only</b>, at least 2 of these 3 completed-bar checks must improve after earnings. The normal setup requirements must still pass too.</div>${readable}<div style="margin-top:9px;padding:9px 10px;border-radius:9px;background:${rx.pass?C.greenDim:C.cardHigh};border:1px solid ${rx.pass?C.green+'55':C.border};color:${rx.pass?C.green:C.textSub};font-size:12px;font-weight:800;line-height:1.45;">${rx.pass?'PLAN: Earnings reaction is confirmed. Re-run the normal setup; if it still passes, a next-session entry can be considered.':'PLAN: No new entry yet. Recheck after the next completed daily bar.'}</div></div>`;
+    }else if(days!=null && days>=0){
+      body=`<div style="margin-top:12px;padding:11px 12px;border-radius:11px;background:${C.cardHigh};border:1px solid ${C.border};"><div class="v2lbl">What This Means</div><div style="color:${C.text};font-size:12.5px;font-weight:850;line-height:1.55;margin-top:5px;">This playbook will not use a post-earnings reaction check until earnings actually happens.</div><div style="color:${C.textSub};font-size:11.5px;line-height:1.5;margin-top:7px;">After the report, StockIQ will compare the first completed reaction bar with the prior completed bar. At least 2 of 3 reaction checks must improve before a new entry can be considered.</div></div>`;
+    }
+  }
+
+  const verifyBlock=!verified && !owned && rule!=='HOLD THROUGH'
+    ? `<div style="margin-top:12px;padding:10px;border-radius:10px;background:${C.red}16;border:1px solid ${C.red}44;color:#F5A3A3;font-size:12px;line-height:1.5;">BUY is blocked until earnings are verified. Enter the date manually if the daily exporter cannot verify it.</div>`:'';
+
+  const ruleLabel=owned ? (rule==='WAIT FOR REACTION'?'WAIT FOR REACTION · ENTRY RULE':rule) : rule;
+  return panel('Earnings',`<div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;"><div><div style="color:${C.text};font-size:14px;font-weight:900;">${ruleLabel}</div><div style="color:${statusColor};font-size:12.5px;margin-top:4px;font-weight:850;">${status}</div>${s.earningsSource?`<div style="color:${C.textMuted};font-size:10.5px;margin-top:3px;">Source: ${s.earningsSource}${s.earningsTime?` · ${s.earningsTime}`:''}</div>`:''}</div>${dateBlock}</div>${verifyBlock}${body}`);
 }
 function indicatorPanel(s,pb){ const r=regressionStats(s),rv=relativeVolume(s),h=macdHist(s),atr=curVal(s,'atr'),price=curVal(s,'price'),atrp=atr&&price?atr/price*100:null; const rows=[['EMA20',curVal(s,'ma20','ema20')!=null?money(curVal(s,'ma20','ema20')):'—','Short-term trend'],['SMA50',curVal(s,'ma50')!=null?money(curVal(s,'ma50')):'—','Medium-term trend'],['SMA200',curVal(s,'ma200')!=null?money(curVal(s,'ma200')):'—','Long-term trend'],['RSI',curVal(s,'rsi')!=null?curVal(s,'rsi').toFixed(1):'—','Momentum'],['MACD Hist',h!=null?h.toFixed(2):'—','Momentum direction'],['ATR%',atrp!=null?atrp.toFixed(1)+'%':'—','Typical daily movement'],['Rel Volume',rv!=null?rv.toFixed(2)+'×':'—','Participation'],['Reg Z',r.z!=null?r.z.toFixed(2):'—','Position vs normal trend']]; return panel('Indicators / Learn Why',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">${rows.map(([a,b,c])=>`<div style="background:${C.cardHigh};border-radius:10px;padding:10px;"><div class="v2lbl">${a}</div><div style="color:${C.text};font-size:13px;font-weight:900;">${b}</div><div style="color:${C.textSub};font-size:11.5px;line-height:1.45;margin-top:4px;">${c}</div></div>`).join('')}</div>`); }
 function marketPanel(s,pb){ const t=marketTailwind(s); return panel('Market & Sector',`<div style="display:flex;justify-content:space-between;align-items:center;"><div><div style="color:${t.ok?C.green:C.text};font-size:14px;font-weight:900;">Tailwind: ${t.label}</div><div style="color:${C.textSub};font-size:12.5px;margin-top:4px;line-height:1.5;">${t.text}</div></div><div style="color:${C.textSub};font-size:11px;font-weight:800;">${pb.market||'—'}</div></div>`); }
@@ -9110,16 +9284,55 @@ function entryPanel(s,pb,st){ const sig=curVal(s,'price'),max=buyUpTo(s); return
 function riskPanel(s,pb){ if(s.position){ const st=suggestedStop(s),p=curVal(s,'price'),dist=p&&st.price?((p/st.price)-1)*100:null, risk=plannedRisk(s); return panel('Risk Plan',`<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;"><div><div class="v2lbl">Entry</div><div class="v2val">${money(s.position.entry)}</div></div><div><div class="v2lbl">${st.type}</div><div class="v2val" style="color:${st.active?C.purple:C.red};">${money(st.price)}</div></div><div><div class="v2lbl">Distance</div><div class="v2val">${dist==null?'—':dist.toFixed(1)+'%'}</div></div></div><div style="color:${C.textSub};font-size:12.5px;line-height:1.55;margin-top:10px;">Planned risk: ${risk==null?'—':fmtP(risk)}. ${st.why}</div>`);} return panel('Risk Plan',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;"><div><div class="v2lbl">Emergency Stop</div><div class="v2big">-${pb.stopPct}%</div></div><div><div class="v2lbl">Normal Hold</div><div class="v2big">${pb.hold} days</div></div></div><div style="color:${C.textSub};font-size:12.5px;line-height:1.55;margin-top:10px;">The exact stop is calculated from your actual purchase price. Want less risk? Buy fewer shares—don’t squeeze the stop.</div>`); }
 function exitPersonalityPanel(s,pb,st){
   if(!s.position) return '';
-  const ep=exitPersonality(s), gain=st?.gainPct, atCheckpoint=gain!=null&&gain>=PROFIT_CHECKPOINT_PCT;
+  const ep=exitPersonality(s), setup=setupFamilyEducation(pb), gain=st?.gainPct, atCheckpoint=gain!=null&&gain>=PROFIT_CHECKPOINT_PCT;
   const color=ep.key==='RUNNER'?C.purple:(ep.key==='QUICKER'?C.yellow:C.teal);
-  return panel('Exit Personality',`<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;"><div><div style="color:${color};font-size:14px;font-weight:950;">${ep.label.toUpperCase()}</div><div style="color:${C.textSub};font-size:11px;margin-top:3px;">${ep.families}</div></div><div style="color:${atCheckpoint?C.green:C.textMuted};font-size:11px;font-weight:850;">${atCheckpoint?'6% checkpoint reached':'Checkpoint at +6%'}</div></div><div style="color:${C.textSub};font-size:12.5px;line-height:1.6;margin-top:10px;">${ep.note}</div><div style="color:${C.textMuted};font-size:11px;line-height:1.5;margin-top:8px;">Trail choice was validated with the full 6-year bar-by-bar replay. It is not a fixed profit target and does not change the entry rules.</div>`);
+  const high=highestSinceEntry(s), atr=curVal(s,'atr'), stop=suggestedStop(s), mult=stop?.atrMult||profitTrailATRMultiplier(s);
+  let behavior='', next='';
+  if(ep.key==='RUNNER'){
+    behavior='Historically, winners in this setup often kept producing meaningful upside after reaching +6%, so +6% is a protection checkpoint — not an automatic sell.';
+    next=atCheckpoint
+      ? `Use the ${mult.toFixed(1)}× ATR trailing stop shown below. Let the stock run while price stays above that stop. The stop may ratchet higher, but never lower.`
+      : `Keep the original emergency stop until the trade reaches +6%. At that checkpoint, StockIQ switches to the validated ${mult.toFixed(1)}× ATR runner trail.`;
+  }else if(ep.key==='QUICKER'){
+    behavior='Historically, this setup was more likely to give back gains after the +6% area than the Runner families.';
+    next=atCheckpoint
+      ? `Use the ${mult.toFixed(1)}× ATR profit trail and protect the gain more aggressively. If momentum stalls and a stronger validated setup is ready, rotation becomes reasonable.`
+      : `Keep the original emergency stop until +6%. At that checkpoint, StockIQ switches to the ${mult.toFixed(1)}× ATR profit trail.`;
+  }else{
+    behavior='Historically, this setup often had more upside after +6%, but continuation was less consistent than the Runner families.';
+    next=atCheckpoint
+      ? `Use the ${mult.toFixed(1)}× ATR profit trail. Keep healthy strength, but treat this as a real capital-allocation decision if momentum weakens or a clearly better setup is waiting.`
+      : `Keep the original emergency stop until +6%. At that checkpoint, StockIQ switches to the ${mult.toFixed(1)}× ATR balanced trail.`;
+  }
+  return panel('Exit Personality',
+    `<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">`+
+      `<div><div style="color:${color};font-size:14px;font-weight:950;">${ep.label.toUpperCase()}</div>`+
+      `<div style="color:${C.textSub};font-size:11px;margin-top:3px;">Entry playbook: <b style="color:${C.text};">${setup.title}</b></div></div>`+
+      `<div style="color:${atCheckpoint?C.green:C.textMuted};font-size:11px;font-weight:850;text-align:right;">${atCheckpoint?'6% checkpoint reached':'Checkpoint at +6%'}</div>`+
+    `<div style="color:${C.textMuted};font-size:10.5px;line-height:1.4;margin-top:4px;">The entry playbook describes how this trade was found; the chart does not need to still look like the original entry setup after you are already in the position.</div></div>`+
+    `<div style="margin-top:11px;padding-top:10px;border-top:1px solid ${C.border};">`+
+      `<div class="v2lbl">Backtest behavior</div>`+
+      `<div style="color:${C.textSub};font-size:12.5px;line-height:1.6;margin-top:5px;">${behavior}</div>`+
+    `</div>`+
+    `<div style="margin-top:10px;">`+
+      `<div class="v2lbl">Next step</div>`+
+      `<div style="color:${C.text};font-size:12.5px;line-height:1.6;margin-top:5px;font-weight:750;">${next}</div>`+
+    `</div>`+
+    (atCheckpoint?`<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:11px;">`+
+      `<div style="background:${C.cardHigh};border:1px solid ${C.border};border-radius:10px;padding:9px 10px;"><div class="v2lbl">Highest Since Entry</div><div class="v2val">${money(high)}</div></div>`+
+      `<div style="background:${C.cardHigh};border:1px solid ${C.border};border-radius:10px;padding:9px 10px;"><div class="v2lbl">Current ATR</div><div class="v2val">${money(atr)}</div></div>`+
+      `<div style="background:${C.cardHigh};border:1px solid ${C.border};border-radius:10px;padding:9px 10px;"><div class="v2lbl">${mult.toFixed(1)}× ATR Trail</div><div class="v2val" style="color:${color};">${money(stop?.price)}</div></div>`+
+      `<div style="background:${C.cardHigh};border:1px solid ${C.border};border-radius:10px;padding:9px 10px;"><div class="v2lbl">Current Gain</div><div class="v2val" style="color:${gain>=0?C.green:C.red};">${gain==null?'—':pctFmt(gain)}</div></div>`+
+    `</div>`:'')+
+    `<div style="color:${C.textMuted};font-size:11px;line-height:1.5;margin-top:9px;">No fixed target now — once the checkpoint is reached, the trailing stop becomes the decision. Trail choice was validated with the full 6-year bar-by-bar replay.</div>`
+  );
 }
 function positionTop(s,pb,st){ const p=curVal(s,'price'),pl=s.position?.entry&&p?((p/s.position.entry)-1)*100:null; return `<div style="padding:16px 16px 10px;"><div style="display:flex;justify-content:space-between;align-items:flex-start;"><div><button onclick="showScreen('home')" style="background:none;border:none;color:${C.textSub};padding:0 0 9px;cursor:pointer;">← Back</button><div style="display:flex;gap:9px;align-items:center;"><span style="color:${C.text};font-size:24px;font-weight:950;">${s.ticker}</span>${badge(st.state)}</div><div style="color:${C.text};font-size:13px;font-weight:700;margin-top:5px;">${companyNameFor(s)}</div><div style="color:${C.textSub};font-size:13px;margin-top:3px;">${pb.name}${isBenchStock(s)?` · <span style="color:${C.teal};font-weight:850;">WEEKLY BENCH</span>`:''}</div></div><div style="text-align:right;"><div style="color:${C.text};font-size:20px;font-weight:900;">${money(p)}</div><div style="color:${pl>=0?C.green:C.red};font-size:13px;font-weight:900;">${pl==null?'—':pctFmt(pl)}</div></div></div></div>`; }
 function preTop(s,pb,st){ const canBuy=['BUY','A+ BUY'].includes(st.state); const buyLabel=st.state==='A+ BUY'?'A+ BUY':'BUY'; return `<div style="padding:16px 16px 10px;"><button onclick="showScreen('home')" style="background:none;border:none;color:${C.textSub};padding:0 0 9px;cursor:pointer;">← Back</button><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;"><div style="min-width:0;"><div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;"><span style="color:${C.text};font-size:24px;font-weight:950;">${s.ticker}</span>${badge(st.state)}</div><div style="color:${C.text};font-size:13px;font-weight:700;margin-top:5px;">${companyNameFor(s)}</div><div style="color:${C.textSub};font-size:13px;margin-top:3px;">${pb.name}${isBenchStock(s)?` · <span style="color:${C.teal};font-weight:850;">WEEKLY BENCH</span>`:''}</div></div><div style="text-align:right;flex-shrink:0;"><div style="color:${C.text};font-size:20px;font-weight:900;margin-bottom:${canBuy?'8px':'0'};">${money(curVal(s,'price'))}</div>${canBuy?`<button onclick="showV2BuyFlow('${s.id}','${buyLabel}')" style="border:none;border-radius:10px;background:${C.green};color:#000;font-size:13px;font-weight:950;padding:9px 18px;cursor:pointer;box-shadow:0 0 0 1px ${C.green}33;">${buyLabel}</button>`:''}</div></div></div>`; }
 function renderDetail(s){
   const el=document.getElementById('detail-content'); if(!el)return; const pb=pbFor(s); if(!pb){ const ev=evidenceFor(s), rp=researchPromotionLabel(s); el.innerHTML=`<div style="padding:16px;"><button onclick="showScreen('home')" style="background:none;border:none;color:${C.textSub};padding:0 0 12px;">← Back</button><h2 style="color:${C.text};margin:0;">${s.ticker}</h2>${companyNameFor(s)?`<div style="color:${C.textSub};font-size:13px;margin-top:4px;">${companyNameFor(s)}</div>`:''}<div style="margin-top:12px;color:${rp.color};font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;">${rp.label}${ev?.grade?` · ${ev.grade}`:''}</div>${ev?.family?`<div style="color:${C.text};font-size:13px;font-weight:800;margin-top:8px;">Candidate family: ${ev.family.replaceAll('_',' ')}</div>`:''}<p style="color:${C.textSub};font-size:13px;line-height:1.65;">${ev?.summary||'This ticker can show indicators, but StockIQ will not issue trading signals until it has a validated playbook.'}</p><div style="background:${C.card};border:1px solid ${C.border};border-radius:14px;padding:13px 14px;margin:12px 0;"><div style="color:${C.yellow};font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;margin-bottom:7px;">Promotion gate</div><div style="color:${C.textSub};font-size:12px;line-height:1.6;">Current readiness is not enough. Promotion requires useful trade frequency, positive friction-adjusted expectancy, older/newer or OOS survival, parameter-neighborhood robustness, and tolerable downside. Until that evidence is explicitly approved, this stock stays research-only.</div></div>${indicatorPanel(s,{})}</div>`; return; }
   const st=stockState(s),checks=setupChecks(s),conflict=portfolioConflict(s);
-  let html=s.position?positionTop(s,pb,st):preTop(s,pb,st); html+=topCallout(s,pb,st);
+  let html=s.position?positionTop(s,pb,st):preTop(s,pb,st); html+=topCallout(s,pb,st); html+=setupEducationPanel(s,pb);
   if(s.position){ html+=riskPanel(s,pb); html+=exitPersonalityPanel(s,pb,st); html+=panel('Trade Health',checklistHTML(checks)); html+=earningsPanel(s,pb); html+=regressionPanel(s,pb); if(pb.maxHold>pb.hold)html+=panel('Decision / Runner',`<div style="color:${C.text};font-size:13px;font-weight:800;">Normal hold: ${pb.hold} days · Max runner window: ${pb.maxHold} days</div><div style="color:${C.textSub};font-size:11px;margin-top:6px;">At decision day, StockIQ checks whether this ticker’s proven runner conditions are still healthy.</div>`); html+=high52BehaviorPanel(s); html+=historyPanel(pb); html+=yourTradeProofPanel(s,pb); html+=sweetSpotPanel(s,pb); html+=indicatorPanel(s,pb); html+=marketPanel(s,pb); html+=panel('Manage Position',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;"><button onclick="showV2CloseFlow('${s.id}')" style="padding:11px;border-radius:10px;border:1px solid ${C.red}66;background:${C.redDim};color:${C.red};font-weight:800;cursor:pointer;">Sell</button><button onclick="showV2StopFlow('${s.id}')" style="padding:11px;border-radius:10px;border:1px solid ${C.border};background:${C.cardHigh};color:${C.text};font-weight:800;cursor:pointer;">Update Stop</button></div>`); }
   else { html+=panel('Setup Requirements',checklistHTML(checks)); if(['BUY','A+ BUY'].includes(st.state))html+=entryPanel(s,pb,st); html+=riskPanel(s,pb); html+=regressionPanel(s,pb); html+=earningsPanel(s,pb); html+=marketPanel(s,pb); if(conflict)html+=panel('Portfolio Conflict',`<div style="color:${C.yellow};font-size:12.5px;line-height:1.55;font-weight:700;">${conflict}</div>`); html+=historyPanel(pb); html+=yourTradeProofPanel(s,pb); html+=sweetSpotPanel(s,pb); html+=indicatorPanel(s,pb); }
   el.innerHTML=html;
@@ -9598,7 +9811,7 @@ function showSundayDiscoveryFlow(){
   const proven=dynVals.filter(([t,e])=>e?.promotionReady===true).length;
   showModal(`<div style="background:${C.card};border-radius:20px;padding:24px;border:1px solid ${C.purple}55;max-height:84vh;overflow:auto;"><div style="color:${C.text};font-size:20px;font-weight:950;margin-bottom:6px;">Sunday Discovery + Validation</div><div style="color:${C.textSub};font-size:13px;line-height:1.6;margin-bottom:14px;">Run the five official Sunday scans and upload each export here. Repeated tickers are merged and retain every scanner source. Scanner appearance never creates a trade signal.</div>${last?`<div style="background:${C.cardHigh};border-radius:12px;padding:12px;margin-bottom:12px;color:${C.textSub};font-size:12px;line-height:1.6;"><b style="color:${C.text};">Last scan:</b> ${last.date} · ${last.total} results · ${last.newCount} new</div>`:''}<input id="v2-sunday-file" type="file" accept=".csv,.txt" style="display:none" onchange="previewSundayDiscovery(this)"><button onclick="document.getElementById('v2-sunday-file').click()" style="width:100%;padding:13px;border:none;border-radius:11px;background:${C.purple};color:#fff;font-weight:900;cursor:pointer;">Upload One Sunday Scan</button><div style="margin-top:14px;padding-top:13px;border-top:1px solid ${C.border};"><div style="display:flex;justify-content:space-between;gap:10px;align-items:center;"><div><div class="v2lbl">Research Queue</div><div style="color:${C.text};font-size:16px;font-weight:950;">${q.length} need 6-year validation</div></div>${q.length?`<button onclick="downloadSundayResearchQueue()" style="padding:9px 11px;border-radius:9px;border:1px solid ${C.teal};background:${C.tealDim};color:${C.teal};font-size:11px;font-weight:900;cursor:pointer;">Download Queue</button>`:''}</div>${q.length?`<div style="margin-top:8px;display:flex;flex-direction:column;gap:6px;">${q.slice(0,30).map(x=>`<div style="background:${C.cardHigh};padding:8px 9px;border-radius:8px;"><b style="color:${C.text};">${x.ticker}</b><div style="color:${C.textMuted};font-size:10px;margin-top:2px;">${x.source||'Source not recorded'}</div></div>`).join('')}</div>`:''}</div><div style="margin-top:14px;padding-top:13px;border-top:1px solid ${C.border};"><div class="v2lbl">After the 6-Year Pull + Validation Engine</div><div style="color:${C.textSub};font-size:11.5px;line-height:1.55;margin:5px 0 10px;">Upload the compact <b style="color:${C.text};">StockIQ_Validation_Results</b> CSV. PROVEN names can join the qualified universe; every other grade remains research/shadow.</div><input id="v2-validation-file" type="file" accept=".csv" style="display:none" onchange="importValidationResults(this)"><button onclick="document.getElementById('v2-validation-file').click()" style="width:100%;padding:12px;border-radius:10px;border:1px solid ${C.green};background:${C.greenDim};color:${C.green};font-weight:950;cursor:pointer;">Import Validation Results</button><button onclick="downloadQualifiedUniverse()" style="width:100%;padding:10px;margin-top:8px;border-radius:10px;border:1px solid ${C.border};background:transparent;color:${C.textSub};font-weight:850;cursor:pointer;">Download Daily Refresh Universe · ${proven} new PROVEN</button></div></div>`);
 }
-(function v2940Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.40 · Research Validation Engine';})();
+(function v2941Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.43 · Clarity Audit';})();
 </script>
 
 </body>
