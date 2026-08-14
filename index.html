@@ -177,7 +177,7 @@ let currentUser = null;
 let unsubStocks = null;
 let saveTimer   = null;
 let bulkDailySaveInProgress = false;
-// v2.9.37: Daily market data is a LOCAL overlay, not a Firestore mirror.
+// v2.9.38: Daily market data is a LOCAL overlay, not a Firestore mirror.
 // This prevents a 95-ticker CSV refresh from becoming 95 cloud writes.
 // User-owned state (positions, favorites, notes, realized trades, manual edits)
 // continues to save normally through fbSaveStock().
@@ -7900,6 +7900,39 @@ const PLAYBOOKS = {
   PBF:{name:'Bench · Momentum',family:'MOMENTUM',tier:'BENCH',confidence:'BENCH · OWNED/LEGACY',hold:20,maxHold:25,stopPct:12,cluster:'Energy',market:'XLE',earnings:'WAIT FOR REACTION',stats:{trades:24,win:67,avg:4.5,drawdown:'Recent > older',worst:'Wider downside'},teach:'Legacy Bench playbook retained so an existing PBF position remains fully managed. It is not automatically in the new Active or Reserve pool.'},
 };
 
+
+// ── REGRESSION CONTEXT EVIDENCE · v2.9.38 ──────────────────────────────────
+// Research-only display layer. These ranges NEVER change BUY/PREPARING/A+ logic.
+// They summarize where RegZ126 clustered in historically successful entries when
+// the evidence was stable enough across older/newer samples to be useful.
+// `source: PLAYBOOK` ranges already embedded in a Core playbook remain authoritative.
+const REGRESSION_CONTEXT_EVIDENCE = {
+  // Current standardized Bench / promoted replays (6-year history, next-session
+  // open, 0.25% adverse friction each side, non-overlapping trades).
+  TIGO:{range:[-1.25,-0.75],grade:'CONTEXT',n:13,note:'Repeatable lower-risk cluster in the current reproducible regression-pullback replay. Context only; the Bench BUY/A+ gates are unchanged.'},
+  ASX:{range:[-2.50,-1.25],grade:'VALIDATED',n:7,note:'Strong regression-entry cluster with positive older and newer samples. Context only; it does not narrow the existing BUY gate.'},
+  PARR:{range:[-1.50,-0.75],grade:'VALIDATED',n:11,note:'Stable regression-entry cluster across older and newer samples with materially better expectancy and downside than the full replay.'},
+  VIST:{range:[-0.50,1.00],grade:'CONTEXT',n:8,note:'Deep-pullback entries historically performed best in this regression-position band. Regression remains context, not the setup trigger.'},
+  HPE:{range:[-1.00,0.50],grade:'CONTEXT',n:7,note:'Deep-pullback entries clustered favorably here. The actual pullback-depth setup remains the trigger.'},
+  ARWR:{range:[1.50,3.00],grade:'EARLY',n:6,note:'Small-sample breakout context only. Do not use this range as a BUY requirement.'},
+  GTES:{range:[-2.25,-0.75],grade:'VALIDATED',n:9,note:'Stable deep-pullback regression context across older and newer samples.'},
+  ROIV:{range:[-1.25,0.25],grade:'VALIDATED',n:10,note:'Stable deep-pullback regression context with improved win rate and downside.'},
+  PBF:{range:[0.50,1.75],grade:'VALIDATED',n:10,note:'Momentum entries historically behaved better in this regression-position band. Momentum rules remain primary.'},
+  WFRD:{range:[-0.50,0.25],grade:'CONTEXT',n:6,note:'EMA20-reclaim entries clustered favorably here in the six-year replay. Reclaim remains the trigger.'},
+  FSLY:{range:[-0.75,-0.50],grade:'EARLY',n:7,note:'Narrow regression-edge cluster from the promoted replay. Wide historical excursions keep this display-only.'},
+
+  // Validated trade-history context from the 447-trade exit-study workbook.
+  DELL:{range:[1.50,2.50],grade:'CONTEXT',n:6,note:'Momentum winners clustered at elevated positive RegZ. This is not a momentum entry gate.'},
+  VRT:{range:[1.25,2.50],grade:'CONTEXT',n:10,note:'Momentum trades showed cleaner downside in this positive-regression band. Momentum remains primary.'},
+  MTSI:{range:[-1.00,-0.25],grade:'CONTEXT',n:10,note:'50-day reclaim trades showed a favorable historical RegZ cluster. The fresh reclaim remains the trigger.'},
+  THC:{range:[-0.75,0.50],grade:'EARLY',n:9,note:'EMA20-reclaim trades showed a modest RegZ cluster, but newer expectancy was weak. Reclaim remains primary.'},
+  DVN:{range:[1.00,2.25],grade:'CONTEXT',n:9,note:'Momentum trades showed somewhat cleaner downside in this positive-regression band. Not a BUY gate.'}
+};
+function regressionContextFor(s,pb){
+  const t=String(s?.ticker||'').toUpperCase();
+  if(pb?.regRange) return {range:pb.regRange,grade:'PLAYBOOK',n:pb?.stats?.trades??null,note:"This is the playbook's validated regression sweet spot and may be part of its entry logic."};
+  return REGRESSION_CONTEXT_EVIDENCE[t]||null;
+}
 function pbFor(s){ if(!s) return null; const t=String(s.ticker||'').toUpperCase(); return PLAYBOOKS[t] || genericPromotedPlaybook(t, RESEARCH_PROMOTION_EVIDENCE[t]) || null; }
 function mergeSnapshotHistory(baseRows, liveRows){
   const byDate=new Map();
@@ -8851,9 +8884,10 @@ function regressionFocusText(s,pb){
   return map[s.ticker]||'';
 }
 function regressionPanel(s,pb){
-  const r=regressionStats(s),range=pb.regRange||null;
-  let pos='Reference Only';
-  if(range&&r.z!=null) pos=r.z>=range[0]&&r.z<=range[1]?'IN HISTORICAL RANGE':'OUTSIDE HISTORICAL RANGE';
+  const r=regressionStats(s),ctx=regressionContextFor(s,pb),range=ctx?.range||null;
+  const isPlaybookRange=ctx?.grade==='PLAYBOOK';
+  let pos=range?'OUTSIDE HISTORICAL CONTEXT':'REFERENCE ONLY';
+  if(range&&r.z!=null) pos=r.z>=range[0]&&r.z<=range[1]?(isPlaybookRange?'IN PLAYBOOK SWEET SPOT':'IN HISTORICAL CONTEXT'):(isPlaybookRange?'OUTSIDE PLAYBOOK SWEET SPOT':'OUTSIDE HISTORICAL CONTEXT');
   const chartMin=-3, chartMax=3;
   const x1=18, x2=316, centerY=64, spacing=18, markerX=228;
   const yFor=(z)=> centerY - (z*spacing);
@@ -8888,13 +8922,14 @@ function regressionPanel(s,pb){
     }
   }
   const note=range
-    ? 'Green band = the historical sweet spot. White dot = current regression when it is in range. Red X = current regression when it is outside the sweet spot.'
-    : regressionFocusText(s,pb);
-  const sweetLabel = range ? `${range[0]} to ${range[1]}` : 'NO SPECIFIC SWEET SPOT';
+    ? `${isPlaybookRange?'Green band = the validated playbook sweet spot.':'Green band = historical regression context only — it does not change BUY, PREPARING, or A+ rules.'} ${ctx?.note||''} White dot = current regression inside the band; red X = outside.`
+    : (regressionFocusText(s,pb)||'No repeatable ticker-specific RegZ126 zone survived the evidence review. Regression is shown as reference only for this setup.');
+  const sweetLabel = range ? `${range[0]} to ${range[1]}` : 'NO VALIDATED TICKER RANGE';
+  const rangeCaption = !range ? 'Reference only' : isPlaybookRange ? 'Playbook Sweet Spot' : `${ctx.grade==='VALIDATED'?'Validated':'Historical'} Context${ctx.n?` · n=${ctx.n}`:''}`;
   return panel('Regression',
     `<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px;">
       <div><div class="v2lbl">Current Z</div><div class="v2big">${r.z==null?'—':r.z.toFixed(2)}</div></div>
-      <div><div class="v2lbl">Historical Range</div><div class="v2val">${sweetLabel}</div></div>
+      <div><div class="v2lbl">${rangeCaption}</div><div class="v2val">${sweetLabel}</div></div>
       <div><div class="v2lbl">Trend</div><div class="v2val" style="color:${r.slope>0?C.green:C.yellow};">${r.slope==null?'—':r.slope>0?'Rising':'Falling'}</div></div>
     </div>
     <div style="background:${C.cardHigh};border:1px solid ${C.border};border-radius:16px;padding:12px 10px 10px;margin-bottom:10px;overflow:hidden;">
@@ -9299,10 +9334,106 @@ const _origShowAddFlow = typeof showAddFlow==='function'?showAddFlow:null;
 function showAddFlow(){ if(_origShowAddFlow)_origShowAddFlow(); setTimeout(()=>{ const root=document.getElementById('modal-content'); if(root){ root.innerHTML=root.innerHTML.replace(/Add Stock/g,'Add Research Ticker').replace(/Position Trade|Long-Term Hold/g,'Swing Trade').replace(/Choose.*strategy/gi,'Research ticker'); }},0); }
 
 
-// ── DAILY DATA ARCHITECTURE · v2.9.37 ───────────────────────────────────────
+// ── DAILY DATA ARCHITECTURE · v2.9.38 ───────────────────────────────────────
 // Daily CSV = local current-market overlay (also cached in localStorage).
 // Firestore = user-owned persistent state only. This intentionally removes the
 // bulk daily save operation that was hanging after the dynamic universe grew.
+
+
+
+// ── SUNDAY DISCOVERY PIPELINE · v2.9.39 ─────────────────────────────────────
+// Sunday scan results are DISCOVERY only. They never earn BUY/PREPARING status
+// just because they appeared in a scanner. New names enter a research queue;
+// known/validated/rejected names are recognized and not redundantly re-tested.
+const SUNDAY_DISCOVERY_STORAGE_KEY='stockiq_sunday_discovery_v1';
+const SUNDAY_QUEUE_STORAGE_KEY='stockiq_sunday_research_queue_v1';
+let sundayDiscoveryHistory=[];
+let sundayResearchQueue=[];
+function loadSundayDiscoveryState(){
+  try{sundayDiscoveryHistory=JSON.parse(localStorage.getItem(SUNDAY_DISCOVERY_STORAGE_KEY)||'[]')||[];}catch(e){sundayDiscoveryHistory=[];}
+  try{sundayResearchQueue=JSON.parse(localStorage.getItem(SUNDAY_QUEUE_STORAGE_KEY)||'[]')||[];}catch(e){sundayResearchQueue=[];}
+}
+function saveSundayDiscoveryState(){
+  try{localStorage.setItem(SUNDAY_DISCOVERY_STORAGE_KEY,JSON.stringify(sundayDiscoveryHistory.slice(-24)));}catch(e){console.warn('Sunday discovery history save failed',e);}
+  try{localStorage.setItem(SUNDAY_QUEUE_STORAGE_KEY,JSON.stringify(sundayResearchQueue));}catch(e){console.warn('Sunday research queue save failed',e);}
+}
+function sundayTickerClass(ticker){
+  const t=String(ticker||'').trim().toUpperCase();
+  const ev=RESEARCH_PROMOTION_EVIDENCE[t]||null;
+  if(CORE_TICKERS.includes(t)||BENCH_TICKERS.includes(t)||(ev&&ev.promotionReady===true)||VALIDATED_EVIDENCE_CLASS[t]) return {bucket:'validated',label:'Already qualified',color:C.green};
+  if(ev&&ev.promotionReady===false && String(ev.grade||'').toUpperCase()==='REJECTED') return {bucket:'rejected',label:'Previously rejected',color:C.red};
+  if(ev&&ev.promotionReady===false) return {bucket:'research',label:'Already in research',color:C.yellow};
+  const existing=stocks.find(x=>String(x.ticker||'').toUpperCase()===t);
+  if(existing && !isMarketStock(existing)) return {bucket:'research',label:'Already in research',color:C.yellow};
+  if(sundayResearchQueue.some(x=>x.ticker===t)) return {bucket:'research',label:'Already queued',color:C.yellow};
+  return {bucket:'new',label:'Needs 6-Year Validation',color:C.teal};
+}
+function sundaySourceName(fileName){ return String(fileName||'Sunday Scan').replace(/\.[^.]+$/,'').replace(/[_-]+/g,' ').trim()||'Sunday Scan'; }
+function parseSundayScan(text){
+  const rows=parseScanCSV(text)||[];
+  const seen=new Set();
+  return rows.filter(r=>{const t=String(r.ticker||'').trim().toUpperCase(); if(!t||MARKET_TICKERS.includes(t)||seen.has(t))return false; seen.add(t); r.ticker=t; return true;});
+}
+function showSundayDiscoveryFlow(){
+  loadSundayDiscoveryState();
+  const q=sundayResearchQueue;
+  const last=sundayDiscoveryHistory.length?sundayDiscoveryHistory[sundayDiscoveryHistory.length-1]:null;
+  showModal(`<div style="background:${C.card};border-radius:20px;padding:24px;border:1px solid ${C.purple}55;max-height:82vh;overflow:auto;">
+    <div style="color:${C.text};font-size:20px;font-weight:950;margin-bottom:6px;">Sunday Discovery</div>
+    <div style="color:${C.textSub};font-size:13px;line-height:1.6;margin-bottom:16px;">Upload the weekly scanner report here. A scan appearance is <b style="color:${C.text};">not a trade signal</b>. StockIQ only uses it to find new research candidates and avoid re-testing names it already knows.</div>
+    ${last?`<div style="background:${C.cardHigh};border-radius:12px;padding:12px;margin-bottom:14px;color:${C.textSub};font-size:12px;line-height:1.6;"><b style="color:${C.text};">Last Sunday run:</b> ${last.date} · ${last.total} results · ${last.newCount} new · ${last.validatedCount} already qualified · ${last.researchCount} already research · ${last.rejectedCount} rejected</div>`:''}
+    <input id="v2-sunday-file" type="file" accept=".csv,.txt" style="display:none" onchange="previewSundayDiscovery(this)">
+    <button onclick="document.getElementById('v2-sunday-file').click()" style="width:100%;padding:14px;border:none;border-radius:12px;background:${C.purple};color:#fff;font-weight:900;cursor:pointer;">Upload Sunday Scan</button>
+    <div style="margin-top:16px;padding-top:14px;border-top:1px solid ${C.border};">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px;"><div><div class="v2lbl">Research Queue</div><div style="color:${C.text};font-size:16px;font-weight:950;">${q.length} ticker${q.length===1?'':'s'} need 6-year validation</div></div>${q.length?`<button onclick="downloadSundayResearchQueue()" style="padding:9px 11px;border-radius:9px;border:1px solid ${C.teal};background:${C.tealDim};color:${C.teal};font-size:11px;font-weight:900;cursor:pointer;">Download Queue CSV</button>`:''}</div>
+      ${q.length?`<div style="display:flex;flex-wrap:wrap;gap:6px;">${q.slice(0,40).map(x=>`<span style="background:${C.cardHigh};border:1px solid ${C.border};border-radius:999px;padding:6px 9px;color:${C.text};font-size:11px;font-weight:800;">${x.ticker}</span>`).join('')}</div>`:`<div style="color:${C.textMuted};font-size:12px;line-height:1.5;">No new names waiting for historical validation.</div>`}
+    </div>
+  </div>`);
+}
+async function previewSundayDiscovery(input){
+  const f=input?.files?.[0]; if(!f)return;
+  const text=await f.text(); const rows=parseSundayScan(text);
+  if(!rows.length){ alert('No Symbol/Ticker rows were found in this Sunday report.'); return; }
+  const buckets={validated:[],rejected:[],research:[],new:[]};
+  rows.forEach(r=>{const c=sundayTickerClass(r.ticker); buckets[c.bucket].push({...r,_class:c});});
+  window._v2PendingSunday={rows,buckets,fileName:f.name,source:sundaySourceName(f.name)};
+  showModal(`<div style="background:${C.card};border-radius:20px;padding:24px;border:1px solid ${C.border};max-height:82vh;overflow:auto;">
+    <div style="color:${C.text};font-size:19px;font-weight:950;margin-bottom:5px;">Sunday Scan Review</div>
+    <div style="color:${C.textSub};font-size:12px;line-height:1.6;margin-bottom:14px;">${rows.length} unique ticker${rows.length===1?'':'s'} found. Nothing becomes BUY/PREPARING from this upload.</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;">
+      ${[[buckets.validated,'Already qualified',C.green],[buckets.research,'Already research',C.yellow],[buckets.rejected,'Previously rejected',C.red],[buckets.new,'NEW · needs 6-year validation',C.teal]].map(([arr,label,color])=>`<div style="background:${C.cardHigh};border-radius:11px;padding:11px;border:1px solid ${color}44;"><div style="color:${color};font-size:18px;font-weight:950;">${arr.length}</div><div style="color:${C.textSub};font-size:10.5px;font-weight:800;">${label}</div></div>`).join('')}
+    </div>
+    ${buckets.new.length?`<div style="color:${C.text};font-size:12px;font-weight:900;margin-bottom:6px;">New research candidates</div><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:15px;">${buckets.new.map(x=>`<span style="padding:5px 8px;border-radius:999px;background:${C.tealDim};border:1px solid ${C.teal}55;color:${C.teal};font-size:10.5px;font-weight:900;">${x.ticker}</span>`).join('')}</div>`:''}
+    <div style="background:${C.yellowDim};border:1px solid ${C.yellow}44;border-radius:10px;padding:10px;color:${C.textSub};font-size:11.5px;line-height:1.55;margin-bottom:14px;">Accepting this report only updates the discovery registry and research queue. It does not change playbooks, evidence grades, ranking, A+ status, or the live board.</div>
+    <button onclick="applySundayDiscovery()" style="width:100%;padding:13px;border:none;border-radius:11px;background:${C.green};color:#000;font-weight:950;cursor:pointer;">Accept Sunday Discovery</button>
+  </div>`);
+}
+function applySundayDiscovery(){
+  const p=window._v2PendingSunday; if(!p)return;
+  loadSundayDiscoveryState();
+  const seen=new Set(sundayResearchQueue.map(x=>x.ticker));
+  const added=[];
+  for(const r of p.buckets.new){
+    const t=r.ticker;
+    if(seen.has(t))continue;
+    const rec={ticker:t,description:r.description||'',sector:r.sector||'',industry:r.industry||'',discoveredOn:today(),source:p.source,status:'NEEDS_6YR_VALIDATION'};
+    sundayResearchQueue.push(rec); seen.add(t); added.push(t);
+  }
+  sundayDiscoveryHistory.push({date:today(),fileName:p.fileName,total:p.rows.length,newCount:p.buckets.new.length,validatedCount:p.buckets.validated.length,researchCount:p.buckets.research.length,rejectedCount:p.buckets.rejected.length,added});
+  saveSundayDiscoveryState(); window._v2PendingSunday=null;
+  showModal(`<div style="background:${C.card};border-radius:20px;padding:24px;border:1px solid ${C.green}55;"><div style="color:${C.green};font-size:19px;font-weight:950;margin-bottom:7px;">Sunday discovery loaded ✓</div><div style="color:${C.textSub};font-size:12.5px;line-height:1.65;margin-bottom:14px;">${p.rows.length} scan names reviewed. <b style="color:${C.text};">${added.length}</b> genuinely new ticker${added.length===1?'':'s'} added to the 6-year research queue. The live trading board was not changed.</div>${sundayResearchQueue.length?`<button onclick="downloadSundayResearchQueue()" style="width:100%;padding:12px;border-radius:10px;border:none;background:${C.teal};color:#000;font-weight:950;cursor:pointer;">Download 6-Year Research Queue (${sundayResearchQueue.length})</button>`:''}<button onclick="closeAllOverlays()" style="width:100%;padding:11px;margin-top:9px;border-radius:10px;border:1px solid ${C.border};background:transparent;color:${C.textSub};font-weight:850;cursor:pointer;">Done</button></div>`);
+}
+function csvEscape(v){ const x=String(v??''); return /[",\n]/.test(x)?'"'+x.replace(/"/g,'""')+'"':x; }
+function downloadSundayResearchQueue(){
+  loadSundayDiscoveryState(); if(!sundayResearchQueue.length)return;
+  const hdr=['Symbol','DiscoveryDate','ScannerSource','Status','Company','Sector','Industry'];
+  const lines=[hdr.join(',')].concat(sundayResearchQueue.map(x=>[x.ticker,x.discoveredOn,x.source,x.status,x.description,x.sector,x.industry].map(csvEscape).join(',')));
+  const blob=new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`StockIQ_Sunday_Research_Queue_${today()}.csv`; document.body.appendChild(a); a.click(); setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},0);
+}
+function markSundayQueueResearched(ticker,status='RESEARCHED'){
+  loadSundayDiscoveryState(); const t=String(ticker||'').toUpperCase(); sundayResearchQueue=sundayResearchQueue.filter(x=>x.ticker!==t); saveSundayDiscoveryState(); return true;
+}
+loadSundayDiscoveryState();
 
 // ── FULL-SYSTEM AUDIT · v2.9.30 ────────────────────────────────────────────
 // Fixed four cross-system contradictions:
@@ -9315,8 +9446,9 @@ function showAddFlow(){ if(_origShowAddFlow)_origShowAddFlow(); setTimeout(()=>{
 // ── v2 initialization ────────────────────────────────────────────────────────
 (function initStockIQV2(){
   const style=document.createElement('style'); style.textContent=`.v2lbl{color:${C.textSub};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}.v2val{color:${C.text};font-size:14px;font-weight:900}.v2big{color:${C.text};font-size:18px;font-weight:950}`; document.head.appendChild(style);
-  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.37 · Daily Import Repair';
+  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.39 · Sunday Discovery Pipeline';
   const topButtons=[...document.querySelectorAll('button')]; const add=topButtons.find(b=>b.textContent.includes('Add Stock')); if(add)add.innerHTML='<span style="font-size:16px;">+</span> Research'; const scan=topButtons.find(b=>b.textContent.includes('Import Scan')); if(scan){scan.textContent='Daily Data';scan.onclick=showDailyDataFlow;scan.setAttribute('aria-label','Upload daily multi-ticker data');}
+  if(scan && !document.getElementById('sunday-discovery-btn')){ const b=document.createElement('button'); b.id='sunday-discovery-btn'; b.textContent='Sunday Discovery'; b.onclick=showSundayDiscoveryFlow; b.setAttribute('aria-label','Upload Sunday scanner discovery report'); b.style.cssText=scan.style.cssText; b.style.borderColor=C.purple; b.style.color=C.purple; scan.parentNode.insertBefore(b,scan.nextSibling); }
   activeTag='Ready Now'; sortMode='opportunity';
 })();
 
