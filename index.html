@@ -95,7 +95,7 @@ input[type=number]{-moz-appearance:textfield;}
   <div id="portfolio-box"></div>
   <div id="position-watch"></div>
   <!-- Tonight's Best Opportunities — the ranking engine -->
-  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">v2.9.30 · Full-System Audit</div>
+  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">v2.9.50 · Cross-Device Daily Sync</div>
   <div id="tonights-opportunities"></div>
   <!-- Filter tags + sort -->
   <div id="filter-bar" style="background:#11141C;border-bottom:1px solid #1E2230;padding:9px 20px;"></div>
@@ -183,6 +183,90 @@ let bulkDailySaveInProgress = false;
 // continues to save normally through fbSaveStock().
 let dailyOverlayByTicker = new Map();
 const DAILY_OVERLAY_STORAGE_KEY = 'stockiq_daily_overlay_v1';
+const DAILY_CLOUD_DOC_ID = 'latestDaily';
+
+function dailyCloudRef(uid){
+  return db.collection('users').doc(uid).collection('marketData').doc(DAILY_CLOUD_DOC_ID);
+}
+function overlayObjectFromMap(map=dailyOverlayByTicker){
+  const obj={};
+  for(const [t,v] of (map||new Map()).entries()) obj[t]=v;
+  return obj;
+}
+function overlayMapFromObject(obj){
+  return new Map(Object.entries(obj||{}));
+}
+function overlayMarketDate(map=dailyOverlayByTicker){
+  const dates=[];
+  for(const v of (map||new Map()).values()){
+    const d=v?.analyzed || (Array.isArray(v?.snapshots)&&v.snapshots.length?v.snapshots[v.snapshots.length-1]?.date:null);
+    if(d) dates.push(String(d));
+  }
+  return dates.sort().slice(-1)[0] || null;
+}
+function compareDatasetDates(a,b){
+  if(!a&&!b) return 0;
+  if(a&&!b) return 1;
+  if(!a&&b) return -1;
+  const da=new Date(a), dbb=new Date(b);
+  if(!isNaN(da)&&!isNaN(dbb)) return da-dbb;
+  return String(a).localeCompare(String(b));
+}
+async function saveDailyOverlayCloud(map=dailyOverlayByTicker){
+  if(!currentUser) throw new Error('You are not signed in to StockIQ.');
+  const overlay=overlayObjectFromMap(map);
+  const payload=cleanForFirestore({
+    schemaVersion:1,
+    datasetDate:overlayMarketDate(map),
+    tickerCount:Object.keys(overlay).length,
+    overlay,
+    updatedAt:firebase.firestore.FieldValue.serverTimestamp()
+  });
+  // Keep comfortably below Firestore's 1 MiB document ceiling.
+  const approxBytes=new Blob([JSON.stringify({...payload,updatedAt:null})]).size;
+  if(approxBytes>850000) throw new Error(`Daily sync payload is too large (${Math.round(approxBytes/1024)} KB).`);
+  const write=dailyCloudRef(currentUser.uid).set(payload);
+  await Promise.race([write,new Promise((_,rej)=>setTimeout(()=>rej(new Error('Daily cloud sync timed out after 20s')),20000))]);
+  return {datasetDate:payload.datasetDate,tickerCount:payload.tickerCount,approxBytes};
+}
+async function syncDailyOverlayFromCloud(){
+  if(!currentUser) return {source:'none'};
+  try{
+    const snap=await Promise.race([
+      dailyCloudRef(currentUser.uid).get(),
+      new Promise((_,rej)=>setTimeout(()=>rej(new Error('Daily cloud read timed out after 15s')),15000))
+    ]);
+    if(!snap.exists){
+      // First device after upgrade: seed cloud from its current local overlay if one exists.
+      if(dailyOverlayByTicker.size){
+        await saveDailyOverlayCloud(dailyOverlayByTicker);
+        return {source:'local-seeded',datasetDate:overlayMarketDate(),tickerCount:dailyOverlayByTicker.size};
+      }
+      return {source:'none'};
+    }
+    const data=snap.data()||{};
+    const cloudMap=overlayMapFromObject(data.overlay||{});
+    const cloudDate=data.datasetDate||overlayMarketDate(cloudMap);
+    const localDate=overlayMarketDate(dailyOverlayByTicker);
+    const cmp=compareDatasetDates(cloudDate,localDate);
+    if(cmp>=0 && cloudMap.size){
+      dailyOverlayByTicker=cloudMap;
+      persistDailyOverlayLocal();
+      stocks=applyDailyOverlayToStocks(stocks);
+      renderHome();
+      return {source:'cloud',datasetDate:cloudDate,tickerCount:cloudMap.size};
+    }
+    if(cmp<0 && dailyOverlayByTicker.size){
+      // This device has a newer completed dataset; make it authoritative for all devices.
+      await saveDailyOverlayCloud(dailyOverlayByTicker);
+      return {source:'local-newer',datasetDate:localDate,tickerCount:dailyOverlayByTicker.size};
+    }
+    return {source:'local',datasetDate:localDate,tickerCount:dailyOverlayByTicker.size};
+  }catch(e){
+    console.error('Daily cloud sync failed',e);
+    return {source:'error',error:e};
+  }
+}
 
 function dailyOverlayFields(u){
   if(!u) return null;
@@ -711,6 +795,18 @@ auth.onAuthStateChanged(user => {
     }, err => {
       console.error(err);
       showSaveStatus('error');
+    });
+    // v2.9.50: synchronize the latest lightweight daily dataset across devices.
+    // This is one small cloud document, not 95 stock-document writes.
+    syncDailyOverlayFromCloud().then(info=>{
+      if(info?.source==='cloud' || info?.source==='local-newer' || info?.source==='local-seeded'){
+        const el=document.getElementById('save-status');
+        if(el && info.datasetDate){
+          el.style.display='block'; el.style.color=C.green;
+          el.textContent=`Daily sync ✓ · ${info.tickerCount||dailyOverlayByTicker.size} tickers · ${info.datasetDate}`;
+          setTimeout(()=>showSaveStatus('ready'),1800);
+        }
+      }
     });
   } else {
     stocks = [];
@@ -8829,6 +8925,39 @@ function renderListHeader(){
   const prep=live.filter(x=>x.state?.state==='PREPARING').length;
   el.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;"><span style="color:${C.textMuted};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;">Live ${live.length}/${LIVE_CANDIDATE_CAP} · Buy ${buys} · Preparing ${prep}</span><span style="color:${C.textMuted};font-size:10px;">Validated library ${validated.length}</span></div>`;
 }
+function evidenceOnlySearchMatches(q){
+  if(!q) return [];
+  loadDynamicEvidence();
+  const inStocks=new Set(stocks.map(s=>String(s.ticker||'').toUpperCase()));
+  const tickers=new Set([
+    ...Object.keys(DYNAMIC_RESEARCH_EVIDENCE||{}),
+    ...Object.keys(RESEARCH_PROMOTION_EVIDENCE||{}),
+    ...Object.keys(VALIDATED_EVIDENCE_CLASS||{})
+  ]);
+  return [...tickers]
+    .filter(t=>!inStocks.has(t) && String(t).toLowerCase().includes(q))
+    .map(t=>{
+      const dyn=DYNAMIC_RESEARCH_EVIDENCE[t]||null;
+      const old=RESEARCH_PROMOTION_EVIDENCE[t]||null;
+      const grade=String(dyn?.grade||old?.grade||VALIDATED_EVIDENCE_CLASS[t]||'RESEARCH').toUpperCase();
+      const qualified=dyn?.promotionReady===true || old?.promotionReady===true || !!VALIDATED_EVIDENCE_CLASS[t];
+      return {ticker:t,grade,qualified,family:dyn?.family||old?.family||'',summary:dyn?.summary||old?.summary||''};
+    })
+    .sort((a,b)=>(b.qualified-a.qualified)||a.ticker.localeCompare(b.ticker));
+}
+function renderEvidenceOnlySearchCard(x){
+  const color=x.qualified?C.green:(x.grade==='REJECTED'?C.red:C.yellow);
+  const family=String(x.family||'').replaceAll('_',' ');
+  const status=x.qualified?'QUALIFIED · AWAITING CURRENT DAILY DATA':(x.grade==='REJECTED'?'REJECTED · RESEARCH RECORD':'RESEARCH / SHADOW · AWAITING CURRENT DAILY DATA');
+  const expl=x.qualified
+    ? 'StockIQ knows this ticker passed historical validation, but it does not have a current daily market row yet. It cannot calculate WAIT / PREPARING / BUY until the ticker is included in the next Daily Data refresh.'
+    : (x.summary||'This ticker has research evidence on file but no current daily market row loaded.');
+  return `<div style="background:${C.card};border:1px solid ${color}66;border-radius:15px;padding:14px 16px;margin-bottom:10px;">
+    <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;"><div><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><span style="color:${C.text};font-size:16px;font-weight:950;">${x.ticker}</span><span style="color:${color};font-size:9px;font-weight:950;text-transform:uppercase;letter-spacing:.05em;">${x.grade}</span></div><div style="color:${C.textMuted};font-size:10.5px;margin-top:4px;">${family?`${family} · `:''}${status}</div></div><span style="color:${C.textMuted};font-size:11px;font-weight:850;">No daily price yet</span></div>
+    <div style="color:${C.textSub};font-size:11.5px;line-height:1.5;margin-top:9px;">${expl}</div>
+    ${x.qualified?`<button onclick="downloadQualifiedUniverse()" style="margin-top:11px;padding:8px 11px;border-radius:9px;border:1px solid ${C.teal}66;background:${C.tealDim};color:${C.teal};font-size:10.5px;font-weight:900;cursor:pointer;">Download Daily Refresh Universe</button>`:''}
+  </div>`;
+}
 function renderStockList(){
   const el=document.getElementById('stock-list'); if(!el)return;
   let list=getRanked(); const q=searchQuery||'';
@@ -8841,6 +8970,7 @@ function renderStockList(){
   else if(activeTag==='Research') list=list.filter(isResearchStock);
   else list=liveCandidateItems().map(x=>x.s);
 
+  const evidenceOnly=q?evidenceOnlySearchMatches(q):[];
   if(activeTag==='Ready Now' && !q){
     const buy=list.filter(s=>['BUY','A+ BUY'].includes(safeStockState(s)?.state));
     const prep=list.filter(s=>safeStockState(s)?.state==='PREPARING');
@@ -8848,7 +8978,9 @@ function renderStockList(){
     el.innerHTML=section('Buy / A+ Buy','Actionable setups only',buy,C.green)+section('Getting Ready','Only one close trigger missing; all structure already passes',prep,C.yellow);
     if(!buy.length&&!prep.length) el.innerHTML=`<div style="color:${C.textSub};font-size:13px;padding:20px 4px;">NO NEW QUALIFIED STOCKS. WAIT names are hidden but still monitored in the validated library.</div>`;
   } else {
-    el.innerHTML=list.map(renderStockCard).join('')||`<div style="color:${C.textSub};font-size:13px;padding:20px 4px;">Nothing in this view.</div>`;
+    const stockHtml=list.map(renderStockCard).join('');
+    const evidenceHtml=evidenceOnly.map(renderEvidenceOnlySearchCard).join('');
+    el.innerHTML=stockHtml+evidenceHtml || `<div style="color:${C.textSub};font-size:13px;padding:20px 4px;">Nothing in this view.</div>`;
   }
 }
 function renderStockCard(s){
@@ -9516,11 +9648,14 @@ async function applyV2Daily(){
   // saves to Firestore through normal BUY/SELL/favorite/manual-edit actions.
   dailyOverlayByTicker = new Map(updates.map(u=>[String(u.ticker||'').toUpperCase(), dailyOverlayFields(u)]));
   persistDailyOverlayLocal();
-  const statusEl=document.getElementById('save-status');
+  // v2.9.50: save the lightweight latest-daily overlay once so laptop/phone
+  // load the same completed dataset. This replaces device-only local state.
+  if(statusEl){ statusEl.textContent='Syncing daily data across devices…'; }
+  const syncInfo=await saveDailyOverlayCloud(dailyOverlayByTicker);
   if(statusEl){
-    const marketDate = updates.map(u=>u.analyzed).filter(Boolean).sort().slice(-1)[0] || 'latest day';
+    const marketDate = syncInfo.datasetDate || updates.map(u=>u.analyzed).filter(Boolean).sort().slice(-1)[0] || 'latest day';
     statusEl.style.display='block'; statusEl.style.color=C.green;
-    statusEl.textContent=`Daily data loaded ✓ · ${updates.length} tickers · ${marketDate}`;
+    statusEl.textContent=`Daily data synced ✓ · ${updates.length} tickers · ${marketDate}`;
     setTimeout(()=>showSaveStatus('ready'),2200);
   }
   renderHome();
@@ -9539,8 +9674,8 @@ function showAddFlow(){ if(_origShowAddFlow)_origShowAddFlow(); setTimeout(()=>{
 
 
 // ── DAILY DATA ARCHITECTURE · v2.9.38 ───────────────────────────────────────
-// Daily CSV = local current-market overlay (also cached in localStorage).
-// Firestore = user-owned persistent state only. This intentionally removes the
+// Daily CSV = lightweight current-market overlay cached locally AND synced as one Firestore document.
+// Firestore stock documents remain user-owned persistent state only. This intentionally removes the
 // bulk daily save operation that was hanging after the dynamic universe grew.
 
 
@@ -9840,7 +9975,7 @@ function showSundayDiscoveryFlow(){
     </div>
   </div>`);
 }
-(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.48 · Sunday Validation Button Fix';})();
+(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.50 · Cross-Device Daily Sync';})();
 </script>
 
 </body>
