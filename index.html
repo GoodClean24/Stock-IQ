@@ -95,7 +95,7 @@ input[type=number]{-moz-appearance:textfield;}
   <div id="portfolio-box"></div>
   <div id="position-watch"></div>
   <!-- Tonight's Best Opportunities — the ranking engine -->
-  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">v2.9.50 · Cross-Device Daily Sync</div>
+  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">v2.9.51 · Cross-Device Daily Sync</div>
   <div id="tonights-opportunities"></div>
   <!-- Filter tags + sort -->
   <div id="filter-bar" style="background:#11141C;border-bottom:1px solid #1E2230;padding:9px 20px;"></div>
@@ -796,7 +796,7 @@ auth.onAuthStateChanged(user => {
       console.error(err);
       showSaveStatus('error');
     });
-    // v2.9.50: synchronize the latest lightweight daily dataset across devices.
+    // v2.9.51: synchronize the latest lightweight daily dataset across devices.
     // This is one small cloud document, not 95 stock-document writes.
     syncDailyOverlayFromCloud().then(info=>{
       if(info?.source==='cloud' || info?.source==='local-newer' || info?.source==='local-seeded'){
@@ -8133,6 +8133,79 @@ function indicatorImproving(s,what){ const c=latestSnap(s),p=prevSnap(s); if(!c|
 function regressionSeriesLastTwo(s){ const a=(s.snapshots||[]).filter(x=>x.price!=null); if(a.length<41)return {currZ:null,prevZ:null}; const copy={...s,snapshots:a.slice(0,-1)}; return {currZ:regressionStats(s).z,prevZ:regressionStats(copy).z}; }
 function priorHighN(s,n=20){ const a=(s.snapshots||[]).filter(x=>x.high!=null||x.price!=null); if(a.length<=n)return null; const rows=a.slice(-(n+1),-1); return rows.length?Math.max(...rows.map(x=>Number(x.high??x.price)).filter(Number.isFinite)):null; }
 
+// ── POSITION HEALTH · v2.9.51 ──────────────────────────────────────────────
+// Entry checks stop being the Trade Health scorecard once a position is owned.
+// These are early-warning conditions only. They do NOT create a SELL signal;
+// the validated stop / earnings / hold logic remains the exit authority.
+function positionHealthChecks(s){
+  if(!s?.position) return [];
+  const pb=pbFor(s);
+  const p=curVal(s,'price'), e20=curVal(s,'ma20','ema20'), m50=curVal(s,'ma50'), m200=curVal(s,'ma200');
+  const rsi=curVal(s,'rsi'), rv=relativeVolume(s), atr=curVal(s,'atr','ATR14');
+  const reg=regressionStats(s), hist=macdHist(s), prevHist=macdHist(s,prevSnap(s));
+  const prev=prevSnap(s), prevClose=snapVal(prev,'price','close'), prevRSI=snapVal(prev,'rsi');
+  const stop=suggestedStop(s);
+  const fam=String(s.position?.entryFamily||pb?.family||'').toUpperCase();
+  const checks=[];
+  const add=(key,label,ok,detail,level='watch')=>checks.push({key,label,ok:!!ok,detail,level});
+
+  // 1) Active risk line. A true breach is handled by positionState() as EXIT.
+  const stopGap=(p!=null&&stop?.price!=null&&p>0)?((p/stop.price)-1)*100:null;
+  add('stop','Active stop',p!=null&&stop?.price!=null?p>stop.price:true,
+      stop?.price!=null?`${money(p)} vs ${money(stop.price)}${stopGap!=null?` · ${stopGap.toFixed(1)}% cushion`:''}`:'Stop unavailable','critical');
+
+  // 2) Trend support is family-aware. This is a warning if lost, not an automatic exit.
+  let support=e20, supportName='EMA20';
+  if(fam.includes('SMA50')||fam.includes('50-DAY')||fam.includes('50 DAY')) { support=m50; supportName='SMA50'; }
+  else if(fam.includes('REG')) { support=e20; supportName='EMA20'; }
+  else if(fam.includes('DEEP')) { support=e20; supportName='EMA20'; }
+  add('trend',`${supportName} trend support`,p!=null&&support!=null?p>=support:true,
+      p!=null&&support!=null?`${money(p)} vs ${money(support)}`:'Support unavailable');
+
+  // 3) Larger trend deterioration. We care about direction, not the old entry sweet spot.
+  const regHealthy=reg.slope==null?true:reg.slope>0;
+  add('regression','126-day trend',regHealthy,reg.slope==null?'Regression slope unavailable':(reg.slope>0?'Still rising':'Slope has turned down'));
+
+  // 4) RSI is NOT overbought = bad. Only flag genuine loss of momentum: below 50 AND falling.
+  const rsiWeak = rsi!=null&&prevRSI!=null&&rsi<50&&rsi<prevRSI;
+  add('rsi','RSI momentum',!rsiWeak,
+      rsi==null?'RSI unavailable':(rsiWeak?`${rsi.toFixed(1)} and falling below 50`:`${rsi.toFixed(1)} · no momentum breakdown`));
+
+  // 5) MACD warning requires both negative histogram and further deterioration.
+  const macdWeak = hist!=null&&prevHist!=null&&hist<0&&hist<prevHist;
+  add('macd','MACD momentum',!macdWeak,
+      hist==null||prevHist==null?'MACD comparison unavailable':(macdWeak?'Negative and weakening':'No confirmed momentum deterioration'));
+
+  // 6) Distribution warning: a down close with materially above-normal volume.
+  // This is context only; it never overrides the validated stop.
+  const downDay=p!=null&&prevClose!=null&&p<prevClose;
+  const distribution = downDay&&rv!=null&&rv>=1.25;
+  add('volume','Selling pressure',!distribution,
+      rv==null?'Relative volume unavailable':(distribution?`Down day on ${rv.toFixed(2)}× normal volume`:`No heavy distribution · ${rv.toFixed(2)}× volume`));
+
+  return checks;
+}
+function positionHealthSummary(s){
+  const checks=positionHealthChecks(s);
+  const warnings=checks.filter(x=>!x.ok);
+  const critical=warnings.some(x=>x.level==='critical');
+  const trendBreak=warnings.some(x=>x.key==='trend');
+  const momentumBreak=warnings.some(x=>x.key==='rsi'||x.key==='macd');
+  let label='HEALTHY', color=C.green;
+  if(critical){ label='AT RISK'; color=C.red; }
+  else if(warnings.length>=3 || (trendBreak&&momentumBreak)){ label='WEAKENING'; color=C.yellow; }
+  else if(warnings.length){ label='HEALTHY · WATCH'; color=C.yellow; }
+  return {checks,warnings,label,color,watchExit:!critical&&(warnings.length>=3||(trendBreak&&momentumBreak))};
+}
+function positionHealthHTML(s){
+  const h=positionHealthSummary(s), st=safeStockState(s);
+  const action=st?.state||'BOUGHT';
+  const warningRows=h.warnings.map(x=>`<div style="display:flex;align-items:center;gap:8px;min-width:0;"><span style="color:${x.level==='critical'?C.red:C.yellow};font-size:16px;font-weight:950;line-height:1;flex:0 0 auto;">×</span><div style="min-width:0;color:${C.text};font-size:12.5px;font-weight:850;line-height:1.35;"><span style="white-space:nowrap;">${x.label}</span><span style="color:${C.textSub};font-weight:650;"> · ${x.detail}</span></div></div>`).join('');
+  return `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:${h.warnings.length?'12':'4'}px;"><div style="color:${h.color};font-size:17px;font-weight:950;letter-spacing:.02em;">${h.label}</div><div style="color:${stateStyle(action).c};font-size:10px;font-weight:950;text-transform:uppercase;letter-spacing:.06em;white-space:nowrap;">${action}</div></div>
+    ${h.warnings.length?`<div style="display:flex;flex-direction:column;gap:9px;">${warningRows}</div>`:`<div style="display:flex;align-items:center;gap:8px;color:${C.green};font-size:12.5px;font-weight:850;"><span style="font-size:15px;">✓</span><span>No position-health warnings.</span></div>`}
+    <div style="color:${C.textMuted};font-size:10.5px;line-height:1.45;margin-top:10px;">Warnings mean an indicator moved outside a healthy hold range — not an automatic sell. The active stop and validated exit rules remain the decision.</div>`;
+}
+
 function setupChecks(s){
   const pb=pbFor(s); if(!pb) return [];
   const p=curVal(s,'price'), e20=curVal(s,'ma20','ema20'), m50=curVal(s,'ma50'), m200=curVal(s,'ma200'), rsi=curVal(s,'rsi');
@@ -8708,9 +8781,9 @@ function positionState(s){
     }
     return {state:'DECISION DAY',reason:`Normal ${pb.hold}-day hold is complete. Review the trade now; do not extend it by habit.`,day:d,stop:nextStop,gainPct,personality};
   }
-  const checks=setupChecks(s), red=checks.filter(x=>x.required&&!x.ok).length;
-  if(red>=Math.max(2,Math.ceil(checks.filter(x=>x.required).length/2))) return {state:'WATCH EXIT',reason:'Several required setup conditions have weakened, but the active stop has not been breached. Watch closely rather than inventing an early exit.',day:d,stop:nextStop,gainPct,personality};
-  return {state:'BOUGHT',reason:'The position remains inside its validated management plan.',day:d,stop:nextStop,gainPct,personality};
+  const health=positionHealthSummary(s);
+  if(health.watchExit) return {state:'WATCH EXIT',reason:'Several position-health warnings are now lining up. The active stop has not been breached, so this is a watch signal — not an automatic sell.',day:d,stop:nextStop,gainPct,personality,health};
+  return {state:'BOUGHT',reason:'The position remains inside its validated management plan.',day:d,stop:nextStop,gainPct,personality,health};
 }
 function stockState(s){ return s.position?positionState(s):preEntryState(s); }
 function statePriority(state){ return ({'EXIT':0,'PROTECT / CONSIDER ROTATION':1,'DECISION DAY':2,'PROTECT & RUN':3,'WATCH EXIT':4,'BOUGHT':5,'A+ BUY':6,'BUY':7,'PREPARING':8,'ENTRY MISSED':9,'WAIT':10,'RESEARCH ONLY':11}[state]??12); }
@@ -9448,7 +9521,7 @@ function renderDetail(s){
   const el=document.getElementById('detail-content'); if(!el)return; const pb=pbFor(s); if(!pb){ const ev=evidenceFor(s), rp=researchPromotionLabel(s); el.innerHTML=`<div style="padding:16px;"><button onclick="showScreen('home')" style="background:none;border:none;color:${C.textSub};padding:0 0 12px;">← Back</button><h2 style="color:${C.text};margin:0;">${s.ticker}</h2>${companyNameFor(s)?`<div style="color:${C.textSub};font-size:13px;margin-top:4px;">${companyNameFor(s)}</div>`:''}<div style="margin-top:12px;color:${rp.color};font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;">${rp.label}${ev?.grade?` · ${ev.grade}`:''}</div>${ev?.family?`<div style="color:${C.text};font-size:13px;font-weight:800;margin-top:8px;">Candidate family: ${ev.family.replaceAll('_',' ')}</div>`:''}<p style="color:${C.textSub};font-size:13px;line-height:1.65;">${ev?.summary||'This ticker can show indicators, but StockIQ will not issue trading signals until it has a validated playbook.'}</p><div style="background:${C.card};border:1px solid ${C.border};border-radius:14px;padding:13px 14px;margin:12px 0;"><div style="color:${C.yellow};font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;margin-bottom:7px;">Promotion gate</div><div style="color:${C.textSub};font-size:12px;line-height:1.6;">Current readiness is not enough. Promotion requires useful trade frequency, positive friction-adjusted expectancy, older/newer or OOS survival, parameter-neighborhood robustness, and tolerable downside. Until that evidence is explicitly approved, this stock stays research-only.</div></div>${indicatorPanel(s,{})}</div>`; return; }
   const st=stockState(s),checks=setupChecks(s),conflict=portfolioConflict(s);
   let html=s.position?positionTop(s,pb,st):preTop(s,pb,st); html+=topCallout(s,pb,st);
-  if(s.position){ html+=panel('Trade Health',checklistHTML(checks)); html+=riskPanel(s,pb); html+=exitPersonalityPanel(s,pb,st); html+=earningsPanel(s,pb); html+=regressionPanel(s,pb); if(pb.maxHold>pb.hold)html+=panel('Decision / Runner',`<div style="color:${C.text};font-size:13px;font-weight:800;">Normal hold: ${pb.hold} days · Max runner window: ${pb.maxHold} days</div><div style="color:${C.textSub};font-size:11px;margin-top:6px;">At decision day, StockIQ checks whether this ticker’s proven runner conditions are still healthy.</div>`); html+=high52BehaviorPanel(s); html+=historyPanel(pb); html+=yourTradeProofPanel(s,pb); html+=sweetSpotPanel(s,pb); html+=indicatorPanel(s,pb); html+=marketPanel(s,pb); html+=panel('Manage Position',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;"><button onclick="showV2CloseFlow('${s.id}')" style="padding:11px;border-radius:10px;border:1px solid ${C.red}66;background:${C.redDim};color:${C.red};font-weight:800;cursor:pointer;">Sell</button><button onclick="showV2StopFlow('${s.id}')" style="padding:11px;border-radius:10px;border:1px solid ${C.border};background:${C.cardHigh};color:${C.text};font-weight:800;cursor:pointer;">Update Stop</button></div>`); }
+  if(s.position){ html+=panel('Trade Health',positionHealthHTML(s)); html+=riskPanel(s,pb); html+=exitPersonalityPanel(s,pb,st); html+=earningsPanel(s,pb); html+=regressionPanel(s,pb); if(pb.maxHold>pb.hold)html+=panel('Decision / Runner',`<div style="color:${C.text};font-size:13px;font-weight:800;">Normal hold: ${pb.hold} days · Max runner window: ${pb.maxHold} days</div><div style="color:${C.textSub};font-size:11px;margin-top:6px;">At decision day, StockIQ checks whether this ticker’s proven runner conditions are still healthy.</div>`); html+=high52BehaviorPanel(s); html+=historyPanel(pb); html+=yourTradeProofPanel(s,pb); html+=sweetSpotPanel(s,pb); html+=indicatorPanel(s,pb); html+=marketPanel(s,pb); html+=panel('Manage Position',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;"><button onclick="showV2CloseFlow('${s.id}')" style="padding:11px;border-radius:10px;border:1px solid ${C.red}66;background:${C.redDim};color:${C.red};font-weight:800;cursor:pointer;">Sell</button><button onclick="showV2StopFlow('${s.id}')" style="padding:11px;border-radius:10px;border:1px solid ${C.border};background:${C.cardHigh};color:${C.text};font-weight:800;cursor:pointer;">Update Stop</button></div>`); }
   else { html+=setupEducationPanel(s,pb); html+=panel('Setup Requirements',checklistHTML(checks)); if(['BUY','A+ BUY'].includes(st.state))html+=entryPanel(s,pb,st); html+=riskPanel(s,pb); html+=regressionPanel(s,pb); html+=earningsPanel(s,pb); html+=marketPanel(s,pb); if(conflict)html+=panel('Portfolio Conflict',`<div style="color:${C.yellow};font-size:12.5px;line-height:1.55;font-weight:700;">${conflict}</div>`); html+=historyPanel(pb); html+=yourTradeProofPanel(s,pb); html+=sweetSpotPanel(s,pb); html+=indicatorPanel(s,pb); }
   el.innerHTML=html;
 }
@@ -9648,7 +9721,7 @@ async function applyV2Daily(){
   // saves to Firestore through normal BUY/SELL/favorite/manual-edit actions.
   dailyOverlayByTicker = new Map(updates.map(u=>[String(u.ticker||'').toUpperCase(), dailyOverlayFields(u)]));
   persistDailyOverlayLocal();
-  // v2.9.50: save the lightweight latest-daily overlay once so laptop/phone
+  // v2.9.51: save the lightweight latest-daily overlay once so laptop/phone
   // load the same completed dataset. This replaces device-only local state.
   if(statusEl){ statusEl.textContent='Syncing daily data across devices…'; }
   const syncInfo=await saveDailyOverlayCloud(dailyOverlayByTicker);
@@ -9975,7 +10048,7 @@ function showSundayDiscoveryFlow(){
     </div>
   </div>`);
 }
-(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.50 · Cross-Device Daily Sync';})();
+(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.51 · Cross-Device Daily Sync';})();
 </script>
 
 </body>
