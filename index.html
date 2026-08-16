@@ -459,23 +459,53 @@ let mentorShowLimitedIntro = false; // whether step 0 is the Limited History int
 let searchQuery = '';
 let sortMode = 'opportunity'; // 'opportunity' | 'price' | 'pct' | 'name'
 let portfolioHidden = false;
-let accountSize = parseFloat(localStorage.getItem('stockiq_account')||'0') || 0;
+const CAPITAL_SETTINGS_STORAGE_KEY='stockiq_account';
+const CAPITAL_SETTINGS_DOC_ID='capitalPlan';
+// Forward-test default. The user can change this at any time by clicking the
+// dollar amount in Capital Plan. It is also synced so phone/laptop agree.
+let accountSize = parseFloat(localStorage.getItem(CAPITAL_SETTINGS_STORAGE_KEY)||'0') || 3000;
+function capitalSettingsRef(uid){ return db.collection('users').doc(uid).collection('settings').doc(CAPITAL_SETTINGS_DOC_ID); }
+async function syncAccountSizeFromCloud(){
+  if(!currentUser) return;
+  try{
+    const snap=await capitalSettingsRef(currentUser.uid).get();
+    if(snap.exists){
+      const n=Number(snap.data()?.accountSize);
+      if(Number.isFinite(n)&&n>0){
+        accountSize=n;
+        try{ localStorage.setItem(CAPITAL_SETTINGS_STORAGE_KEY,String(accountSize)); }catch(e){}
+        renderHome();
+        return;
+      }
+    }
+    // First run after this upgrade: if an old placeholder $1,000 is present,
+    // migrate the forward-test capital to the agreed $3,000 baseline.
+    if(accountSize===1000) accountSize=3000;
+    await capitalSettingsRef(currentUser.uid).set({accountSize,updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});
+    try{ localStorage.setItem(CAPITAL_SETTINGS_STORAGE_KEY,String(accountSize)); }catch(e){}
+    renderHome();
+  }catch(e){ console.warn('Capital-plan sync failed',e); }
+}
 function setAccountSize(){
   showModal(`
     <div style="background:${C.card};border-radius:20px;padding:24px;border:1px solid ${C.border};">
-      <div style="color:${C.text};font-size:18px;font-weight:800;text-align:center;margin-bottom:6px;">Risk sizing</div>
-      <div style="color:#AEB4C2;font-size:12.5px;line-height:1.55;text-align:center;margin-bottom:16px;">Used to size every trade at 1% risk. If this is $10,000, each trade risks $100, and the app works out the shares from your stop.</div>
-      <input id="acct-input" type="text" inputmode="decimal" value="${accountSize||''}" placeholder="e.g. 10000" style="width:100%;background:${C.cardHigh};border:1px solid ${C.border};border-radius:10px;color:${C.text};font-size:18px;font-weight:700;padding:13px;outline:none;box-sizing:border-box;margin-bottom:16px;text-align:center;">
+      <div style="color:${C.text};font-size:18px;font-weight:800;text-align:center;margin-bottom:6px;">Portfolio capital</div>
+      <div style="color:#AEB4C2;font-size:12.5px;line-height:1.55;text-align:center;margin-bottom:16px;">This is the capital StockIQ is allowed to allocate. The capital engine uses the setup's evidence tier, stop distance, position limits, and the 3% total planned portfolio stop-risk cap to size trades.</div>
+      <input id="acct-input" type="text" inputmode="decimal" value="${accountSize||''}" placeholder="e.g. 3000" style="width:100%;background:${C.cardHigh};border:1px solid ${C.border};border-radius:10px;color:${C.text};font-size:18px;font-weight:700;padding:13px;outline:none;box-sizing:border-box;margin-bottom:16px;text-align:center;">
       <div style="display:flex;gap:10px;">
         <button onclick="closeAllOverlays()" style="flex:1;padding:13px;border-radius:12px;border:1px solid ${C.border};background:none;color:${C.textSub};font-size:14px;font-weight:700;cursor:pointer;">Cancel</button>
         <button onclick="saveAccountSize(document.getElementById('acct-input').value)" style="flex:1;padding:13px;border-radius:12px;border:none;background:${C.green};color:#000;font-size:14px;font-weight:900;cursor:pointer;">Save</button>
       </div>
     </div>`);
 }
-function saveAccountSize(val){
+async function saveAccountSize(val){
   const n = parseFloat(String(val).replace(/[^0-9.]/g,''));
   accountSize = (n>0)?n:0;
-  try{ localStorage.setItem('stockiq_account', String(accountSize)); }catch(e){}
+  try{ localStorage.setItem(CAPITAL_SETTINGS_STORAGE_KEY, String(accountSize)); }catch(e){}
+  if(currentUser && accountSize>0){
+    try{ await capitalSettingsRef(currentUser.uid).set({accountSize,updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true}); }
+    catch(e){ console.warn('Could not sync portfolio capital',e); }
+  }
   closeAllOverlays();
   if(detailStockId){ const s=stocks.find(x=>String(x.id)===String(detailStockId)); if(s) renderDetail(s); }
   renderHome();
@@ -796,6 +826,8 @@ auth.onAuthStateChanged(user => {
       console.error(err);
       showSaveStatus('error');
     });
+    // Keep portfolio capital identical across devices as well.
+    syncAccountSizeFromCloud();
     // v2.9.51: synchronize the latest lightweight daily dataset across devices.
     // This is one small cloud document, not 95 stock-document writes.
     syncDailyOverlayFromCloud().then(info=>{
@@ -8709,7 +8741,8 @@ function validatedAtrProfitTrail(s, includeLatest=true){
     }
   }
   if(!checkpointHit || best==null) return null;
-  return {price:Math.max(base,best),mult};
+  const trailControls = best > base;
+  return {price:trailControls?best:base,mult,rawTrail:best,base,trailControls};
 }
 function suggestedStop(s){
   const pb=pbFor(s); if(!pb||!s.position?.entry)return {price:null,type:'Emergency Stop',active:false};
@@ -8718,7 +8751,10 @@ function suggestedStop(s){
   const trail=validatedAtrProfitTrail(s,true);
   if(trail){
     const ep=exitPersonality(s);
-    return {price:trail.price,type:'Profit Stop',active:true,atrMult:trail.mult,why:`+${PROFIT_CHECKPOINT_PCT}% checkpoint reached; ${trail.mult.toFixed(1)}× ATR ${ep.label.toLowerCase()} trail is active for the next session and only ratchets upward.`};
+    const why = trail.trailControls
+      ? `+${PROFIT_CHECKPOINT_PCT}% checkpoint reached. The ${trail.mult.toFixed(1)}× ATR ${ep.label.toLowerCase()} trail now controls the active stop and only ratchets upward.`
+      : `+${PROFIT_CHECKPOINT_PCT}% checkpoint reached. The ${trail.mult.toFixed(1)}× ATR ${ep.label.toLowerCase()} trail is monitoring the trade, but it has not yet risen above the original protective stop. The original stop remains active.`;
+    return {price:trail.price,type:'Active Stop',active:true,atrMult:trail.mult,trailControls:trail.trailControls,why};
   }
   return {price:base,type:'Emergency Stop',active:false,why:'Original capital-protection stop remains active until the +6% checkpoint is reached.'};
 }
@@ -8727,7 +8763,7 @@ function activeStopForLatestBar(s){
   const base=originalStop(s);
   // Exclude the latest bar because a trail calculated from today's completed bar was NOT active during today.
   const trail=validatedAtrProfitTrail(s,false);
-  if(trail) return {price:trail.price,type:'Profit Stop',active:true,atrMult:trail.mult};
+  if(trail) return {price:trail.price,type:'Active Stop',active:true,atrMult:trail.mult,trailControls:trail.trailControls};
   return {price:base,type:'Emergency Stop',active:false};
 }
 function latestStopBreach(s){
@@ -10072,7 +10108,7 @@ function showSundayDiscoveryFlow(){
     </div>
   </div>`);
 }
-(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.55 · History Lifecycle';})();
+(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.57 · Active Stop Clarity';})();
 
 // ── v2.9.54 HISTORY LIFECYCLE ──────────────────────────────────────
 // Research is no longer a catch-all. The visible Research tab contains only:
@@ -10313,7 +10349,7 @@ function renderStockList(){
 }
 
 (function v2953Init(){
-  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.55 · History Lifecycle';
+  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.57 · Active Stop Clarity';
   // Safe cleanup on load: de-duplicate queue and remove only records that already
   // have evidence. Genuine pending Sunday names are never deleted automatically.
   try{ applyResearchReconciliation(true); }catch(e){ console.warn('Research reconciliation init failed',e); }
