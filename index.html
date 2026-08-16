@@ -10297,7 +10297,7 @@ function showSundayDiscoveryFlow(){
     </div>
   </div>`);
 }
-(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.64 · Cross-Device State Hardening';})();
+(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.65 · Automatic Signal Ledger';})();
 
 // ── v2.9.54 HISTORY LIFECYCLE ──────────────────────────────────────
 // Research is no longer a catch-all. The visible Research tab contains only:
@@ -10539,12 +10539,240 @@ function renderStockList(){
 }
 
 (function v2953Init(){
-  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.64 · Cross-Device State Hardening';
+  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.65 · Automatic Signal Ledger';
   // Safe cleanup on load: de-duplicate queue and remove only records that already
   // have evidence. Genuine pending Sunday names are never deleted automatically.
   try{ applyResearchReconciliation(true); }catch(e){ console.warn('Research reconciliation init failed',e); }
 })();
 
+</script>
+
+<script>
+// ── AUTOMATIC BUY SIGNAL LEDGER · v2.9.65 ────────────────────────────────────
+// Every qualified BUY/A+ BUY is frozen automatically, whether the user funds it
+// or not. This prevents selection bias during forward testing. The ledger is
+// observational only: it never changes BUY/PREPARING/EXIT logic.
+const SIGNAL_LEDGER_STORAGE_KEY='stockiq_signal_ledger_v1';
+const SIGNAL_LEDGER_DOC_ID='signalLedgerV1';
+let SIGNAL_LEDGER=[];
+let signalLedgerCloudBusy=false;
+let signalLedgerSaveTimer=null;
+
+function loadSignalLedger(){
+  try{ SIGNAL_LEDGER=JSON.parse(localStorage.getItem(SIGNAL_LEDGER_STORAGE_KEY)||'[]')||[]; }
+  catch(e){ SIGNAL_LEDGER=[]; }
+}
+function signalLedgerRef(uid){ return db.collection('users').doc(uid).collection('settings').doc(SIGNAL_LEDGER_DOC_ID); }
+function saveSignalLedgerLocal(){
+  try{ localStorage.setItem(SIGNAL_LEDGER_STORAGE_KEY,JSON.stringify(SIGNAL_LEDGER.slice(-500))); }
+  catch(e){ console.warn('Signal ledger local save failed',e); }
+  scheduleSignalLedgerCloudSave();
+}
+function scheduleSignalLedgerCloudSave(){
+  if(!currentUser||signalLedgerCloudBusy)return;
+  clearTimeout(signalLedgerSaveTimer);
+  signalLedgerSaveTimer=setTimeout(()=>saveSignalLedgerCloud(),350);
+}
+async function saveSignalLedgerCloud(){
+  if(!currentUser||signalLedgerCloudBusy)return;
+  try{
+    const rows=SIGNAL_LEDGER.slice(-500);
+    const payload=cleanForFirestore({schemaVersion:1,signals:rows,updatedAt:firebase.firestore.FieldValue.serverTimestamp()});
+    const approxBytes=new Blob([JSON.stringify({...payload,updatedAt:null})]).size;
+    if(approxBytes>850000) throw new Error(`Signal ledger is too large (${Math.round(approxBytes/1024)} KB). Export/archive older signals before adding more.`);
+    await Promise.race([
+      signalLedgerRef(currentUser.uid).set(payload,{merge:false}),
+      new Promise((_,rej)=>setTimeout(()=>rej(new Error('Signal-ledger cloud save timed out after 15s')),15000))
+    ]);
+  }catch(e){ console.warn('Signal ledger cloud save failed',e); }
+}
+function signalLedgerTime(r){
+  const d=new Date(r?.updatedOn||r?.createdOn||r?.signalDate||0); return isNaN(d)?0:d.getTime();
+}
+function mergeSignalLedgers(cloud=[],local=[]){
+  const by=new Map();
+  for(const r of [...(cloud||[]),...(local||[])]){
+    const id=String(r?.id||''); if(!id)continue;
+    const prev=by.get(id);
+    if(!prev || signalLedgerTime(r)>=signalLedgerTime(prev)) by.set(id,r);
+  }
+  return [...by.values()].sort((a,b)=>String(a.signalDate||'').localeCompare(String(b.signalDate||''))).slice(-500);
+}
+async function syncSignalLedgerFromCloud(){
+  if(!currentUser)return;
+  signalLedgerCloudBusy=true;
+  try{
+    loadSignalLedger();
+    const snap=await Promise.race([
+      signalLedgerRef(currentUser.uid).get(),
+      new Promise((_,rej)=>setTimeout(()=>rej(new Error('Signal-ledger cloud read timed out after 15s')),15000))
+    ]);
+    if(snap.exists) SIGNAL_LEDGER=mergeSignalLedgers(snap.data()?.signals||[],SIGNAL_LEDGER);
+    saveSignalLedgerLocalNoCloud();
+  }catch(e){ console.warn('Signal ledger cloud sync failed',e); }
+  finally{ signalLedgerCloudBusy=false; }
+  await saveSignalLedgerCloud();
+  updateAndCaptureSignals();
+}
+function saveSignalLedgerLocalNoCloud(){
+  try{ localStorage.setItem(SIGNAL_LEDGER_STORAGE_KEY,JSON.stringify(SIGNAL_LEDGER.slice(-500))); }catch(e){}
+}
+function signalIdFor(s,st,date){
+  const pb=pbFor(s); return [String(s.ticker||'').toUpperCase(),date,cleanPlaybookName(pb)||pb?.name||'PLAYBOOK',st].join('|');
+}
+function signalSnapshotFor(s){
+  const pb=pbFor(s), reg=regressionStats(s), px=curVal(s,'price'), atr=curVal(s,'atr'), earn=earningsState(s);
+  return {
+    rsi:curVal(s,'rsi'), regZ126:reg?.z??null, momentum20:changeN(s,20),
+    atrPct:(px&&atr)?atr/px*100:null, pctFrom52High:pctFrom52High(s), relativeVolume:relativeVolume(s),
+    ema20:curVal(s,'ema20')??curVal(s,'ma20'), sma50:curVal(s,'ma50'), sma200:curVal(s,'ma200'),
+    earningsRule:earn?.rule||pb?.earnings||null, earningsDays:earn?.days??null,
+    sector:s.sector||null, industry:s.industry||null
+  };
+}
+function captureQualifiedSignals(){
+  if(!(stocks||[]).length)return false;
+  let changed=false;
+  let plan=null;
+  try{ plan=capitalPlan(); }catch(e){ plan=null; }
+  const nowIso=new Date().toISOString();
+  for(const s of stocks){
+    if(isMarketStock(s)||s.position||!isValidatedStock(s))continue;
+    const ss=safeStockState(s); if(!['BUY','A+ BUY'].includes(ss?.state))continue;
+    const d=latestSnap(s)?.date||s.analyzed||today();
+    const id=signalIdFor(s,ss.state,d);
+    if(SIGNAL_LEDGER.some(r=>r.id===id))continue;
+    const pb=pbFor(s), cap=plan?.rows?.find(r=>String(r.s?.id)===String(s.id))||null;
+    const ev=evidenceFor(s)||{};
+    SIGNAL_LEDGER.push({
+      id,ticker:String(s.ticker||'').toUpperCase(),name:s.name||'',signalDate:d,signalTier:ss.state,
+      playbook:cleanPlaybookName(pb)||pb?.name||'',family:pb?.family||null,evidenceGrade:ev.grade||modernEvidenceLabel(s,pb)||'',
+      signalPrice:curVal(s,'price'),buyUpTo:buyUpTo(s),signalReason:ss.reason||'',snapshot:signalSnapshotFor(s),
+      capitalDecision:cap?.status||'UNASSESSED',capitalWhy:cap?.why||'',suggestedInvestment:cap?.amount||0,
+      suggestedShares:cap?.shares||0,plannedRisk:cap?.risk||0,riskPct:cap?.riskPct??null,stopPct:Number(pb?.stopPct||0),
+      executionStatus:'PENDING_NEXT_SESSION',shadowEntryDate:null,shadowEntryPrice:null,actualFunded:false,
+      observationBars:Number(pb?.maxHold||pb?.hold||20),barsTracked:0,hit6Pct:false,mfePct:null,maePct:null,
+      currentReturnPct:null,finalShadowReturnPct:null,shadowStatus:'PENDING',createdOn:nowIso,updatedOn:nowIso
+    });
+    changed=true;
+  }
+  if(changed){ SIGNAL_LEDGER=SIGNAL_LEDGER.slice(-500); saveSignalLedgerLocal(); }
+  return changed;
+}
+function rowsAfterSignal(s,date){
+  return (s?.snapshots||[]).filter(x=>x?.date&&String(x.date)>String(date)).sort((a,b)=>new Date(a.date)-new Date(b.date));
+}
+function updateSignalOutcomes(){
+  if(!SIGNAL_LEDGER.length||!(stocks||[]).length)return false;
+  let changed=false; const nowIso=new Date().toISOString();
+  for(const r of SIGNAL_LEDGER){
+    const s=stocks.find(x=>String(x.ticker||'').toUpperCase()===String(r.ticker||'').toUpperCase()); if(!s)continue;
+    const after=rowsAfterSignal(s,r.signalDate);
+    if(!r.shadowEntryDate && after.length){
+      const first=after[0], entry=Number(first.open||first.price||0);
+      if(entry>0){
+        if(Number(r.buyUpTo)>0 && entry>Number(r.buyUpTo)){
+          r.executionStatus='MISSED_CHASE'; r.shadowStatus='MISSED_CHASE'; r.shadowEntryDate=first.date; r.shadowEntryPrice=entry;
+        }else{
+          r.executionStatus=r.actualFunded?'TAKEN':'SHADOW'; r.shadowStatus='TRACKING'; r.shadowEntryDate=first.date; r.shadowEntryPrice=entry;
+        }
+        r.updatedOn=nowIso; changed=true;
+      }
+    }
+    if(r.shadowEntryDate && r.shadowStatus!=='MISSED_CHASE' && Number(r.shadowEntryPrice)>0){
+      const path=(s.snapshots||[]).filter(x=>x?.date&&String(x.date)>=String(r.shadowEntryDate)).sort((a,b)=>new Date(a.date)-new Date(b.date));
+      if(path.length){
+        const ep=Number(r.shadowEntryPrice), highs=path.map(x=>Number(x.high||x.price)).filter(Number.isFinite), lows=path.map(x=>Number(x.low||x.price)).filter(Number.isFinite);
+        const last=path[path.length-1], lp=Number(last.price||curVal(s,'price')||0);
+        const mfe=highs.length?(Math.max(...highs)/ep-1)*100:null, mae=lows.length?(Math.min(...lows)/ep-1)*100:null;
+        const ret=lp>0?(lp/ep-1)*100:null, bars=path.length;
+        const vals=[['mfePct',mfe],['maePct',mae],['currentReturnPct',ret],['barsTracked',bars]];
+        for(const [k,v] of vals){ if(v!=null && r[k]!==v){r[k]=v;changed=true;} }
+        if(mfe!=null&&mfe>=6&&!r.hit6Pct){r.hit6Pct=true;changed=true;}
+        if(bars>=Number(r.observationBars||20) && r.shadowStatus==='TRACKING'){
+          r.shadowStatus='OBSERVATION_COMPLETE'; r.finalShadowReturnPct=ret; changed=true;
+        }
+        if(changed)r.updatedOn=nowIso;
+      }
+    }
+  }
+  if(changed)saveSignalLedgerLocal();
+  return changed;
+}
+function updateAndCaptureSignals(){
+  loadSignalLedger();
+  updateSignalOutcomes();
+  captureQualifiedSignals();
+}
+function mostRecentSignal(ticker,predicate=()=>true){
+  return SIGNAL_LEDGER.filter(r=>r.ticker===String(ticker||'').toUpperCase()&&predicate(r)).sort((a,b)=>String(b.signalDate||'').localeCompare(String(a.signalDate||'')))[0]||null;
+}
+function markSignalFunded(ticker,entry,shares,date,tier){
+  loadSignalLedger();
+  let r=mostRecentSignal(ticker,x=>!x.actualFunded && ['PENDING_NEXT_SESSION','SHADOW'].includes(x.executionStatus));
+  if(!r){ updateAndCaptureSignals(); r=mostRecentSignal(ticker,x=>!x.actualFunded); }
+  if(!r)return;
+  r.actualFunded=true; r.actualEntryDate=date; r.actualEntryPrice=entry; r.actualShares=shares; r.actualSignalTier=tier||r.signalTier;
+  r.executionStatus='TAKEN'; r.updatedOn=new Date().toISOString(); saveSignalLedgerLocal();
+}
+function markSignalActualExit(ticker,realizedRec){
+  loadSignalLedger();
+  const r=mostRecentSignal(ticker,x=>x.actualFunded&&!x.actualExitDate); if(!r||!realizedRec)return;
+  r.actualExitDate=realizedRec.dateOut||realizedRec.date; r.actualExitPrice=realizedRec.exit; r.actualPLPct=realizedRec.plPct;
+  r.actualMfePct=realizedRec.mfePct; r.actualMaePct=realizedRec.maePct; r.updatedOn=new Date().toISOString(); saveSignalLedgerLocal();
+}
+function csvSafe(v){ const s=v==null?'':String(v); return /[",\n]/.test(s)?`"${s.replace(/"/g,'""')}"`:s; }
+function downloadSignalLedger(){
+  updateAndCaptureSignals();
+  const cols=['SignalDate','Ticker','SignalTier','Playbook','Family','EvidenceGrade','SignalPrice','BuyUpTo','CapitalDecision','CapitalWhy','SuggestedInvestment','SuggestedShares','PlannedRisk','RSI','RegZ126','Momentum20','ATRPct','PctFrom52WHigh','RelativeVolume','EarningsRule','EarningsDays','ExecutionStatus','ShadowEntryDate','ShadowEntryPrice','ShadowStatus','BarsTracked','CurrentReturnPct','MFEPct','MAEPct','Hit6Pct','FinalShadowReturnPct','ActualFunded','ActualEntryDate','ActualEntryPrice','ActualShares','ActualExitDate','ActualExitPrice','ActualPLPct'];
+  const rows=SIGNAL_LEDGER.map(r=>[r.signalDate,r.ticker,r.signalTier,r.playbook,r.family,r.evidenceGrade,r.signalPrice,r.buyUpTo,r.capitalDecision,r.capitalWhy,r.suggestedInvestment,r.suggestedShares,r.plannedRisk,r.snapshot?.rsi,r.snapshot?.regZ126,r.snapshot?.momentum20,r.snapshot?.atrPct,r.snapshot?.pctFrom52High,r.snapshot?.relativeVolume,r.snapshot?.earningsRule,r.snapshot?.earningsDays,r.executionStatus,r.shadowEntryDate,r.shadowEntryPrice,r.shadowStatus,r.barsTracked,r.currentReturnPct,r.mfePct,r.maePct,r.hit6Pct,r.finalShadowReturnPct,r.actualFunded,r.actualEntryDate,r.actualEntryPrice,r.actualShares,r.actualExitDate,r.actualExitPrice,r.actualPLPct]);
+  const csv=[cols,...rows].map(row=>row.map(csvSafe).join(',')).join('\n');
+  const blob=new Blob([csv],{type:'text/csv'}),a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`StockIQ_Signal_Ledger_${today()}.csv`; a.click(); URL.revokeObjectURL(a.href);
+}
+function showSignalLedger(){
+  updateAndCaptureSignals();
+  const total=SIGNAL_LEDGER.length,funded=SIGNAL_LEDGER.filter(x=>x.actualFunded).length,tracking=SIGNAL_LEDGER.filter(x=>x.shadowStatus==='TRACKING').length,missed=SIGNAL_LEDGER.filter(x=>x.shadowStatus==='MISSED_CHASE').length,complete=SIGNAL_LEDGER.filter(x=>x.shadowStatus==='OBSERVATION_COMPLETE').length;
+  const recent=[...SIGNAL_LEDGER].sort((a,b)=>String(b.signalDate||'').localeCompare(String(a.signalDate||''))).slice(0,12);
+  showModal(`<div style="background:${C.card};border-radius:20px;padding:22px;border:1px solid ${C.border};max-height:82vh;overflow:auto;"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;"><div><div style="color:${C.text};font-size:19px;font-weight:950;">Forward Signal Log</div><div style="color:${C.textSub};font-size:11.5px;line-height:1.5;margin-top:4px;">Every BUY/A+ BUY is frozen automatically, even when capital rules prevent a purchase. This ledger is evidence only and never changes trading logic.</div></div><button onclick="closeAllOverlays()" style="background:none;border:none;color:${C.textMuted};font-size:19px;cursor:pointer;">×</button></div><div style="display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin:14px 0;">${[[total,'Signals'],[funded,'Funded'],[tracking,'Tracking'],[missed,'Missed chase']].map(([n,l])=>`<div style="background:${C.cardHigh};border-radius:10px;padding:9px;"><div style="color:${C.text};font-size:16px;font-weight:950;">${n}</div><div style="color:${C.textMuted};font-size:9.5px;font-weight:850;">${l}</div></div>`).join('')}</div><button onclick="downloadSignalLedger()" style="width:100%;padding:11px;border-radius:10px;border:1px solid ${C.teal};background:${C.tealDim};color:${C.teal};font-weight:900;cursor:pointer;margin-bottom:12px;">Download Signal Ledger CSV</button>${recent.map(r=>`<div style="padding:9px 0;border-bottom:1px solid ${C.border};"><div style="display:flex;justify-content:space-between;gap:10px;"><div><span style="color:${C.text};font-weight:950;">${r.ticker}</span> <span style="color:${r.signalTier==='A+ BUY'?C.green:C.teal};font-size:10px;font-weight:900;">${r.signalTier}</span></div><div style="color:${C.textMuted};font-size:10px;">${r.signalDate}</div></div><div style="color:${C.textSub};font-size:10.5px;margin-top:3px;">${r.playbook||r.family||'Playbook'} · ${r.capitalDecision||'—'} · ${r.shadowStatus||r.executionStatus}${r.currentReturnPct!=null?` · ${r.currentReturnPct>=0?'+':''}${Number(r.currentReturnPct).toFixed(1)}%`:''}</div></div>`).join('')||`<div style="color:${C.textMuted};font-size:12px;">No BUY signals have been captured yet.</div>`}<div style="color:${C.textMuted};font-size:10px;line-height:1.5;margin-top:10px;">Observation complete: ${complete}. The 20–30 completed-signal review will compare all qualified signals with the funded portfolio so we can measure signal quality and whether capital selection helped or hurt.</div></div>`);
+}
+
+// Keep Signal Log beside the view tags; top buttons remain data-input only.
+const _v2965RenderFilterBar=renderFilterBar;
+renderFilterBar=function(){
+  _v2965RenderFilterBar();
+  const el=document.getElementById('filter-bar'); const row=el?.firstElementChild; if(!row)return;
+  if(!row.querySelector('[data-signal-log]')){
+    const b=document.createElement('button'); b.setAttribute('data-signal-log','1'); b.textContent='Signal Log'; b.title='Forward-test BUY signal ledger';
+    b.onclick=showSignalLedger; b.style.cssText=`padding:5px 8px;border-radius:8px;font-size:9.5px;font-weight:850;border:1px solid ${C.border};background:${C.cardHigh};color:${C.textMuted};cursor:pointer;white-space:nowrap;`;
+    row.appendChild(b);
+  }
+};
+
+// Capture on every list refresh. Dedupe by ticker + signal date + playbook + tier,
+// so repeated renders never create duplicate signals.
+const _v2965RenderStockList=renderStockList;
+renderStockList=function(){ updateAndCaptureSignals(); return _v2965RenderStockList(); };
+
+// Link real/manual test purchases back to the already-frozen signal record.
+const _v2965SaveBuy=saveV2Buy;
+saveV2Buy=async function(id,signalTier){
+  const before=stocks.find(x=>String(x.id)===String(id));
+  await _v2965SaveBuy(id,signalTier);
+  const after=stocks.find(x=>String(x.id)===String(id));
+  if(after?.position){ markSignalFunded(after.ticker,Number(after.position.entry),Number(after.position.shares),after.position.date,after.position.signalTier); }
+};
+const _v2965SaveClose=saveV2Close;
+saveV2Close=async function(id){
+  const before=stocks.find(x=>String(x.id)===String(id)); const ticker=before?.ticker;
+  await _v2965SaveClose(id);
+  const after=stocks.find(x=>String(x.id)===String(id));
+  if(ticker && !after?.position){ const rec=(after?.realized||[]).slice(-1)[0]; markSignalActualExit(ticker,rec); }
+};
+
+auth.onAuthStateChanged(user=>{ if(user){ loadSignalLedger(); syncSignalLedgerFromCloud(); } else { SIGNAL_LEDGER=[]; } });
+loadSignalLedger();
+setTimeout(()=>{ try{ updateAndCaptureSignals(); renderFilterBar(); }catch(e){ console.warn('Signal ledger init failed',e); } },800);
+const _v2965Version=document.getElementById('stockiq-version'); if(_v2965Version)_v2965Version.textContent='StockIQ v2.9.65 · Automatic Signal Ledger';
 </script>
 
 </body>
