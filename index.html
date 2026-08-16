@@ -10072,7 +10072,7 @@ function showSundayDiscoveryFlow(){
     </div>
   </div>`);
 }
-(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.54 · History Lifecycle';})();
+(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.55 · History Lifecycle';})();
 
 // ── v2.9.54 HISTORY LIFECYCLE ──────────────────────────────────────
 // Research is no longer a catch-all. The visible Research tab contains only:
@@ -10091,10 +10091,24 @@ function saveResearchHistoryStatus(){
   try{localStorage.setItem(HISTORY_STATUS_STORAGE_KEY,JSON.stringify(RESEARCH_HISTORY_STATUS));}catch(e){console.warn('Research history status save failed',e);}
 }
 function historyStatusForTicker(t){ loadResearchHistoryStatus(); return RESEARCH_HISTORY_STATUS[String(t||'').trim().toUpperCase()]||null; }
+function parseGenericCSVRecords(text){
+  const lines=String(text||'').trim().split(/\r?\n/).filter(Boolean);
+  if(lines.length<2) return [];
+  const delim=lines[0].includes('\t')?'\t':',';
+  const headers=lines[0].split(delim).map(h=>h.replace(/^\uFEFF/,'').trim());
+  const out=[];
+  for(let i=1;i<lines.length;i++){
+    const cols=lines[i].split(delim).map(c=>c.trim());
+    const rec={};
+    headers.forEach((h,j)=>{ rec[h]=cols[j]??''; });
+    out.push(rec);
+  }
+  return out;
+}
 async function importResearchHistoryStatus(input){
   const f=input?.files?.[0]; if(!f)return;
   try{
-    const text=await f.text(); const rows=parseCSV(text)||[];
+    const text=await f.text(); const rows=parseGenericCSVRecords(text)||[];
     if(!rows.length) throw new Error('No rows found in History Status CSV.');
     let imported=0, insufficient=0, errors=0, ready=0;
     loadResearchHistoryStatus(); loadSundayDiscoveryState();
@@ -10299,7 +10313,7 @@ function renderStockList(){
 }
 
 (function v2953Init(){
-  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.54 · History Lifecycle';
+  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.55 · History Lifecycle';
   // Safe cleanup on load: de-duplicate queue and remove only records that already
   // have evidence. Genuine pending Sunday names are never deleted automatically.
   try{ applyResearchReconciliation(true); }catch(e){ console.warn('Research reconciliation init failed',e); }
