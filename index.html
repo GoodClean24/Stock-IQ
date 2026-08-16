@@ -10072,16 +10072,52 @@ function showSundayDiscoveryFlow(){
     </div>
   </div>`);
 }
-(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.53 · Research Reconciliation';})();
+(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.54 · History Lifecycle';})();
 
-// ── v2.9.53 RESEARCH RECONCILIATION ──────────────────────────────────────
+// ── v2.9.54 HISTORY LIFECYCLE ──────────────────────────────────────
 // Research is no longer a catch-all. The visible Research tab contains only:
 //   1) genuine Sunday discoveries still waiting for 6-year validation, and
 //   2) completed validation names kept as research/shadow.
 // Rejected, qualified, stale queue records, and legacy unclassified names stay
 // out of the normal Research view. Legacy names are preserved for audit rather
 // than silently deleted because their original scanner source is unknown.
-const RESEARCH_RECON_VERSION='1';
+const RESEARCH_RECON_VERSION='2';
+const HISTORY_STATUS_STORAGE_KEY='stockiq_history_status_v1';
+let RESEARCH_HISTORY_STATUS={};
+function loadResearchHistoryStatus(){
+  try{RESEARCH_HISTORY_STATUS=JSON.parse(localStorage.getItem(HISTORY_STATUS_STORAGE_KEY)||'{}')||{};}catch(e){RESEARCH_HISTORY_STATUS={};}
+}
+function saveResearchHistoryStatus(){
+  try{localStorage.setItem(HISTORY_STATUS_STORAGE_KEY,JSON.stringify(RESEARCH_HISTORY_STATUS));}catch(e){console.warn('Research history status save failed',e);}
+}
+function historyStatusForTicker(t){ loadResearchHistoryStatus(); return RESEARCH_HISTORY_STATUS[String(t||'').trim().toUpperCase()]||null; }
+async function importResearchHistoryStatus(input){
+  const f=input?.files?.[0]; if(!f)return;
+  try{
+    const text=await f.text(); const rows=parseCSV(text)||[];
+    if(!rows.length) throw new Error('No rows found in History Status CSV.');
+    let imported=0, insufficient=0, errors=0, ready=0;
+    loadResearchHistoryStatus(); loadSundayDiscoveryState();
+    for(const r of rows){
+      const t=String(r.Symbol||r.symbol||r.Ticker||r.ticker||'').trim().toUpperCase(); if(!t)continue;
+      const status=String(r.HistoryStatus||r.historystatus||r.Status||r.status||'').trim().toUpperCase().replace(/\s+/g,'_');
+      if(!['HISTORY_READY','INSUFFICIENT_HISTORY','DATA_ERROR'].includes(status)) continue;
+      const rec={ticker:t,status,dailyRows:Number(r.DailyRows||r.dailyrows||0)||0,firstDate:r.FirstDate||r.firstdate||'',lastDate:r.LastDate||r.lastdate||'',message:r.Message||r.message||'',source:r.DiscoverySource||r.discoverysource||'',updatedOn:today()};
+      RESEARCH_HISTORY_STATUS[t]=rec; imported++;
+      if(status==='INSUFFICIENT_HISTORY') insufficient++; else if(status==='DATA_ERROR') errors++; else ready++;
+    }
+    // Only terminal non-validation states leave the waiting queue. HISTORY_READY remains
+    // queued until a Validation Results file gives it a final evidence disposition.
+    sundayResearchQueue=(sundayResearchQueue||[]).filter(x=>{
+      const h=RESEARCH_HISTORY_STATUS[String(x.ticker||'').trim().toUpperCase()];
+      return !(h && ['INSUFFICIENT_HISTORY','DATA_ERROR'].includes(h.status));
+    });
+    saveResearchHistoryStatus(); saveSundayDiscoveryState();
+    input.value=''; renderHome();
+    alert(`History status imported: ${imported}. Ready for validation: ${ready}. Insufficient history: ${insufficient}. Data errors: ${errors}.`);
+    showResearchReconciliation();
+  }catch(e){ console.error(e); alert('History status import failed: '+(e?.message||e)); }
+}
 
 function researchTicker(t){ return String(t||'').trim().toUpperCase(); }
 function dynamicEvidenceForTicker(t){ loadDynamicEvidence(); return DYNAMIC_RESEARCH_EVIDENCE[researchTicker(t)]||null; }
@@ -10091,7 +10127,7 @@ function isRejectedGrade(g){ return String(g||'').toUpperCase()==='REJECTED'; }
 
 function researchReconciliationSnapshot(){
   loadSundayDiscoveryState(); loadDynamicEvidence();
-  const pending=[], stale=[], shadow=[], rejected=[], qualified=[], legacy=[];
+  const pending=[], stale=[], shadow=[], rejected=[], qualified=[], legacy=[], insufficient=[], dataErrors=[];
   const seenQ=new Set();
   for(const raw of sundayResearchQueue||[]){
     const t=researchTicker(raw?.ticker); if(!t) continue;
@@ -10099,6 +10135,9 @@ function researchReconciliationSnapshot(){
     seenQ.add(t);
     const dyn=DYNAMIC_RESEARCH_EVIDENCE[t]||null;
     const builtin=RESEARCH_PROMOTION_EVIDENCE[t]||null;
+    const hs=historyStatusForTicker(t);
+    if(hs?.status==='INSUFFICIENT_HISTORY'){ insufficient.push({...hs,ticker:t}); continue; }
+    if(hs?.status==='DATA_ERROR'){ dataErrors.push({...hs,ticker:t}); continue; }
     const existing=stocks.find(s=>researchTicker(s.ticker)===t)||null;
     const validated=existing?isValidatedStock(existing):(dyn?.promotionReady===true || builtin?.promotionReady===true || !!VALIDATED_EVIDENCE_CLASS[t]);
     if(dyn){ stale.push({ticker:t,reason:`Validation already imported · ${dyn.grade||'EVIDENCE'}`}); continue; }
@@ -10107,10 +10146,17 @@ function researchReconciliationSnapshot(){
     pending.push({...raw,ticker:t,status:'NEEDS_6YR_VALIDATION'});
   }
 
+  loadResearchHistoryStatus();
+  for(const [t0,hs] of Object.entries(RESEARCH_HISTORY_STATUS||{})){
+    const t=researchTicker(t0); if(!t || seenQ.has(t)) continue;
+    if(hs?.status==='INSUFFICIENT_HISTORY') insufficient.push({...hs,ticker:t});
+    else if(hs?.status==='DATA_ERROR') dataErrors.push({...hs,ticker:t});
+  }
   const allTickers=new Set([
     ...stocks.filter(s=>!isMarketStock(s)).map(s=>researchTicker(s.ticker)),
     ...Object.keys(DYNAMIC_RESEARCH_EVIDENCE||{}).map(researchTicker),
-    ...Object.keys(RESEARCH_PROMOTION_EVIDENCE||{}).map(researchTicker)
+    ...Object.keys(RESEARCH_PROMOTION_EVIDENCE||{}).map(researchTicker),
+    ...Object.keys(RESEARCH_HISTORY_STATUS||{}).map(researchTicker)
   ]);
   for(const t of allTickers){
     if(!t) continue;
@@ -10131,7 +10177,9 @@ function researchReconciliationSnapshot(){
     pending:[...new Map(pending.map(x=>[x.ticker,x])).values()].sort((a,b)=>a.ticker.localeCompare(b.ticker)),
     stale:[...new Map(stale.map(x=>[x.ticker,x])).values()].sort((a,b)=>a.ticker.localeCompare(b.ticker)),
     shadow:[...new Set(shadow)].sort(), rejected:[...new Set(rejected)].sort(),
-    qualified:[...new Set(qualified)].sort(), legacy:[...new Set(legacy)].sort()
+    qualified:[...new Set(qualified)].sort(), legacy:[...new Set(legacy)].sort(),
+    insufficient:[...new Map(insufficient.map(x=>[x.ticker,x])).values()].sort((a,b)=>a.ticker.localeCompare(b.ticker)),
+    dataErrors:[...new Map(dataErrors.map(x=>[x.ticker,x])).values()].sort((a,b)=>a.ticker.localeCompare(b.ticker))
   };
 }
 
@@ -10167,16 +10215,25 @@ function showResearchReconciliation(){
   showModal(`<div style="background:${C.card};border-radius:18px;padding:20px;border:1px solid ${C.border};max-height:84vh;overflow:auto;">
     <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:5px;"><div><div style="color:${C.text};font-size:19px;font-weight:950;">Research Audit</div><div style="color:${C.textSub};font-size:11.5px;line-height:1.5;margin-top:4px;">Every Sunday discovery must reach a final disposition. Nothing should sit in limbo.</div></div><button onclick="closeAllOverlays()" style="background:none;border:none;color:${C.textMuted};font-size:19px;cursor:pointer;">×</button></div>
 
+    <input id="research-history-status-file" type="file" accept=".csv" style="display:none" onchange="importResearchHistoryStatus(this)">
+    <div style="display:flex;justify-content:flex-end;margin:8px 0 3px;"><button onclick="document.getElementById('research-history-status-file').click()" style="padding:6px 8px;border-radius:8px;border:1px solid ${C.border};background:${C.cardHigh};color:${C.textMuted};font-size:9.5px;font-weight:850;cursor:pointer;">Import History Status</button></div>
+
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:13px 0;">
       <div style="background:${C.tealDim};border:1px solid ${C.teal}44;border-radius:11px;padding:11px;"><div style="color:${C.teal};font-size:20px;font-weight:950;">${snap.pending.length}</div><div class="v2lbl">Needs 6-Year History</div></div>
       <div style="background:${C.yellowDim};border:1px solid ${C.yellow}44;border-radius:11px;padding:11px;"><div style="color:${C.yellow};font-size:20px;font-weight:950;">${snap.shadow.length}</div><div class="v2lbl">Research / Shadow</div></div>
       <div style="background:${C.cardHigh};border:1px solid ${C.border};border-radius:11px;padding:11px;"><div style="color:${C.textSub};font-size:20px;font-weight:950;">${snap.stale.length}</div><div class="v2lbl">Stale Queue Records</div></div>
       <div style="background:${C.cardHigh};border:1px solid ${C.border};border-radius:11px;padding:11px;"><div style="color:${C.textSub};font-size:20px;font-weight:950;">${snap.legacy.length}</div><div class="v2lbl">Legacy · Source Unknown</div></div>
+      <div style="background:${C.cardHigh};border:1px solid ${C.border};border-radius:11px;padding:11px;"><div style="color:${C.textSub};font-size:20px;font-weight:950;">${snap.insufficient.length}</div><div class="v2lbl">Insufficient History</div></div>
+      <div style="background:${C.cardHigh};border:1px solid ${C.border};border-radius:11px;padding:11px;"><div style="color:${C.red};font-size:20px;font-weight:950;">${snap.dataErrors.length}</div><div class="v2lbl">Data Error · Review</div></div>
     </div>
 
     <div style="background:${C.cardHigh};border:1px solid ${C.border};border-radius:12px;padding:12px;margin-bottom:9px;"><div style="color:${C.teal};font-size:10px;font-weight:950;text-transform:uppercase;letter-spacing:.07em;">Needs History Review · ${snap.pending.length}</div><div style="color:${C.textSub};font-size:11px;line-height:1.5;margin-top:4px;">These are genuine Sunday discoveries with scanner provenance and no completed validation result. They deserve the 6-year pull before any keep/reject decision.</div>${chips(snap.pending,C.teal)}${snap.pending.length?`<button onclick="downloadMissingHistoryQueue()" style="margin-top:10px;padding:8px 10px;border-radius:8px;border:1px solid ${C.teal};background:${C.tealDim};color:${C.teal};font-size:10.5px;font-weight:900;cursor:pointer;">Download Missing History CSV</button>`:''}</div>
 
     <div style="background:${C.cardHigh};border:1px solid ${C.border};border-radius:12px;padding:12px;margin-bottom:9px;"><div style="color:${C.yellow};font-size:10px;font-weight:950;text-transform:uppercase;letter-spacing:.07em;">Research / Shadow · ${snap.shadow.length}</div><div style="color:${C.textSub};font-size:11px;line-height:1.5;margin-top:4px;">Already completed 6-year validation. These did not earn automatic promotion but remain useful for shadow evidence.</div>${chips(snap.shadow,C.yellow)}</div>
+
+    ${snap.insufficient.length?`<div style="background:${C.cardHigh};border:1px solid ${C.border};border-radius:12px;padding:12px;margin-bottom:9px;"><div style="color:${C.textSub};font-size:10px;font-weight:950;text-transform:uppercase;letter-spacing:.07em;">Insufficient history · ${snap.insufficient.length}</div><div style="color:${C.textSub};font-size:11px;line-height:1.5;margin-top:4px;">These Sunday discoveries were researched, but they do not yet have enough public trading history for StockIQ's validation standard. They are not PROVEN and are no longer stuck in the 6-year queue.</div>${chips(snap.insufficient,C.textMuted)}</div>`:''}
+
+    ${snap.dataErrors.length?`<div style="background:${C.cardHigh};border:1px solid ${C.red}44;border-radius:12px;padding:12px;margin-bottom:9px;"><div style="color:${C.red};font-size:10px;font-weight:950;text-transform:uppercase;letter-spacing:.07em;">Data error · review · ${snap.dataErrors.length}</div><div style="color:${C.textSub};font-size:11px;line-height:1.5;margin-top:4px;">These names had a true download/data problem. They are preserved for review rather than rejected or silently deleted.</div>${chips(snap.dataErrors,C.red)}</div>`:''}
 
     ${snap.stale.length?`<div style="background:${C.cardHigh};border:1px solid ${C.border};border-radius:12px;padding:12px;margin-bottom:9px;"><div style="color:${C.text};font-size:10px;font-weight:950;text-transform:uppercase;letter-spacing:.07em;">Stale waiting records · ${snap.stale.length}</div><div style="color:${C.textSub};font-size:11px;line-height:1.5;margin-top:4px;">These already have evidence or qualification. Reconcile removes the obsolete waiting record; it does not delete their evidence.</div>${chips(snap.stale,C.textSub)}</div>`:''}
 
@@ -10242,7 +10299,7 @@ function renderStockList(){
 }
 
 (function v2953Init(){
-  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.53 · Research Reconciliation';
+  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.54 · History Lifecycle';
   // Safe cleanup on load: de-duplicate queue and remove only records that already
   // have evidence. Genuine pending Sunday names are never deleted automatically.
   try{ applyResearchReconciliation(true); }catch(e){ console.warn('Research reconciliation init failed',e); }
