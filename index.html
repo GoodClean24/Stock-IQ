@@ -10072,7 +10072,182 @@ function showSundayDiscoveryFlow(){
     </div>
   </div>`);
 }
-(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.52 · Live Direction Arrows';})();
+(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.53 · Research Reconciliation';})();
+
+// ── v2.9.53 RESEARCH RECONCILIATION ──────────────────────────────────────
+// Research is no longer a catch-all. The visible Research tab contains only:
+//   1) genuine Sunday discoveries still waiting for 6-year validation, and
+//   2) completed validation names kept as research/shadow.
+// Rejected, qualified, stale queue records, and legacy unclassified names stay
+// out of the normal Research view. Legacy names are preserved for audit rather
+// than silently deleted because their original scanner source is unknown.
+const RESEARCH_RECON_VERSION='1';
+
+function researchTicker(t){ return String(t||'').trim().toUpperCase(); }
+function dynamicEvidenceForTicker(t){ loadDynamicEvidence(); return DYNAMIC_RESEARCH_EVIDENCE[researchTicker(t)]||null; }
+function queueRecordForTicker(t){ loadSundayDiscoveryState(); const u=researchTicker(t); return sundayResearchQueue.find(x=>researchTicker(x.ticker)===u)||null; }
+function isShadowGrade(g){ return ['PROMISING','REGIME-STRONG','AGGRESSIVE','REGIME-WEAK'].includes(String(g||'').toUpperCase()); }
+function isRejectedGrade(g){ return String(g||'').toUpperCase()==='REJECTED'; }
+
+function researchReconciliationSnapshot(){
+  loadSundayDiscoveryState(); loadDynamicEvidence();
+  const pending=[], stale=[], shadow=[], rejected=[], qualified=[], legacy=[];
+  const seenQ=new Set();
+  for(const raw of sundayResearchQueue||[]){
+    const t=researchTicker(raw?.ticker); if(!t) continue;
+    if(seenQ.has(t)){ stale.push({ticker:t,reason:'Duplicate queue record'}); continue; }
+    seenQ.add(t);
+    const dyn=DYNAMIC_RESEARCH_EVIDENCE[t]||null;
+    const builtin=RESEARCH_PROMOTION_EVIDENCE[t]||null;
+    const existing=stocks.find(s=>researchTicker(s.ticker)===t)||null;
+    const validated=existing?isValidatedStock(existing):(dyn?.promotionReady===true || builtin?.promotionReady===true || !!VALIDATED_EVIDENCE_CLASS[t]);
+    if(dyn){ stale.push({ticker:t,reason:`Validation already imported · ${dyn.grade||'EVIDENCE'}`}); continue; }
+    if(builtin){ stale.push({ticker:t,reason:`Existing research evidence · ${builtin.grade||'EVIDENCE'}`}); continue; }
+    if(validated){ stale.push({ticker:t,reason:'Already qualified'}); continue; }
+    pending.push({...raw,ticker:t,status:'NEEDS_6YR_VALIDATION'});
+  }
+
+  const allTickers=new Set([
+    ...stocks.filter(s=>!isMarketStock(s)).map(s=>researchTicker(s.ticker)),
+    ...Object.keys(DYNAMIC_RESEARCH_EVIDENCE||{}).map(researchTicker),
+    ...Object.keys(RESEARCH_PROMOTION_EVIDENCE||{}).map(researchTicker)
+  ]);
+  for(const t of allTickers){
+    if(!t) continue;
+    const s=stocks.find(x=>researchTicker(x.ticker)===t)||null;
+    const dyn=DYNAMIC_RESEARCH_EVIDENCE[t]||null;
+    const builtin=RESEARCH_PROMOTION_EVIDENCE[t]||null;
+    const ev=dyn||builtin||null;
+    const isVal=s?isValidatedStock(s):(dyn?.promotionReady===true || builtin?.promotionReady===true || !!VALIDATED_EVIDENCE_CLASS[t]);
+    if(isVal){ qualified.push(t); continue; }
+    if(ev && isRejectedGrade(ev.grade)){ rejected.push(t); continue; }
+    if(ev && isShadowGrade(ev.grade)){ shadow.push(t); continue; }
+    if(seenQ.has(t)) continue;
+    // No queue provenance + no validation evidence = legacy baggage. Preserve it
+    // for audit, but do not show it as if it were an active Sunday research item.
+    if(s && isResearchStock(s) && !s.archived) legacy.push(t);
+  }
+  return {
+    pending:[...new Map(pending.map(x=>[x.ticker,x])).values()].sort((a,b)=>a.ticker.localeCompare(b.ticker)),
+    stale:[...new Map(stale.map(x=>[x.ticker,x])).values()].sort((a,b)=>a.ticker.localeCompare(b.ticker)),
+    shadow:[...new Set(shadow)].sort(), rejected:[...new Set(rejected)].sort(),
+    qualified:[...new Set(qualified)].sort(), legacy:[...new Set(legacy)].sort()
+  };
+}
+
+function applyResearchReconciliation(silent=false){
+  const snap=researchReconciliationSnapshot();
+  const keep=new Map();
+  for(const x of snap.pending){
+    const old=keep.get(x.ticker);
+    if(old) old.source=mergeScannerSource(old.source,x.source);
+    else keep.set(x.ticker,{...x,status:'NEEDS_6YR_VALIDATION'});
+  }
+  sundayResearchQueue=[...keep.values()];
+  saveSundayDiscoveryState();
+  if(!silent){ renderHome(); showResearchReconciliation(); }
+  return snap;
+}
+
+function downloadMissingHistoryQueue(){
+  const snap=applyResearchReconciliation(true), q=snap.pending;
+  if(!q.length){ alert('No genuine Sunday discoveries are waiting for 6-year history.'); return; }
+  const hdr=['Symbol','DiscoveredOn','DiscoverySource','Status','Description','Sector','Industry'];
+  const lines=[hdr.join(',')].concat(q.map(x=>[
+    x.ticker,x.discoveredOn||'',x.source||'', 'NEEDS_6YR_VALIDATION',x.description||'',x.sector||'',x.industry||''
+  ].map(csvEscape).join(',')));
+  const blob=new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8'}),a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);a.download=`StockIQ_Missing_6YR_History_${today()}.csv`;document.body.appendChild(a);a.click();
+  setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},0);
+}
+
+function showResearchReconciliation(){
+  const snap=researchReconciliationSnapshot();
+  const chips=(arr,color,limit=18)=>arr.length?`<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:8px;">${arr.slice(0,limit).map(x=>`<span style="padding:5px 7px;border-radius:999px;border:1px solid ${color}55;color:${color};font-size:9.5px;font-weight:850;">${typeof x==='string'?x:x.ticker}</span>`).join('')}${arr.length>limit?`<span style="color:${C.textMuted};font-size:10px;padding:5px 2px;">+${arr.length-limit} more</span>`:''}</div>`:'';
+  showModal(`<div style="background:${C.card};border-radius:18px;padding:20px;border:1px solid ${C.border};max-height:84vh;overflow:auto;">
+    <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:5px;"><div><div style="color:${C.text};font-size:19px;font-weight:950;">Research Audit</div><div style="color:${C.textSub};font-size:11.5px;line-height:1.5;margin-top:4px;">Every Sunday discovery must reach a final disposition. Nothing should sit in limbo.</div></div><button onclick="closeAllOverlays()" style="background:none;border:none;color:${C.textMuted};font-size:19px;cursor:pointer;">×</button></div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:13px 0;">
+      <div style="background:${C.tealDim};border:1px solid ${C.teal}44;border-radius:11px;padding:11px;"><div style="color:${C.teal};font-size:20px;font-weight:950;">${snap.pending.length}</div><div class="v2lbl">Needs 6-Year History</div></div>
+      <div style="background:${C.yellowDim};border:1px solid ${C.yellow}44;border-radius:11px;padding:11px;"><div style="color:${C.yellow};font-size:20px;font-weight:950;">${snap.shadow.length}</div><div class="v2lbl">Research / Shadow</div></div>
+      <div style="background:${C.cardHigh};border:1px solid ${C.border};border-radius:11px;padding:11px;"><div style="color:${C.textSub};font-size:20px;font-weight:950;">${snap.stale.length}</div><div class="v2lbl">Stale Queue Records</div></div>
+      <div style="background:${C.cardHigh};border:1px solid ${C.border};border-radius:11px;padding:11px;"><div style="color:${C.textSub};font-size:20px;font-weight:950;">${snap.legacy.length}</div><div class="v2lbl">Legacy · Source Unknown</div></div>
+    </div>
+
+    <div style="background:${C.cardHigh};border:1px solid ${C.border};border-radius:12px;padding:12px;margin-bottom:9px;"><div style="color:${C.teal};font-size:10px;font-weight:950;text-transform:uppercase;letter-spacing:.07em;">Needs History Review · ${snap.pending.length}</div><div style="color:${C.textSub};font-size:11px;line-height:1.5;margin-top:4px;">These are genuine Sunday discoveries with scanner provenance and no completed validation result. They deserve the 6-year pull before any keep/reject decision.</div>${chips(snap.pending,C.teal)}${snap.pending.length?`<button onclick="downloadMissingHistoryQueue()" style="margin-top:10px;padding:8px 10px;border-radius:8px;border:1px solid ${C.teal};background:${C.tealDim};color:${C.teal};font-size:10.5px;font-weight:900;cursor:pointer;">Download Missing History CSV</button>`:''}</div>
+
+    <div style="background:${C.cardHigh};border:1px solid ${C.border};border-radius:12px;padding:12px;margin-bottom:9px;"><div style="color:${C.yellow};font-size:10px;font-weight:950;text-transform:uppercase;letter-spacing:.07em;">Research / Shadow · ${snap.shadow.length}</div><div style="color:${C.textSub};font-size:11px;line-height:1.5;margin-top:4px;">Already completed 6-year validation. These did not earn automatic promotion but remain useful for shadow evidence.</div>${chips(snap.shadow,C.yellow)}</div>
+
+    ${snap.stale.length?`<div style="background:${C.cardHigh};border:1px solid ${C.border};border-radius:12px;padding:12px;margin-bottom:9px;"><div style="color:${C.text};font-size:10px;font-weight:950;text-transform:uppercase;letter-spacing:.07em;">Stale waiting records · ${snap.stale.length}</div><div style="color:${C.textSub};font-size:11px;line-height:1.5;margin-top:4px;">These already have evidence or qualification. Reconcile removes the obsolete waiting record; it does not delete their evidence.</div>${chips(snap.stale,C.textSub)}</div>`:''}
+
+    ${snap.legacy.length?`<div style="background:${C.cardHigh};border:1px solid ${C.border};border-radius:12px;padding:12px;margin-bottom:9px;"><div style="color:${C.textSub};font-size:10px;font-weight:950;text-transform:uppercase;letter-spacing:.07em;">Legacy research · ${snap.legacy.length}</div><div style="color:${C.textSub};font-size:11px;line-height:1.5;margin-top:4px;">These old names have no trustworthy Sunday scanner source and no validation record. StockIQ will hide them from the normal Research tab rather than family-shop them through six strategies. If one reappears in an official Sunday scan, it will be queued with the correct source and receive a fair 6-year test.</div>${chips(snap.legacy,C.textMuted)}</div>`:''}
+
+    <div style="display:flex;gap:8px;margin-top:12px;"><button onclick="applyResearchReconciliation()" style="flex:1;padding:10px;border:none;border-radius:9px;background:${C.green};color:#000;font-size:11px;font-weight:950;cursor:pointer;">Reconcile Queue</button><button onclick="closeAllOverlays()" style="padding:10px 13px;border:1px solid ${C.border};border-radius:9px;background:transparent;color:${C.textSub};font-size:11px;font-weight:850;cursor:pointer;">Done</button></div>
+  </div>`);
+}
+
+function researchVisibleStock(s){
+  const t=researchTicker(s?.ticker); if(!t || isMarketStock(s) || s.archived || isValidatedStock(s)) return false;
+  const q=queueRecordForTicker(t); if(q) return true;
+  const ev=dynamicEvidenceForTicker(t) || RESEARCH_PROMOTION_EVIDENCE[t] || null;
+  if(!ev) return false; // legacy/unclassified stays in the audit, not the normal tab
+  return isShadowGrade(ev.grade) && ev.promotionReady!==true;
+}
+
+// Override the generic label so genuine queue names are unmistakable.
+function researchPromotionLabel(s){
+  const t=researchTicker(s?.ticker);
+  if(queueRecordForTicker(t)) return {label:'WAITING FOR 6-YEAR HISTORY',color:C.teal};
+  const ev=evidenceFor(s);
+  if(!ev) return {label:'LEGACY RESEARCH',color:C.textMuted};
+  if(ev.promotionReady) return {label:'PROMOTION READY',color:C.green};
+  if(ev.grade==='AGGRESSIVE') return {label:'AGGRESSIVE · SHADOW',color:C.orange};
+  if(ev.grade==='PROMISING') return {label:'PROMISING · SHADOW',color:C.yellow};
+  if(ev.grade==='REGIME-STRONG'||ev.grade==='REGIME-WEAK') return {label:`${ev.grade} · SHADOW`,color:C.yellow};
+  if(ev.grade==='REJECTED') return {label:'REJECTED',color:C.red};
+  return {label:'RESEARCH / SHADOW',color:C.textMuted};
+}
+
+// Keep the top row for data-input buttons. Research Audit lives beside the view tags.
+function renderFilterBar(){
+  const el=document.getElementById('filter-bar'); if(!el)return;
+  const opts=['Ready Now','Buy','Preparing','Positions','Validated Library','Research'];
+  el.innerHTML=`<div style="display:flex;gap:7px;overflow-x:auto;align-items:center;">${opts.map(t=>`<button onclick="setTag('${t}')" style="padding:7px 14px;border-radius:22px;font-size:11.5px;font-weight:800;border:1px solid ${activeTag===t?C.green:C.border};background:${activeTag===t?C.greenDim:'none'};color:${activeTag===t?C.green:C.textSub};cursor:pointer;white-space:nowrap;">${t}</button>`).join('')}<button onclick="showResearchReconciliation()" title="Audit research queue" style="padding:5px 8px;border-radius:8px;font-size:9.5px;font-weight:850;border:1px solid ${C.border};background:${C.cardHigh};color:${C.textMuted};cursor:pointer;white-space:nowrap;">Research Audit</button></div>`;
+}
+
+function renderStockList(){
+  const el=document.getElementById('stock-list'); if(!el)return;
+  let list=getRanked(); const q=searchQuery||'';
+  if(q) list=list.filter(s=>String(s.ticker).toLowerCase().includes(q)||String(s.name||'').toLowerCase().includes(q));
+
+  if(activeTag==='Buy') list=liveCandidateItems().filter(x=>['BUY','A+ BUY'].includes(x.state?.state)).map(x=>x.s);
+  else if(activeTag==='Preparing') list=liveCandidateItems().filter(x=>x.state?.state==='PREPARING').map(x=>x.s);
+  else if(activeTag==='Positions') list=list.filter(s=>s.position&&isValidatedStock(s));
+  else if(activeTag==='Validated Library') list=list.filter(s=>isValidatedStock(s)&&String(s.ticker||'').toUpperCase()!=='PBF');
+  else if(activeTag==='Research') list=list.filter(researchVisibleStock);
+  else list=liveCandidateItems().map(x=>x.s);
+
+  const evidenceOnly=q?evidenceOnlySearchMatches(q):[];
+  if(activeTag==='Ready Now' && !q){
+    const buy=list.filter(s=>['BUY','A+ BUY'].includes(safeStockState(s)?.state));
+    const prep=list.filter(s=>safeStockState(s)?.state==='PREPARING');
+    const section=(title,subtitle,items,color)=>items.length?`<div style="margin:14px 2px 8px;display:flex;justify-content:space-between;align-items:end;"><div><div style="color:${color};font-size:11px;font-weight:950;text-transform:uppercase;letter-spacing:.08em;">${title}</div><div style="color:${C.textMuted};font-size:10px;margin-top:2px;">${subtitle}</div></div><div style="color:${C.textMuted};font-size:10px;">${items.length}</div></div>${items.map(renderStockCard).join('')}`:'';
+    el.innerHTML=section('Buy / A+ Buy','Actionable setups only',buy,C.green)+section('Getting Ready','Only one close trigger missing; all structure already passes',prep,C.yellow);
+    if(!buy.length&&!prep.length) el.innerHTML=`<div style="color:${C.textSub};font-size:13px;padding:20px 4px;">NO NEW QUALIFIED STOCKS. WAIT names are hidden but still monitored in the validated library.</div>`;
+  } else {
+    const stockHtml=list.map(renderStockCard).join('');
+    const evidenceHtml=evidenceOnly.map(renderEvidenceOnlySearchCard).join('');
+    el.innerHTML=stockHtml+evidenceHtml || `<div style="color:${C.textSub};font-size:13px;padding:20px 4px;">Nothing in this view.</div>`;
+  }
+}
+
+(function v2953Init(){
+  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.53 · Research Reconciliation';
+  // Safe cleanup on load: de-duplicate queue and remove only records that already
+  // have evidence. Genuine pending Sunday names are never deleted automatically.
+  try{ applyResearchReconciliation(true); }catch(e){ console.warn('Research reconciliation init failed',e); }
+})();
+
 </script>
 
 </body>
