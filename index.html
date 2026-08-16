@@ -88,14 +88,14 @@ input[type=number]{-moz-appearance:textfield;}
   <div id="save-status" style="display:none;background:#11141C;border-bottom:1px solid #1E2230;padding:5px 20px;text-align:center;font-size:11px;font-weight:700;"></div>
   <!-- Market pulse -->
   <div id="market-bar" style="background:#11141C;border-bottom:1px solid #1E2230;padding:7px 20px;display:flex;justify-content:space-between;align-items:center;">
-    <span style="color:#3E4355;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;">Market</span>
+    <span style="color:#3E4355;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;">20D Market Trend</span>
     <div style="display:flex;gap:14px;" id="market-items"></div>
   </div>
   <!-- Portfolio box -->
   <div id="portfolio-box"></div>
   <div id="position-watch"></div>
   <!-- Tonight's Best Opportunities — the ranking engine -->
-  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">v2.9.52 · Live Direction Arrows</div>
+  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">v2.9.64 · Cross-Device State Hardening</div>
   <div id="tonights-opportunities"></div>
   <!-- Filter tags + sort -->
   <div id="filter-bar" style="background:#11141C;border-bottom:1px solid #1E2230;padding:9px 20px;"></div>
@@ -828,6 +828,8 @@ auth.onAuthStateChanged(user => {
     });
     // Keep portfolio capital identical across devices as well.
     syncAccountSizeFromCloud();
+    // v2.9.64: synchronize Sunday queue, validation evidence, and history lifecycle.
+    syncResearchStateFromCloud();
     // v2.9.51: synchronize the latest lightweight daily dataset across devices.
     // This is one small cloud document, not 95 stock-document writes.
     syncDailyOverlayFromCloud().then(info=>{
@@ -8001,31 +8003,31 @@ const PLAYBOOKS = {
   // ── WEEKLY BENCH · AUG 11, 2026 TOURNAMENT ────────────────────────────
   // Active Bench = best validated candidates from the fresh 309-stock scan.
   // Reserve is capped at 10. WAIT names stay hidden on the default screen.
-  LQDA:{name:'Bench · Momentum',family:'MOMENTUM',tier:'BENCH',confidence:'BENCH · ACTIVE',hold:20,maxHold:25,stopPct:12,cluster:'Health Care',market:'XLV',earnings:'WAIT FOR REACTION',stats:{trades:20,win:80,avg:11.3,drawdown:'Moderate',worst:'Forward-test risk'},teach:'Active Bench winner: strong momentum profile with unusually frequent +7% to +10% excursions in the six-year study.'},
-  VIST:{name:'Bench · Deep Pullback',family:'DEEP_PULLBACK',tier:'BENCH',confidence:'BENCH · ACTIVE',hold:20,maxHold:25,stopPct:12,cluster:'Energy',market:'XLE',earnings:'WAIT FOR REACTION',stats:{trades:29,win:69,avg:7.7,drawdown:'~7% average MAE',worst:'~-13.6% modeled result'},teach:'Valid deep-pullback playbook, but recent evidence weakened: older history was ~76% wins / +10.9% average, versus ~58% / +3.2% since 2024 and ~50% / +1.6% since 2025. Keep it tradeable, but withhold A+ until newer/forward evidence improves.'},
-  TIGO:{name:'Bench · Regression Pullback',family:'REG_PULLBACK',tier:'BENCH',confidence:'BENCH · ACTIVE',hold:20,maxHold:25,stopPct:9,cluster:'Communication Services',market:'SPY',earnings:'WAIT FOR REACTION',stats:{trades:28,win:82,avg:6.2,drawdown:'Cleaner than most Bench names',worst:'Forward-test risk'},teach:'Active Bench winner: repeatable regression-pullback edge with a comparatively cleaner downside profile.'},
-  NESR:{name:'Bench · Momentum',family:'MOMENTUM',tier:'BENCH',confidence:'BENCH · ACTIVE',hold:20,maxHold:25,stopPct:12,cluster:'Energy',market:'XLE',earnings:'WAIT FOR REACTION',stats:{trades:10,win:70,avg:7.4,drawdown:'Moderate',worst:'Smaller sample'},teach:'Active Bench winner: affordable momentum candidate with strong historical +7% reach, but a smaller sample than the leaders.'},
-  ASX:{name:'Bench · Regression Pullback',family:'REG_PULLBACK',tier:'BENCH',confidence:'BENCH · ACTIVE',hold:20,maxHold:25,stopPct:10,cluster:'Technology',market:'SOXX',earnings:'WAIT FOR REACTION',stats:{trades:28,win:64,avg:4.7,drawdown:'~5.9% average adverse excursion',worst:'~-11.8% standardized replay'},teach:'PROVEN regression-pullback candidate: positive older and newer periods, useful frequency, controlled average downside, and broad parameter survival. Strong, but not as clean as TIGO.'},
-  LTH:{name:'Bench · EMA20 Reclaim',family:'EMA20_RECLAIM',tier:'BENCH',confidence:'BENCH · ACTIVE',hold:14,maxHold:20,stopPct:9,cluster:'Consumer / Leisure',market:'XLY',earnings:'WAIT FOR REACTION',stats:{trades:12,win:67,avg:5.9,drawdown:'Cleaner',worst:'Forward-test risk'},teach:'Active Bench winner: EMA20 reclaim setup with a relatively clean downside profile and frequent +7% follow-through.'},
-  PRM:{name:'Bench · Deep Pullback',family:'DEEP_PULLBACK',tier:'BENCH',confidence:'BENCH · ACTIVE',hold:20,maxHold:25,stopPct:11,cluster:'Industrials',market:'XLI',earnings:'WAIT FOR REACTION',stats:{trades:11,win:82,avg:10.9,drawdown:'Moderate',worst:'Smaller sample'},teach:'Active Bench candidate: excellent historical profile, but it should only surface when the required pullback depth is actually close.'},
-  HPE:{name:'Bench · Deep Pullback',family:'DEEP_PULLBACK',tier:'BENCH',confidence:'BENCH · ACTIVE',hold:20,maxHold:25,stopPct:9,cluster:'Technology',market:'XLK',earnings:'WAIT FOR REACTION',stats:{trades:16,win:88,avg:6.6,drawdown:'Cleaner',worst:'Forward-test risk'},teach:'Active Bench candidate: strong win rate and risk profile; wait for the pullback setup rather than chasing strength.'},
+  LQDA:{name:'Momentum',family:'MOMENTUM',tier:'BENCH',confidence:'VALIDATED',hold:20,maxHold:25,stopPct:12,cluster:'Health Care',market:'XLV',earnings:'WAIT FOR REACTION',stats:{trades:20,win:80,avg:11.3,drawdown:'Moderate',worst:'Forward-test risk'},teach:'Validated candidate: strong momentum profile with unusually frequent +7% to +10% excursions in the six-year study.'},
+  VIST:{name:'Deep Pullback',family:'DEEP_PULLBACK',tier:'BENCH',confidence:'VALIDATED',hold:20,maxHold:25,stopPct:12,cluster:'Energy',market:'XLE',earnings:'WAIT FOR REACTION',stats:{trades:29,win:69,avg:7.7,drawdown:'~7% average MAE',worst:'~-13.6% modeled result'},teach:'Valid deep-pullback playbook, but recent evidence weakened: older history was ~76% wins / +10.9% average, versus ~58% / +3.2% since 2024 and ~50% / +1.6% since 2025. Keep it tradeable, but withhold A+ until newer/forward evidence improves.'},
+  TIGO:{name:'Regression Pullback',family:'REG_PULLBACK',tier:'BENCH',confidence:'VALIDATED',hold:20,maxHold:25,stopPct:9,cluster:'Communication Services',market:'SPY',earnings:'WAIT FOR REACTION',stats:{trades:28,win:82,avg:6.2,drawdown:'Cleaner than most validated names',worst:'Forward-test risk'},teach:'Validated candidate: repeatable regression-pullback edge with a comparatively cleaner downside profile.'},
+  NESR:{name:'Momentum',family:'MOMENTUM',tier:'BENCH',confidence:'VALIDATED',hold:20,maxHold:25,stopPct:12,cluster:'Energy',market:'XLE',earnings:'WAIT FOR REACTION',stats:{trades:10,win:70,avg:7.4,drawdown:'Moderate',worst:'Smaller sample'},teach:'Validated candidate: affordable momentum candidate with strong historical +7% reach, but a smaller sample than the leaders.'},
+  ASX:{name:'Regression Pullback',family:'REG_PULLBACK',tier:'BENCH',confidence:'VALIDATED',hold:20,maxHold:25,stopPct:10,cluster:'Technology',market:'SOXX',earnings:'WAIT FOR REACTION',stats:{trades:28,win:64,avg:4.7,drawdown:'~5.9% average adverse excursion',worst:'~-11.8% standardized replay'},teach:'PROVEN regression-pullback candidate: positive older and newer periods, useful frequency, controlled average downside, and broad parameter survival. Strong, but not as clean as TIGO.'},
+  LTH:{name:'EMA20 Reclaim',family:'EMA20_RECLAIM',tier:'BENCH',confidence:'VALIDATED',hold:14,maxHold:20,stopPct:9,cluster:'Consumer / Leisure',market:'XLY',earnings:'WAIT FOR REACTION',stats:{trades:12,win:67,avg:5.9,drawdown:'Cleaner',worst:'Forward-test risk'},teach:'Validated candidate: EMA20 reclaim setup with a relatively clean downside profile and frequent +7% follow-through.'},
+  PRM:{name:'Deep Pullback',family:'DEEP_PULLBACK',tier:'BENCH',confidence:'VALIDATED',hold:20,maxHold:25,stopPct:11,cluster:'Industrials',market:'XLI',earnings:'WAIT FOR REACTION',stats:{trades:11,win:82,avg:10.9,drawdown:'Moderate',worst:'Smaller sample'},teach:'Validated candidate: excellent historical profile, but it should only surface when the required pullback depth is actually close.'},
+  HPE:{name:'Deep Pullback',family:'DEEP_PULLBACK',tier:'BENCH',confidence:'VALIDATED',hold:20,maxHold:25,stopPct:9,cluster:'Technology',market:'XLK',earnings:'WAIT FOR REACTION',stats:{trades:16,win:88,avg:6.6,drawdown:'Cleaner',worst:'Forward-test risk'},teach:'Validated candidate: strong win rate and risk profile; wait for the pullback setup rather than chasing strength.'},
 
   // Reserve tournament pool — capped at 10. These remain hidden until inspected
   // or promoted by a future weekly tournament.
-  ARWR:{name:'Reserve · Breakout',family:'BREAKOUT',tier:'BENCH',confidence:'BENCH · RESERVE',hold:20,maxHold:25,stopPct:13,cluster:'Health Care',market:'XLV',earnings:'WAIT FOR REACTION',stats:{trades:8,win:75,avg:14.2,drawdown:'Higher volatility',worst:'Reserve study'},teach:'Reserve candidate. Breakout was the strongest generic family in the current six-year tournament pass.'},
-  PARR:{name:'Reserve · Regression Pullback',family:'REG_PULLBACK',tier:'BENCH',confidence:'BENCH · RESERVE',hold:20,maxHold:25,stopPct:10,cluster:'Energy',market:'XLE',earnings:'WAIT FOR REACTION',stats:{trades:26,win:73,avg:9.5,drawdown:'Moderate',worst:'Reserve study'},teach:'Reserve candidate. Regression pullbacks produced the most repeatable generic edge in the current tournament.'},
-  ACHC:{name:'Reserve · Deep Pullback',family:'DEEP_PULLBACK',tier:'BENCH',confidence:'BENCH · RESERVE',hold:20,maxHold:25,stopPct:12,cluster:'Health Care',market:'XLV',earnings:'WAIT FOR REACTION',stats:{trades:5,win:80,avg:17.3,drawdown:'Small sample',worst:'Reserve study'},teach:'Reserve candidate with a very small deep-pullback sample. Keep it in reserve until more forward evidence accumulates.'},
-  AHR:{name:'Reserve · Breakout',family:'BREAKOUT',tier:'BENCH',confidence:'BENCH · RESERVE',hold:20,maxHold:25,stopPct:9,cluster:'Real Estate',market:'SPY',earnings:'WAIT FOR REACTION',stats:{trades:8,win:88,avg:5.1,drawdown:'Cleaner',worst:'Reserve study'},teach:'Reserve candidate. Breakouts screened well, but the sample is still small.'},
-  COGT:{name:'Reserve · Deep Pullback',family:'DEEP_PULLBACK',tier:'BENCH',confidence:'BENCH · RESERVE',hold:20,maxHold:25,stopPct:14,cluster:'Health Care',market:'XLV',earnings:'WAIT FOR REACTION',stats:{trades:27,win:52,avg:7.5,drawdown:'Wide',worst:'Reserve study'},teach:'Reserve candidate. Upside exists, but the lower win rate keeps it behind the Active Bench.'},
-  ZETA:{name:'Reserve · Momentum',family:'MOMENTUM',tier:'BENCH',confidence:'BENCH · RESERVE',hold:20,maxHold:25,stopPct:12,cluster:'Technology',market:'XLK',earnings:'WAIT FOR REACTION',stats:{trades:15,win:80,avg:7.6,drawdown:'Recent > older',worst:'Regime-sensitive'},teach:'Reserve candidate. Recent momentum results are excellent, but older behavior was weaker, so forward validation matters.'},
-  DYN:{name:'Reserve · Momentum',family:'MOMENTUM',tier:'BENCH',confidence:'RESEARCH · REGIME-WEAK',hold:20,maxHold:25,stopPct:12,cluster:'Health Care',market:'XLV',earnings:'WAIT FOR REACTION',stats:{trades:17,win:53,avg:1.5,drawdown:'~-10.3% average MAE',worst:'~-38% historical gap-through-stop loss'},teach:'DEMOTED TO RESEARCH. Recent momentum performance improved sharply, but older history failed, full-period expectancy is weak, and gap/downside risk is too large for the live shortlist. Shadow-track only until forward evidence proves the recent regime is durable.'},
-  RELY:{name:'Reserve · EMA20 Reclaim',family:'EMA20_RECLAIM',tier:'BENCH',confidence:'BENCH · RESERVE',hold:14,maxHold:20,stopPct:11,cluster:'Financial Technology',market:'XLK',earnings:'WAIT FOR REACTION',stats:{trades:14,win:64,avg:4.7,drawdown:'~-8.3% average MAE',worst:'~-25.2% historical gap-through-stop loss'},teach:'PROMISING EMA20-reclaim candidate, not proven. Standardized replay stayed profitable and recent trades improved, but the sample is limited and historical gap risk is materially worse than TIGO/ASX. Valid BUYs can compete at a lower evidence tier; no A+ until forward evidence earns it.'},
-  GTES:{name:'Reserve · Deep Pullback',family:'DEEP_PULLBACK',tier:'BENCH',confidence:'BENCH · RESERVE',hold:20,maxHold:25,stopPct:9,cluster:'Industrials',market:'XLI',earnings:'WAIT FOR REACTION',stats:{trades:16,win:69,avg:4.5,drawdown:'Cleaner',worst:'Reserve study'},teach:'Reserve candidate. Reasonable pullback edge, but expectancy trails the Active Bench.'},
-  ROIV:{name:'Reserve · Deep Pullback',family:'DEEP_PULLBACK',tier:'BENCH',confidence:'BENCH · RESERVE',hold:20,maxHold:25,stopPct:11,cluster:'Health Care',market:'XLV',earnings:'WAIT FOR REACTION',stats:{trades:16,win:75,avg:7.3,drawdown:'Moderate',worst:'Reserve study'},teach:'Reserve candidate. Solid deep-pullback profile, currently behind the strongest Active names.'},
+  ARWR:{name:'Breakout',family:'BREAKOUT',tier:'BENCH',confidence:'VALIDATED RESEARCH',hold:20,maxHold:25,stopPct:13,cluster:'Health Care',market:'XLV',earnings:'WAIT FOR REACTION',stats:{trades:8,win:75,avg:14.2,drawdown:'Higher volatility',worst:'Research study'},teach:'Research candidate. Breakout was the strongest generic family in the current six-year tournament pass.'},
+  PARR:{name:'Regression Pullback',family:'REG_PULLBACK',tier:'BENCH',confidence:'VALIDATED RESEARCH',hold:20,maxHold:25,stopPct:10,cluster:'Energy',market:'XLE',earnings:'WAIT FOR REACTION',stats:{trades:26,win:73,avg:9.5,drawdown:'Moderate',worst:'Research study'},teach:'Research candidate. Regression pullbacks produced the most repeatable generic edge in the current tournament.'},
+  ACHC:{name:'Deep Pullback',family:'DEEP_PULLBACK',tier:'BENCH',confidence:'VALIDATED RESEARCH',hold:20,maxHold:25,stopPct:12,cluster:'Health Care',market:'XLV',earnings:'WAIT FOR REACTION',stats:{trades:5,win:80,avg:17.3,drawdown:'Small sample',worst:'Research study'},teach:'Research candidate with a very small deep-pullback sample. Keep it in research until more forward evidence accumulates.'},
+  AHR:{name:'Breakout',family:'BREAKOUT',tier:'BENCH',confidence:'VALIDATED RESEARCH',hold:20,maxHold:25,stopPct:9,cluster:'Real Estate',market:'SPY',earnings:'WAIT FOR REACTION',stats:{trades:8,win:88,avg:5.1,drawdown:'Cleaner',worst:'Research study'},teach:'Research candidate. Breakouts screened well, but the sample is still small.'},
+  COGT:{name:'Deep Pullback',family:'DEEP_PULLBACK',tier:'BENCH',confidence:'VALIDATED RESEARCH',hold:20,maxHold:25,stopPct:14,cluster:'Health Care',market:'XLV',earnings:'WAIT FOR REACTION',stats:{trades:27,win:52,avg:7.5,drawdown:'Wide',worst:'Research study'},teach:'Research candidate. Upside exists, but the lower win rate keeps it behind the strongest validated names.'},
+  ZETA:{name:'Momentum',family:'MOMENTUM',tier:'BENCH',confidence:'VALIDATED RESEARCH',hold:20,maxHold:25,stopPct:12,cluster:'Technology',market:'XLK',earnings:'WAIT FOR REACTION',stats:{trades:15,win:80,avg:7.6,drawdown:'Recent > older',worst:'Regime-sensitive'},teach:'Research candidate. Recent momentum results are excellent, but older behavior was weaker, so forward validation matters.'},
+  DYN:{name:'Momentum',family:'MOMENTUM',tier:'BENCH',confidence:'RESEARCH · REGIME-WEAK',hold:20,maxHold:25,stopPct:12,cluster:'Health Care',market:'XLV',earnings:'WAIT FOR REACTION',stats:{trades:17,win:53,avg:1.5,drawdown:'~-10.3% average MAE',worst:'~-38% historical gap-through-stop loss'},teach:'DEMOTED TO RESEARCH. Recent momentum performance improved sharply, but older history failed, full-period expectancy is weak, and gap/downside risk is too large for the live shortlist. Shadow-track only until forward evidence proves the recent regime is durable.'},
+  RELY:{name:'EMA20 Reclaim',family:'EMA20_RECLAIM',tier:'BENCH',confidence:'VALIDATED RESEARCH',hold:14,maxHold:20,stopPct:11,cluster:'Financial Technology',market:'XLK',earnings:'WAIT FOR REACTION',stats:{trades:14,win:64,avg:4.7,drawdown:'~-8.3% average MAE',worst:'~-25.2% historical gap-through-stop loss'},teach:'PROMISING EMA20-reclaim candidate, not proven. Standardized replay stayed profitable and recent trades improved, but the sample is limited and historical gap risk is materially worse than TIGO/ASX. Valid BUYs can compete at a lower evidence tier; no A+ until forward evidence earns it.'},
+  GTES:{name:'Deep Pullback',family:'DEEP_PULLBACK',tier:'BENCH',confidence:'VALIDATED RESEARCH',hold:20,maxHold:25,stopPct:9,cluster:'Industrials',market:'XLI',earnings:'WAIT FOR REACTION',stats:{trades:16,win:69,avg:4.5,drawdown:'Cleaner',worst:'Research study'},teach:'Research candidate. Reasonable pullback edge, but expectancy trails the Active Bench.'},
+  ROIV:{name:'Deep Pullback',family:'DEEP_PULLBACK',tier:'BENCH',confidence:'VALIDATED RESEARCH',hold:20,maxHold:25,stopPct:11,cluster:'Health Care',market:'XLV',earnings:'WAIT FOR REACTION',stats:{trades:16,win:75,avg:7.3,drawdown:'Moderate',worst:'Research study'},teach:'Research candidate. Solid deep-pullback profile, currently behind the strongest Active names.'},
 
   // PBF stays validated because it may already be owned. Once flat, it is not
-  // part of the new Active/Reserve tournament pool unless re-selected later.
-  PBF:{name:'Bench · Momentum',family:'MOMENTUM',tier:'BENCH',confidence:'BENCH · OWNED/LEGACY',hold:20,maxHold:25,stopPct:12,cluster:'Energy',market:'XLE',earnings:'WAIT FOR REACTION',stats:{trades:24,win:67,avg:4.5,drawdown:'Recent > older',worst:'Wider downside'},teach:'Legacy Bench playbook retained so an existing PBF position remains fully managed. It is not automatically in the new Active or Reserve pool.'},
+  // part of the current qualified universe unless re-selected later.
+  PBF:{name:'Momentum',family:'MOMENTUM',tier:'BENCH',confidence:'VALIDATED · LEGACY',hold:20,maxHold:25,stopPct:12,cluster:'Energy',market:'XLE',earnings:'WAIT FOR REACTION',stats:{trades:24,win:67,avg:4.5,drawdown:'Recent > older',worst:'Wider downside'},teach:'Legacy validated playbook retained so an existing PBF position remains fully managed. It is not automatically in the current qualified universe.'},
 };
 
 
@@ -8035,9 +8037,9 @@ const PLAYBOOKS = {
 // the evidence was stable enough across older/newer samples to be useful.
 // `source: PLAYBOOK` ranges already embedded in a Core playbook remain authoritative.
 const REGRESSION_CONTEXT_EVIDENCE = {
-  // Current standardized Bench / promoted replays (6-year history, next-session
+  // Current standardized validated / promoted replays (6-year history, next-session
   // open, 0.25% adverse friction each side, non-overlapping trades).
-  TIGO:{range:[-1.25,-0.75],grade:'CONTEXT',n:13,note:'Repeatable lower-risk cluster in the current reproducible regression-pullback replay. Context only; the Bench BUY/A+ gates are unchanged.'},
+  TIGO:{range:[-1.25,-0.75],grade:'CONTEXT',n:13,note:'Repeatable lower-risk cluster in the current reproducible regression-pullback replay. Context only; the Validated BUY/A+ rules are unchanged.'},
   ASX:{range:[-2.50,-1.25],grade:'VALIDATED',n:7,note:'Strong regression-entry cluster with positive older and newer samples. Context only; it does not narrow the existing BUY gate.'},
   PARR:{range:[-1.50,-0.75],grade:'VALIDATED',n:11,note:'Stable regression-entry cluster across older and newer samples with materially better expectancy and downside than the full replay.'},
   VIST:{range:[-0.50,1.00],grade:'CONTEXT',n:8,note:'Deep-pullback entries historically performed best in this regression-position band. Regression remains context, not the setup trigger.'},
@@ -8211,8 +8213,18 @@ function positionHealthChecks(s){
   if(fam.includes('SMA50')||fam.includes('50-DAY')||fam.includes('50 DAY')) { support=m50; supportName='SMA50'; }
   else if(fam.includes('REG')) { support=e20; supportName='EMA20'; }
   else if(fam.includes('DEEP')) { support=e20; supportName='EMA20'; }
-  add('trend',`${supportName} trend support`,p!=null&&support!=null?p>=support:true,
-      p!=null&&support!=null?`${money(p)} vs ${money(support)}`:'Support unavailable');
+  // Ignore tiny support breaches that are normal daily noise. A warning requires
+  // price to close at least 0.75 ATR below the family support line. This keeps a
+  // $0.20 dip under EMA20 from looking like deterioration on a $10+ ATR stock,
+  // while still flagging a meaningful break such as TIGO's current EMA20 loss.
+  const supportBuffer=(atr!=null&&atr>0)?0.75*atr:null;
+  const supportFloor=(support!=null&&supportBuffer!=null)?support-supportBuffer:support;
+  const supportHealthy=p!=null&&support!=null?(supportFloor!=null?p>=supportFloor:p>=support):true;
+  const supportGapATR=(p!=null&&support!=null&&atr!=null&&atr>0)?(support-p)/atr:null;
+  add('trend',`${supportName} trend support`,supportHealthy,
+      p!=null&&support!=null
+        ? `${money(p)} vs ${money(support)}${supportGapATR!=null&&p<support?` · ${supportGapATR.toFixed(2)} ATR below`:''}`
+        : 'Support unavailable');
 
   // 3) Larger trend deterioration. We care about direction, not the old entry sweet spot.
   const regHealthy=reg.slope==null?true:reg.slope>0;
@@ -8241,13 +8253,19 @@ function positionHealthSummary(s){
   const checks=positionHealthChecks(s);
   const warnings=checks.filter(x=>!x.ok);
   const critical=warnings.some(x=>x.level==='critical');
-  const trendBreak=warnings.some(x=>x.key==='trend');
-  const momentumBreak=warnings.some(x=>x.key==='rsi'||x.key==='macd');
+  // 447-trade historical review: position-health warnings were useful as risk
+  // flags, but they were NOT reliable exit triggers. 73% of historical trades
+  // reached the old WATCH EXIT condition and most still recovered/finished
+  // materially better by following the validated stop/hold plan.
+  // Core deterioration = support + RSI + MACD. Regression/volume remain context.
+  const coreWarnings=warnings.filter(x=>x.key==='trend'||x.key==='rsi'||x.key==='macd');
   let label='HEALTHY', color=C.green;
   if(critical){ label='AT RISK'; color=C.red; }
-  else if(warnings.length>=3 || (trendBreak&&momentumBreak)){ label='WEAKENING'; color=C.yellow; }
+  else if(coreWarnings.length>=3){ label='WEAKENING', color=C.yellow; }
   else if(warnings.length){ label='HEALTHY · WATCH'; color=C.yellow; }
-  return {checks,warnings,label,color,watchExit:!critical&&(warnings.length>=3||(trendBreak&&momentumBreak))};
+  // Never convert indicator warnings into an official exit state. The validated
+  // stop, earnings rule, profit-trail and hold-window logic remain authoritative.
+  return {checks,warnings,coreWarnings,label,color,watchExit:false};
 }
 function positionHealthHTML(s){
   const h=positionHealthSummary(s), st=safeStockState(s);
@@ -8267,9 +8285,9 @@ function setupChecks(s){
   const stack= m50!=null&&m200!=null&&m50>m200;
   const regUp=reg.slope!=null&&reg.slope>0;
 
-  // Weekly Bench uses broad, backtested setup families rather than a permanent
+  // Validated research uses broad, backtested setup families rather than a permanent
   // ticker-specific Core rule. These rules are intentionally a little wider
-  // so Bench can surface more paper-trade opportunities for forward testing.
+  // so research can surface more paper-trade opportunities for forward testing.
   if(pb.tier==='BENCH'){
     const fam=pb.family;
     const trend20=p!=null&&e20!=null&&p>e20;
@@ -8283,7 +8301,7 @@ function setupChecks(s){
       add('RSI in 55–75 momentum range',rsi!=null&&rsi>=55&&rsi<=75,`Current RSI ${rsi==null?'—':rsi.toFixed(1)}`);
       add('20-day momentum at least +5%',ch20!=null&&ch20>=5,`Current ${ch20==null?'—':pctFmt(ch20)}`);
       add('Relative volume at least 0.8×',rv!=null&&rv>=0.8,`Current ${rv==null?'—':rv.toFixed(2)+'×'}`);
-      add('A+ momentum +8% or better',ch20!=null&&ch20>=8,'Stronger momentum version of the Bench setup.',false,'A+');
+      add('A+ momentum +8% or better',ch20!=null&&ch20>=8,'Stronger momentum version of the validated setup.',false,'A+');
       add('A+ volume 1.0× or better',rv!=null&&rv>=1.0,'Full participation improves the setup.',false,'A+');
       return out;
     }
@@ -8311,7 +8329,7 @@ function setupChecks(s){
       add('Price above 200-day average',baseTrend,`Current ${money(p)} · 200-day ${money(m200)}`);
       add('50-day above 200-day',stack,`50-day ${money(m50)} · 200-day ${money(m200)}`);
       add('Regression trend rising',regUp,'The 126-day regression slope must stay positive.');
-      add('Regression inside Bench BUY range',reg.z!=null&&reg.z>=buy[0]&&reg.z<=buy[1],`Current ${reg.z==null?'—':reg.z.toFixed(2)} · BUY range ${buy[0]} to ${buy[1]}`);
+      add('Regression inside validated BUY range',reg.z!=null&&reg.z>=buy[0]&&reg.z<=buy[1],`Current ${reg.z==null?'—':reg.z.toFixed(2)} · BUY range ${buy[0]} to ${buy[1]}`);
       add('RSI 35–55',rsi!=null&&rsi>=35&&rsi<=55,`Current RSI ${rsi==null?'—':rsi.toFixed(1)}`);
       add('A+ regression sweet spot',reg.z!=null&&reg.z>=sweet[0]&&reg.z<=sweet[1],`Preferred ${sweet[0]} to ${sweet[1]}`,false,'A+');
       return out;
@@ -8838,8 +8856,9 @@ function positionState(s){
     return {state:'DECISION DAY',reason:`Normal ${pb.hold}-day hold is complete. Review the trade now; do not extend it by habit.`,day:d,stop:nextStop,gainPct,personality};
   }
   const health=positionHealthSummary(s);
-  if(health.watchExit) return {state:'WATCH EXIT',reason:'Several position-health warnings are now lining up. The active stop has not been breached, so this is a watch signal — not an automatic sell.',day:d,stop:nextStop,gainPct,personality,health};
-  return {state:'BOUGHT',reason:'The position remains inside its validated management plan.',day:d,stop:nextStop,gainPct,personality,health};
+  return {state:'BOUGHT',reason:health.label==='WEAKENING'
+    ? 'The position remains inside its validated management plan. Trade Health is weakening, so watch the warnings closely, but do not override the validated stop/exit rules.'
+    : 'The position remains inside its validated management plan.',day:d,stop:nextStop,gainPct,personality,health};
 }
 function stockState(s){ return s.position?positionState(s):preEntryState(s); }
 function statePriority(state){ return ({'EXIT':0,'PROTECT / CONSIDER ROTATION':1,'DECISION DAY':2,'PROTECT & RUN':3,'WATCH EXIT':4,'BOUGHT':5,'A+ BUY':6,'BUY':7,'PREPARING':8,'ENTRY MISSED':9,'WAIT':10,'RESEARCH ONLY':11}[state]??12); }
@@ -8853,7 +8872,7 @@ function badge(state){ const st=stateStyle(state); return `<span style="backgrou
 
 function buyUpTo(s){ const p=curVal(s,'price'); return p?p*1.02:null; }
 function plannedRisk(s){ if(!s.position?.entry||!s.position?.shares)return null; const stop=originalStop(s); return stop!=null?(s.position.entry-stop)*s.position.shares:null; }
-function clusterExposure(){ const open=stocks.filter(s=>s.position&&isValidatedStock(s)); const counts={}; open.forEach(s=>{const c=pbFor(s).cluster;counts[c]=(counts[c]||0)+1;}); return counts; }
+function clusterExposure(){ const open=capitalOpenPositions(); const counts={}; open.forEach(s=>{const c=pbFor(s)?.cluster||'Other';counts[c]=(counts[c]||0)+1;}); return counts; }
 function portfolioConflict(s){ if(!isValidatedStock(s)||s.position)return null; const pb=pbFor(s), exp=clusterExposure(), n=exp[pb.cluster]||0; if(pb.cluster==='Energy'&&n>=1)return 'Energy exposure is already full. DVN and MPC often move together.'; if(pb.cluster==='Tech / AI / Semis'&&n>=2)return 'Tech / AI exposure is already full. Consider replacing a weaker similar trade instead of adding.'; if(pb.cluster==='Industrial / Aerospace'&&n>=1)return 'You already hold a similar industrial/aerospace trade. Consider reduced size or choose the stronger setup.'; return null; }
 
 // ── v2 HOME ─────────────────────────────────────────────────────────────────
@@ -8960,11 +8979,28 @@ function evidenceRiskPct(s){
   if(pb?.confidence==='MODERATE') return 0.75;
   return 0.75;
 }
+function capitalOpenPositions(){
+  // Capital is real whether a position came from a current validated playbook,
+  // an older managed trade, or a manual/test entry. Never pretend occupied cash
+  // and stop risk disappear simply because a ticker is not currently qualified.
+  return stocks.filter(s=>s.position&&!isMarketStock(s));
+}
+function activeCapitalRisk(s){
+  const entry=Number(s?.position?.entry||0), shares=Number(s?.position?.shares||0);
+  if(!(entry>0&&shares>0)) return 0;
+  // Use the stop that actually controls the position now. A ratcheted stop can
+  // reduce planned downside; once above entry, planned stop-risk is zero. This
+  // is still NOT a guarantee against gaps, which are disclosed in the UI.
+  let stop=null;
+  try{ stop=Number(suggestedStop(s)?.price); }catch(e){ stop=Number(originalStop(s)); }
+  if(!Number.isFinite(stop)||stop<=0) return entry*shares; // fail closed if no stop can be resolved
+  return Math.max(0,(entry-stop)*shares);
+}
 function openCapitalRiskDollars(){
-  return stocks.filter(s=>s.position&&isValidatedStock(s)).reduce((sum,s)=>sum+(plannedRisk(s)||0),0);
+  return capitalOpenPositions().reduce((sum,s)=>sum+activeCapitalRisk(s),0);
 }
 function openCapitalCost(){
-  return stocks.filter(s=>s.position&&isValidatedStock(s)).reduce((sum,s)=>sum+Number(s.position?.entry||0)*Number(s.position?.shares||0),0);
+  return capitalOpenPositions().reduce((sum,s)=>sum+Number(s.position?.entry||0)*Number(s.position?.shares||0),0);
 }
 function capitalPlan(){
   const buys=liveCandidateItems().filter(x=>['A+ BUY','BUY'].includes(x.state?.state));
@@ -8972,7 +9008,7 @@ function capitalPlan(){
   const maxRisk=accountSize*(MAX_PORTFOLIO_RISK_PCT/100);
   let remainingRisk=Math.max(0,maxRisk-openCapitalRiskDollars());
   let remainingCash=Math.max(0,accountSize-openCapitalCost());
-  const openCount=stocks.filter(s=>s.position&&isValidatedStock(s)).length;
+  const openCount=capitalOpenPositions().length;
   let slots=Math.max(0,DEFAULT_MAX_POSITIONS-openCount);
   let fundedCount=openCount;
   const rows=[];
@@ -9013,8 +9049,9 @@ function capitalPlanBox(){
   if(!plan.ready) return `<div style="background:${C.card};border-radius:16px;border:1px solid ${C.blue}55;padding:15px 16px;margin:0 16px 12px;"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px;"><div><div style="color:${C.blue};font-size:10px;text-transform:uppercase;letter-spacing:.09em;font-weight:950;">Capital Plan</div><div style="color:${C.textSub};font-size:12px;line-height:1.5;margin-top:5px;">There are ${plan.buys.length} valid BUY${plan.buys.length===1?'':'s'}, but StockIQ will not pretend they all deserve money. Set your trading capital so it can fund only the highest-ranked few.</div></div><button onclick="setAccountSize()" style="border:none;border-radius:9px;background:${C.green};color:#000;padding:9px 11px;font-size:11px;font-weight:900;cursor:pointer;white-space:nowrap;">Set capital</button></div></div>`;
   const funded=plan.rows.filter(r=>r.status==='FUND');
   const backups=plan.rows.filter(r=>r.status!=='FUND');
-  const row=r=>`<div style="display:grid;grid-template-columns:62px 1fr auto;gap:8px;align-items:center;padding:9px 0;border-bottom:1px solid ${C.border};"><span style="color:${r.status==='FUND'?C.green:C.textMuted};font-size:10px;font-weight:950;">${r.status}</span><div><div style="color:${C.text};font-size:13px;font-weight:900;">${r.s.ticker} <span style="color:${C.textMuted};font-size:9px;">${evidenceFor(r.s)?.grade||pbFor(r.s)?.confidence||''}</span></div><div style="color:${C.textSub};font-size:10.5px;line-height:1.4;margin-top:2px;">${r.why}</div></div><div style="text-align:right;"><div style="color:${r.status==='FUND'?C.text:C.textMuted};font-size:12px;font-weight:900;">${r.status==='FUND'?money(r.amount):'—'}</div>${r.status==='FUND'?`<div style="color:${C.textMuted};font-size:9px;">risk ${money(r.risk)}</div>`:''}</div></div>`;
-  return `<div style="background:${C.card};border-radius:16px;border:1px solid ${C.blue}55;padding:15px 16px;margin:0 16px 12px;"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:6px;"><div><div style="color:${C.blue};font-size:10px;text-transform:uppercase;letter-spacing:.09em;font-weight:950;">Capital Plan · Fund the best, not all</div><div style="color:${C.textSub};font-size:11px;line-height:1.45;margin-top:4px;">${PRIMARY_POSITION_TARGET} primary positions · 3rd slot only for PROVEN A+ · ${MAX_PORTFOLIO_RISK_PCT.toFixed(1)}% planned portfolio stop risk · A+ does not automatically get larger size.</div></div><button onclick="setAccountSize()" style="background:none;border:1px solid ${C.border};border-radius:8px;color:${C.textSub};padding:6px 8px;font-size:10px;font-weight:800;cursor:pointer;">${money(accountSize)}</button></div>${plan.rows.map(row).join('')}<div style="color:${C.textMuted};font-size:10px;line-height:1.45;margin-top:8px;">Planned stop risk is not a guarantee of maximum loss. Gaps can execute below the stop, so higher-gap-risk names are deliberately sized smaller or left as backups.</div></div>`;
+  const row=r=>{const pct=r.status==='FUND'&&accountSize>0?(r.amount/accountSize*100):null; const sh=r.status==='FUND'&&r.shares>0?r.shares:null; return `<div style="display:grid;grid-template-columns:62px 1fr auto;gap:8px;align-items:center;padding:9px 0;border-bottom:1px solid ${C.border};"><span style="color:${r.status==='FUND'?C.green:C.textMuted};font-size:10px;font-weight:950;">${r.status}</span><div><div style="color:${C.text};font-size:13px;font-weight:900;">${r.s.ticker} <span style="color:${C.textMuted};font-size:9px;">${evidenceFor(r.s)?.grade||pbFor(r.s)?.confidence||''}</span></div><div style="color:${C.textSub};font-size:10.5px;line-height:1.4;margin-top:2px;">${r.why}</div></div><div style="text-align:right;"><div style="color:${r.status==='FUND'?C.text:C.textMuted};font-size:12px;font-weight:900;white-space:nowrap;">${r.status==='FUND'?`Invest up to ${money(r.amount)}`:'—'}</div>${r.status==='FUND'?`<div style="color:${C.textMuted};font-size:9px;white-space:nowrap;">~${sh.toFixed(2)} shares · ${pct.toFixed(1)}% capital · risk ${money(r.risk)}</div>`:''}</div></div>`;};
+  const committedRisk=Math.max(0,plan.maxRisk-plan.remainingRisk), committedCash=Math.max(0,accountSize-plan.remainingCash);
+  return `<div style="background:${C.card};border-radius:16px;border:1px solid ${C.blue}55;padding:15px 16px;margin:0 16px 12px;"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:6px;"><div><div style="color:${C.blue};font-size:10px;text-transform:uppercase;letter-spacing:.09em;font-weight:950;">Capital Plan · Fund the best, not all</div><div style="color:${C.textSub};font-size:11px;line-height:1.45;margin-top:4px;">${PRIMARY_POSITION_TARGET} primary positions · 3rd slot only for PROVEN A+ · ${MAX_PORTFOLIO_RISK_PCT.toFixed(1)}% planned portfolio stop risk · A+ does not automatically get larger size.</div></div><button onclick="setAccountSize()" style="background:none;border:1px solid ${C.border};border-radius:8px;color:${C.textSub};padding:6px 8px;font-size:10px;font-weight:800;cursor:pointer;">${money(accountSize)}</button></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0 4px;"><div style="background:${C.cardHigh};border-radius:9px;padding:8px 9px;"><div class="v2lbl">Capital committed</div><div style="color:${C.text};font-size:12px;font-weight:900;">${money(committedCash)} / ${money(accountSize)}</div></div><div style="background:${C.cardHigh};border-radius:9px;padding:8px 9px;"><div class="v2lbl">Stop risk committed</div><div style="color:${C.text};font-size:12px;font-weight:900;">${money(committedRisk)} / ${money(plan.maxRisk)}</div></div></div>${plan.rows.map(row).join('')}<div style="color:${C.textMuted};font-size:10px;line-height:1.45;margin-top:8px;">Wide validated stops can intentionally leave cash unused. Do not increase size just to deploy cash. Planned stop risk uses the position's active stop, but gaps can still execute below it and create a larger loss.</div></div>`;
 }
 
 function renderTonightsOpportunities(){
@@ -9116,9 +9153,9 @@ function renderStockCard(s){
   const st=safeStockState(s), pb=pbFor(s), price=displayPrice(s), reg=regressionStats(s), conflict=portfolioConflict(s); if(!pb){ const ev=evidenceFor(s), rp=researchPromotionLabel(s); return `<div onclick="openDetail('${s.id}')" style="background:${C.card};border:1px solid ${ev?rp.color+'55':C.border};border-radius:15px;padding:14px 16px;cursor:pointer;"><div style="display:flex;justify-content:space-between;gap:10px;"><div><div style="display:flex;align-items:center;gap:8px;"><span style="color:${C.text};font-weight:900;">${s.ticker}</span><span style="color:${rp.color};font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:.05em;">${rp.label}</span></div>${ev?`<div style="color:${C.textMuted};font-size:10px;margin-top:4px;">${ev.family?ev.family.replaceAll('_',' '):'Research'} · ${ev.grade||'UNRATED'}</div>`:''}</div><span style="color:${C.text};font-weight:800;">${money(price)}</span></div><div style="color:${C.textSub};font-size:11px;line-height:1.45;margin-top:7px;">${ev?.summary||'No validated StockIQ playbook yet. Current technical readiness cannot promote this ticker by itself.'}</div></div>`;}
   const pos=s.position; const plPct=pos&&price&&pos.entry?((price/pos.entry)-1)*100:null; const stop=pos?suggestedStop(s):null;
   return `<div onclick="openDetail('${s.id}')" style="background:${C.card};border:1px solid ${C.border};border-radius:15px;padding:14px 16px;cursor:pointer;">
-    <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;"><div><div style="display:flex;align-items:center;gap:8px;"><span style="color:${C.text};font-size:16px;font-weight:900;">${s.ticker}</span>${badge(st.state)}</div><div style="color:${C.textSub};font-size:11px;margin-top:4px;">${pb.name}${evidenceFor(s)?.grade?` · <span style="color:${evidenceFor(s).grade==='PROVEN'?C.green:(evidenceFor(s).grade==='REGIME-STRONG'?C.teal:C.yellow)};font-weight:850;">${evidenceFor(s).grade}</span>`:''}</div></div><div style="text-align:right;"><div style="color:${C.text};font-size:14px;font-weight:900;">${money(price)}</div>${plPct!=null?`<div style="color:${plPct>=0?C.green:C.red};font-size:11px;font-weight:800;">${pctFmt(plPct)}</div>`:''}${liveDayMoveHTML(s,'10.5px')}</div></div>
+    <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;"><div><div style="display:flex;align-items:center;gap:8px;"><span style="color:${C.text};font-size:16px;font-weight:900;">${s.ticker}</span>${badge(st.state)}</div><div style="color:${C.textSub};font-size:11px;margin-top:4px;">${cleanPlaybookName(pb)}${evidenceFor(s)?.grade?` · <span style="color:${evidenceFor(s).grade==='PROVEN'?C.green:(evidenceFor(s).grade==='REGIME-STRONG'?C.teal:C.yellow)};font-weight:850;">${evidenceFor(s).grade}</span>`:''}</div></div><div style="text-align:right;"><div style="color:${C.text};font-size:14px;font-weight:900;">${money(price)}</div>${plPct!=null?`<div style="color:${plPct>=0?C.green:C.red};font-size:11px;font-weight:800;">${pctFmt(plPct)}</div>`:''}${liveDayMoveHTML(s,'10.5px')}</div></div>
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:11px;padding-top:10px;border-top:1px solid ${C.border};">
-      ${pos?`<div><div class="v2lbl">Day</div><div class="v2val">${positionDays(s)}/${pb.hold}</div></div><div><div class="v2lbl">${stop.type}</div><div class="v2val">${money(stop.price)}</div></div><div><div class="v2lbl">Entry</div><div class="v2val">${money(pos.entry)}</div></div>`:`<div><div class="v2lbl">Regression</div><div class="v2val">${reg.z==null?'—':reg.z.toFixed(2)}</div></div><div><div class="v2lbl">Confidence</div><div class="v2val">${pb.confidence}</div></div><div><div class="v2lbl">${['BUY','A+ BUY'].includes(st.state)?'Buy Up To':'Key Detail'}</div><div class="v2val">${['BUY','A+ BUY'].includes(st.state)?money(buyUpTo(s)):st.state}</div></div>`}
+      ${pos?`<div><div class="v2lbl">Day</div><div class="v2val">${positionDays(s)}/${pb.hold}</div></div><div><div class="v2lbl">${stop.type}</div><div class="v2val">${money(stop.price)}</div></div><div><div class="v2lbl">Entry</div><div class="v2val">${money(pos.entry)}</div></div>`:`<div><div class="v2lbl">Regression</div><div class="v2val">${reg.z==null?'—':reg.z.toFixed(2)}</div></div><div><div class="v2lbl">Evidence</div><div class="v2val">${modernEvidenceLabel(s,pb)}</div></div><div><div class="v2lbl">${['BUY','A+ BUY'].includes(st.state)?'Buy Up To':'Key Detail'}</div><div class="v2val">${['BUY','A+ BUY'].includes(st.state)?money(buyUpTo(s)):st.state}</div></div>`}
     </div>${conflict?`<div style="color:${C.yellow};font-size:11px;margin-top:9px;font-weight:700;">Portfolio conflict: ${conflict}</div>`:''}
   </div>`;
 }
@@ -9267,7 +9304,27 @@ function high52BehaviorPanel(s){
   `);
 }
 
-function historyPanel(pb){ const st=pb?.stats||null; const trades=st?.trades??'—', win=st?.win!=null?`~${st.win}%`:'—', avg=st?.avg!=null?`~${st.avg}%`:'—'; const proof=st?`Normal drawdown ${st.drawdown??'not separately summarized'}. ${pb.tier==='BENCH'?'Bench results are used to choose what to forward-test; they are not promoted to Core yet.':'The setup survived holdout testing, best-trade removal, best-year removal, and nearby-rule checks.'}`:(pb?.evidenceSummary||'This playbook was promoted through the StockIQ evidence gate; detailed summary statistics were not embedded in this playbook object.'); return panel('Historical Proof',`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;"><div style="color:${C.text};font-size:15px;font-weight:900;">${pb?.confidence||'VALIDATED'} CONFIDENCE</div><div style="color:${C.textSub};font-size:11px;">${pb?.tier==='BENCH'?'Validated research playbook':'Validated playbook'}</div></div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;"><div><div class="v2lbl">Trades</div><div class="v2big">${trades}</div></div><div><div class="v2lbl">Win Rate</div><div class="v2big">${win}</div></div><div><div class="v2lbl">Avg Return</div><div class="v2big">${avg}</div></div></div><div style="margin-top:12px;color:${C.textSub};font-size:12.5px;line-height:1.6;">${proof} Historical results are evidence, not a guarantee.</div>`); }
+function modernEvidenceLabel(s,pb){
+  const ev=evidenceFor(s);
+  if(ev?.grade) return String(ev.grade).replaceAll('_',' ');
+  const c=String(pb?.confidence||'').toUpperCase();
+  if(c.includes('REGIME-WEAK')) return 'RESEARCH';
+  if(c.includes('OWNED/LEGACY')) return 'VALIDATED · LEGACY';
+  if(c.includes('RESERVE')) return 'VALIDATED RESEARCH';
+  if(c.includes('ACTIVE')) return 'VALIDATED';
+  const cleaned=c.replace(/\bBENCH\b/g,'').replace(/\bCORE\b/g,'').replace(/\bRESERVE\b/g,'').replace(/\bACTIVE\b/g,'').replace(/[·|]+/g,' ').replace(/\s+/g,' ').trim();
+  return cleaned||'VALIDATED';
+}
+function historyPanel(s,pb){
+  const st=pb?.stats||null;
+  const trades=st?.trades??'—', win=st?.win!=null?`~${st.win}%`:'—', avg=st?.avg!=null?`~${st.avg}%`:'—';
+  const ev=evidenceFor(s), evidenceLabel=modernEvidenceLabel(s,pb);
+  const legacyResearch=pb?.tier==='BENCH';
+  const proof=st
+    ? `Normal drawdown ${st.drawdown??'not separately summarized'}. ${legacyResearch?'Historical results support forward testing; live eligibility is determined by the current evidence grade, setup readiness, and promotion rules.':'The setup survived holdout testing, best-trade removal, best-year removal, and nearby-rule checks.'}`
+    : (pb?.evidenceSummary||'This playbook passed the StockIQ evidence gate; detailed summary statistics were not embedded in this playbook object.');
+  return panel('Historical Proof',`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;"><div style="color:${C.text};font-size:15px;font-weight:900;">${evidenceLabel} EVIDENCE</div><div style="color:${C.textSub};font-size:11px;">${ev?.promotionReady?'Qualified validated playbook':'Validated playbook'}</div></div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;"><div><div class="v2lbl">Trades</div><div class="v2big">${trades}</div></div><div><div class="v2lbl">Win Rate</div><div class="v2big">${win}</div></div><div><div class="v2lbl">Avg Return</div><div class="v2big">${avg}</div></div></div><div style="margin-top:12px;color:${C.textSub};font-size:12.5px;line-height:1.6;">${proof} Historical results are evidence, not a guarantee.</div>`);
+}
 function sweetSpotTiles(s,pb){
   const p=curVal(s,'price'), e20=curVal(s,'ma20','ema20'), m50=curVal(s,'ma50'), m200=curVal(s,'ma200'), rsi=curVal(s,'rsi');
   const reg=regressionStats(s), ch20=changeN(s,20), rv=relativeVolume(s), offHi=pctFrom52High(s), hist=macdHist(s), prevHist=macdHist(s,prevSnap(s));
@@ -9333,7 +9390,7 @@ function sweetSpotTiles(s,pb){
       add('50 > 200','Trend Structure',m50!=null&&m200!=null?`${money(m50)} vs ${money(m200)}`:'—',stack,'Medium-term trend should remain above the long-term trend.');
       add('RISING','Regression Trend',reg.slope==null?'—':(regUp?'Rising':'Falling'),regUp,'The 126-day regression path should still be rising.');
       addCtx();
-      add('35–55','RSI',rsi==null?'—':rsi.toFixed(1),rsi!=null&&rsi>=35&&rsi<=55,'Preferred pullback momentum range for the Bench regression family.');
+      add('35–55','RSI',rsi==null?'—':rsi.toFixed(1),rsi!=null&&rsi>=35&&rsi<=55,'Preferred pullback momentum range for the validated regression family.');
     }else if(fam==='DEEP_PULLBACK'){
       add('ABOVE','Price vs SMA200',p!=null&&m200!=null?`${money(p)} vs ${money(m200)}`:'—',longTrend,'Long-term structure should remain intact.');
       add('50 > 200','Trend Structure',m50!=null&&m200!=null?`${money(m50)} vs ${money(m200)}`:'—',stack,'The larger trend stack should remain healthy.');
@@ -9573,12 +9630,39 @@ function preTop(s,pb,st){
   const canBuy=['BUY','A+ BUY'].includes(st.state), buyLabel=st.state==='A+ BUY'?'A+ BUY':'BUY', label=cleanPlaybookName(pb);
   return `<div style="padding:16px 16px 10px;"><button onclick="showScreen('home')" style="background:none;border:none;color:${C.textSub};padding:0 0 9px;cursor:pointer;">← Back</button><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;"><div style="min-width:0;"><div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;"><span style="color:${C.text};font-size:24px;font-weight:950;">${s.ticker}</span>${badge(st.state)}</div><div style="color:${C.text};font-size:13px;font-weight:700;margin-top:5px;">${companyNameFor(s)}</div>${label?`<div style="color:${C.textSub};font-size:12px;margin-top:3px;">${label}</div>`:''}</div><div style="text-align:right;flex-shrink:0;"><div style="color:${C.text};font-size:20px;font-weight:900;margin-bottom:2px;">${money(displayPrice(s))}</div>${liveDayMoveHTML(s,'11px')} ${canBuy?`<button onclick="showV2BuyFlow('${s.id}','${buyLabel}')" style="border:none;border-radius:10px;background:${C.green};color:#000;font-size:13px;font-weight:950;padding:9px 18px;cursor:pointer;box-shadow:0 0 0 1px ${C.green}33;">${buyLabel}</button>`:''}</div></div></div>`;
 }
+function ownedResearchDetails(s,pb){
+  const research = [
+    regressionPanel(s,pb),
+    high52BehaviorPanel(s),
+    historyPanel(s,pb),
+    yourTradeProofPanel(s,pb),
+    sweetSpotPanel(s,pb),
+    indicatorPanel(s,pb),
+    marketPanel(s,pb)
+  ].join('');
+  return `<details style="margin:0 16px 12px;background:${C.card};border:1px solid ${C.border};border-radius:16px;overflow:hidden;">`
+    + `<summary style="list-style:none;cursor:pointer;padding:14px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;user-select:none;">`
+    + `<div><div style="color:${C.text};font-size:13px;font-weight:950;">Entry & Historical Research</div><div style="color:${C.textSub};font-size:11.5px;margin-top:3px;line-height:1.4;">Original setup, backtest evidence, regression context and indicators.</div></div>`
+    + `<div style="color:${C.textMuted};font-size:11px;font-weight:900;white-space:nowrap;">SHOW DETAILS ▾</div>`
+    + `</summary>`
+    + `<div style="border-top:1px solid ${C.border};padding-top:12px;padding-bottom:2px;">${research}</div>`
+    + `</details>`;
+}
+
 function renderDetail(s){
   const el=document.getElementById('detail-content'); if(!el)return; const pb=pbFor(s); if(!pb){ const ev=evidenceFor(s), rp=researchPromotionLabel(s); el.innerHTML=`<div style="padding:16px;"><button onclick="showScreen('home')" style="background:none;border:none;color:${C.textSub};padding:0 0 12px;">← Back</button><h2 style="color:${C.text};margin:0;">${s.ticker}</h2>${companyNameFor(s)?`<div style="color:${C.textSub};font-size:13px;margin-top:4px;">${companyNameFor(s)}</div>`:''}<div style="margin-top:12px;color:${rp.color};font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;">${rp.label}${ev?.grade?` · ${ev.grade}`:''}</div>${ev?.family?`<div style="color:${C.text};font-size:13px;font-weight:800;margin-top:8px;">Candidate family: ${ev.family.replaceAll('_',' ')}</div>`:''}<p style="color:${C.textSub};font-size:13px;line-height:1.65;">${ev?.summary||'This ticker can show indicators, but StockIQ will not issue trading signals until it has a validated playbook.'}</p><div style="background:${C.card};border:1px solid ${C.border};border-radius:14px;padding:13px 14px;margin:12px 0;"><div style="color:${C.yellow};font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;margin-bottom:7px;">Promotion gate</div><div style="color:${C.textSub};font-size:12px;line-height:1.6;">Current readiness is not enough. Promotion requires useful trade frequency, positive friction-adjusted expectancy, older/newer or OOS survival, parameter-neighborhood robustness, and tolerable downside. Until that evidence is explicitly approved, this stock stays research-only.</div></div>${indicatorPanel(s,{})}</div>`; return; }
   const st=stockState(s),checks=setupChecks(s),conflict=portfolioConflict(s);
   let html=s.position?positionTop(s,pb,st):preTop(s,pb,st); html+=topCallout(s,pb,st);
-  if(s.position){ html+=panel('Trade Health',positionHealthHTML(s)); html+=riskPanel(s,pb); html+=exitPersonalityPanel(s,pb,st); html+=earningsPanel(s,pb); html+=regressionPanel(s,pb); if(pb.maxHold>pb.hold)html+=panel('Decision / Runner',`<div style="color:${C.text};font-size:13px;font-weight:800;">Normal hold: ${pb.hold} days · Max runner window: ${pb.maxHold} days</div><div style="color:${C.textSub};font-size:11px;margin-top:6px;">At decision day, StockIQ checks whether this ticker’s proven runner conditions are still healthy.</div>`); html+=high52BehaviorPanel(s); html+=historyPanel(pb); html+=yourTradeProofPanel(s,pb); html+=sweetSpotPanel(s,pb); html+=indicatorPanel(s,pb); html+=marketPanel(s,pb); html+=panel('Manage Position',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;"><button onclick="showV2CloseFlow('${s.id}')" style="padding:11px;border-radius:10px;border:1px solid ${C.red}66;background:${C.redDim};color:${C.red};font-weight:800;cursor:pointer;">Sell</button><button onclick="showV2StopFlow('${s.id}')" style="padding:11px;border-radius:10px;border:1px solid ${C.border};background:${C.cardHigh};color:${C.text};font-weight:800;cursor:pointer;">Update Stop</button></div>`); }
-  else { html+=setupEducationPanel(s,pb); html+=panel('Setup Requirements',checklistHTML(checks)); if(['BUY','A+ BUY'].includes(st.state))html+=entryPanel(s,pb,st); html+=riskPanel(s,pb); html+=regressionPanel(s,pb); html+=earningsPanel(s,pb); html+=marketPanel(s,pb); if(conflict)html+=panel('Portfolio Conflict',`<div style="color:${C.yellow};font-size:12.5px;line-height:1.55;font-weight:700;">${conflict}</div>`); html+=historyPanel(pb); html+=yourTradeProofPanel(s,pb); html+=sweetSpotPanel(s,pb); html+=indicatorPanel(s,pb); }
+  if(s.position){
+    html+=panel('Trade Health',positionHealthHTML(s));
+    html+=riskPanel(s,pb);
+    html+=exitPersonalityPanel(s,pb,st);
+    html+=earningsPanel(s,pb);
+    if(pb.maxHold>pb.hold) html+=panel('Decision / Runner',`<div style="color:${C.text};font-size:13px;font-weight:800;">Normal hold: ${pb.hold} days · Max runner window: ${pb.maxHold} days</div><div style="color:${C.textSub};font-size:11px;margin-top:6px;">At decision day, StockIQ checks whether this ticker’s proven runner conditions are still healthy.</div>`);
+    html+=panel('Manage Position',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;"><button onclick="showV2CloseFlow('${s.id}')" style="padding:11px;border-radius:10px;border:1px solid ${C.red}66;background:${C.redDim};color:${C.red};font-weight:800;cursor:pointer;">Sell</button><button onclick="showV2StopFlow('${s.id}')" style="padding:11px;border-radius:10px;border:1px solid ${C.border};background:${C.cardHigh};color:${C.text};font-weight:800;cursor:pointer;">Update Stop</button></div>`);
+    html+=ownedResearchDetails(s,pb);
+  }
+  else { html+=setupEducationPanel(s,pb); html+=panel('Setup Requirements',checklistHTML(checks)); if(['BUY','A+ BUY'].includes(st.state))html+=entryPanel(s,pb,st); html+=riskPanel(s,pb); html+=regressionPanel(s,pb); html+=earningsPanel(s,pb); html+=marketPanel(s,pb); if(conflict)html+=panel('Portfolio Conflict',`<div style="color:${C.yellow};font-size:12.5px;line-height:1.55;font-weight:700;">${conflict}</div>`); html+=historyPanel(s,pb); html+=yourTradeProofPanel(s,pb); html+=sweetSpotPanel(s,pb); html+=indicatorPanel(s,pb); }
   el.innerHTML=html;
 }
 function openDetail(id){ const s=stocks.find(x=>String(x.id)===String(id)); if(!s)return; showScreen('detail'); renderDetail(s); }
@@ -9813,6 +9897,109 @@ function showAddFlow(){ if(_origShowAddFlow)_origShowAddFlow(); setTimeout(()=>{
 
 
 
+// ── CROSS-DEVICE RESEARCH STATE SYNC · v2.9.64 ───────────────────────────────
+// Daily market data and portfolio capital already sync through Firestore. The
+// Sunday queue, imported validation evidence, and history-status lifecycle used
+// to live only in localStorage, which could make phone and laptop disagree.
+// This keeps those lightweight research records in ONE shared cloud document.
+const RESEARCH_STATE_DOC_ID='researchStateV1';
+let researchCloudSyncInProgress=false;
+let researchCloudSaveTimer=null;
+function researchStateRef(uid){ return db.collection('users').doc(uid).collection('settings').doc(RESEARCH_STATE_DOC_ID); }
+function researchRecency(rec,key='importedOn'){
+  const v=rec?.[key]||''; const d=new Date(v); return isNaN(d)?String(v):d.getTime();
+}
+function mergeRecordMaps(cloud={},local={},dateKey='importedOn'){
+  const out={...cloud};
+  for(const [k,v] of Object.entries(local||{})){
+    if(!out[k]){ out[k]=v; continue; }
+    const lc=researchRecency(v,dateKey), cc=researchRecency(out[k],dateKey);
+    if(lc>cc) out[k]=v;
+  }
+  return out;
+}
+function normalizeResearchQueue(queue,evidence,status){
+  const by=new Map();
+  for(const q of (queue||[])){
+    const t=String(q?.ticker||'').trim().toUpperCase(); if(!t) continue;
+    const ev=evidence?.[t]; const hs=status?.[t];
+    // Once a validation result exists or a terminal history status exists, the
+    // ticker no longer belongs in the waiting-for-history queue.
+    if(ev || (hs && ['INSUFFICIENT_HISTORY','DATA_ERROR'].includes(String(hs.status||'').toUpperCase()))) continue;
+    const prev=by.get(t);
+    if(!prev) by.set(t,{...q,ticker:t});
+    else{
+      const src=[...(prev.sources||[]),...(q.sources||[])].map(x=>String(x)).filter(Boolean);
+      by.set(t,{...prev,...q,ticker:t,sources:[...new Set(src)]});
+    }
+  }
+  return [...by.values()];
+}
+function researchStatePayload(){
+  return cleanForFirestore({
+    schemaVersion:1,
+    dynamicEvidence:DYNAMIC_RESEARCH_EVIDENCE||{},
+    historyStatus:RESEARCH_HISTORY_STATUS||{},
+    sundayDiscoveryHistory:(sundayDiscoveryHistory||[]).slice(-24),
+    sundayResearchQueue:normalizeResearchQueue(sundayResearchQueue,DYNAMIC_RESEARCH_EVIDENCE,RESEARCH_HISTORY_STATUS),
+    updatedAt:firebase.firestore.FieldValue.serverTimestamp()
+  });
+}
+async function saveResearchStateCloud(){
+  if(!currentUser || researchCloudSyncInProgress) return;
+  try{
+    const payload=researchStatePayload();
+    const approxBytes=new Blob([JSON.stringify({...payload,updatedAt:null})]).size;
+    if(approxBytes>800000) throw new Error(`Research sync payload is too large (${Math.round(approxBytes/1024)} KB).`);
+    await Promise.race([
+      researchStateRef(currentUser.uid).set(payload,{merge:false}),
+      new Promise((_,rej)=>setTimeout(()=>rej(new Error('Research-state cloud sync timed out after 15s')),15000))
+    ]);
+  }catch(e){ console.warn('Research-state cloud save failed',e); }
+}
+function scheduleResearchStateCloudSave(){
+  if(!currentUser || researchCloudSyncInProgress) return;
+  clearTimeout(researchCloudSaveTimer);
+  researchCloudSaveTimer=setTimeout(()=>saveResearchStateCloud(),250);
+}
+async function syncResearchStateFromCloud(){
+  if(!currentUser) return {source:'none'};
+  researchCloudSyncInProgress=true;
+  try{
+    // Ensure local stores are loaded before merging.
+    loadSundayDiscoveryState(); loadDynamicEvidence(); loadResearchHistoryStatus();
+    const snap=await Promise.race([
+      researchStateRef(currentUser.uid).get(),
+      new Promise((_,rej)=>setTimeout(()=>rej(new Error('Research-state cloud read timed out after 15s')),15000))
+    ]);
+    if(!snap.exists){
+      researchCloudSyncInProgress=false;
+      await saveResearchStateCloud();
+      return {source:'local-seeded'};
+    }
+    const c=snap.data()||{};
+    DYNAMIC_RESEARCH_EVIDENCE=mergeRecordMaps(c.dynamicEvidence||{},DYNAMIC_RESEARCH_EVIDENCE||{},'importedOn');
+    RESEARCH_HISTORY_STATUS=mergeRecordMaps(c.historyStatus||{},RESEARCH_HISTORY_STATUS||{},'updatedOn');
+    const hist=[...(c.sundayDiscoveryHistory||[]),...(sundayDiscoveryHistory||[])];
+    const seen=new Set();
+    sundayDiscoveryHistory=hist.filter(x=>{ const key=JSON.stringify(x); if(seen.has(key)) return false; seen.add(key); return true; }).slice(-24);
+    sundayResearchQueue=normalizeResearchQueue([...(c.sundayResearchQueue||[]),...(sundayResearchQueue||[])],DYNAMIC_RESEARCH_EVIDENCE,RESEARCH_HISTORY_STATUS);
+    // Persist the merged truth locally without recursively scheduling another save.
+    try{localStorage.setItem(DYNAMIC_EVIDENCE_STORAGE_KEY,JSON.stringify(DYNAMIC_RESEARCH_EVIDENCE));}catch(e){}
+    try{localStorage.setItem(HISTORY_STATUS_STORAGE_KEY,JSON.stringify(RESEARCH_HISTORY_STATUS));}catch(e){}
+    try{localStorage.setItem(SUNDAY_DISCOVERY_STORAGE_KEY,JSON.stringify(sundayDiscoveryHistory));}catch(e){}
+    try{localStorage.setItem(SUNDAY_QUEUE_STORAGE_KEY,JSON.stringify(sundayResearchQueue));}catch(e){}
+    researchCloudSyncInProgress=false;
+    await saveResearchStateCloud(); // normalize merged state back to cloud
+    renderHome();
+    return {source:'cloud-merged',queue:sundayResearchQueue.length,evidence:Object.keys(DYNAMIC_RESEARCH_EVIDENCE).length};
+  }catch(e){
+    console.warn('Research-state cloud sync failed',e);
+    researchCloudSyncInProgress=false;
+    return {source:'error',error:e};
+  }
+}
+
 // ── SUNDAY DISCOVERY PIPELINE · v2.9.39 ─────────────────────────────────────
 // Sunday scan results are DISCOVERY only. They never earn BUY/PREPARING status
 // just because they appeared in a scanner. New names enter a research queue;
@@ -9826,8 +10013,10 @@ function loadSundayDiscoveryState(){
   try{sundayResearchQueue=JSON.parse(localStorage.getItem(SUNDAY_QUEUE_STORAGE_KEY)||'[]')||[];}catch(e){sundayResearchQueue=[];}
 }
 function saveSundayDiscoveryState(){
+  sundayResearchQueue=normalizeResearchQueue(sundayResearchQueue,DYNAMIC_RESEARCH_EVIDENCE,RESEARCH_HISTORY_STATUS);
   try{localStorage.setItem(SUNDAY_DISCOVERY_STORAGE_KEY,JSON.stringify(sundayDiscoveryHistory.slice(-24)));}catch(e){console.warn('Sunday discovery history save failed',e);}
   try{localStorage.setItem(SUNDAY_QUEUE_STORAGE_KEY,JSON.stringify(sundayResearchQueue));}catch(e){console.warn('Sunday research queue save failed',e);}
+  scheduleResearchStateCloudSave();
 }
 function sundayTickerClass(ticker){
   const t=String(ticker||'').trim().toUpperCase();
@@ -9946,7 +10135,7 @@ let DYNAMIC_RESEARCH_EVIDENCE={};
 function loadDynamicEvidence(){
   try{DYNAMIC_RESEARCH_EVIDENCE=JSON.parse(localStorage.getItem(DYNAMIC_EVIDENCE_STORAGE_KEY)||'{}')||{};}catch(e){DYNAMIC_RESEARCH_EVIDENCE={};}
 }
-function saveDynamicEvidence(){try{localStorage.setItem(DYNAMIC_EVIDENCE_STORAGE_KEY,JSON.stringify(DYNAMIC_RESEARCH_EVIDENCE));}catch(e){console.warn('Dynamic evidence save failed',e);}}
+function saveDynamicEvidence(){try{localStorage.setItem(DYNAMIC_EVIDENCE_STORAGE_KEY,JSON.stringify(DYNAMIC_RESEARCH_EVIDENCE));}catch(e){console.warn('Dynamic evidence save failed',e);} scheduleResearchStateCloudSave();}
 loadDynamicEvidence();
 
 function evidenceFor(s){
@@ -10108,7 +10297,7 @@ function showSundayDiscoveryFlow(){
     </div>
   </div>`);
 }
-(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.57 · Active Stop Clarity';})();
+(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.64 · Cross-Device State Hardening';})();
 
 // ── v2.9.54 HISTORY LIFECYCLE ──────────────────────────────────────
 // Research is no longer a catch-all. The visible Research tab contains only:
@@ -10125,6 +10314,7 @@ function loadResearchHistoryStatus(){
 }
 function saveResearchHistoryStatus(){
   try{localStorage.setItem(HISTORY_STATUS_STORAGE_KEY,JSON.stringify(RESEARCH_HISTORY_STATUS));}catch(e){console.warn('Research history status save failed',e);}
+  scheduleResearchStateCloudSave();
 }
 function historyStatusForTicker(t){ loadResearchHistoryStatus(); return RESEARCH_HISTORY_STATUS[String(t||'').trim().toUpperCase()]||null; }
 function parseGenericCSVRecords(text){
@@ -10349,7 +10539,7 @@ function renderStockList(){
 }
 
 (function v2953Init(){
-  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.57 · Active Stop Clarity';
+  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.64 · Cross-Device State Hardening';
   // Safe cleanup on load: de-duplicate queue and remove only records that already
   // have evidence. Genuine pending Sunday names are never deleted automatically.
   try{ applyResearchReconciliation(true); }catch(e){ console.warn('Research reconciliation init failed',e); }
