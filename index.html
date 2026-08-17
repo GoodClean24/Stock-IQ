@@ -8135,17 +8135,40 @@ function displayDayPct(s){
   const v=Number(s?.liveDayPct);
   return Number.isFinite(v)?v:(Number.isFinite(Number(s?.pct))?Number(s.pct):null);
 }
-function liveDirectionMeta(s){
-  const m=Number(s?.liveMovePct);
-  if(!Number.isFinite(m)) return {arrow:'→',color:C.textMuted,label:'first upload'};
-  if(m>0.10) return {arrow:'↑',color:C.green,label:'rising since last upload'};
-  if(m<-0.10) return {arrow:'↓',color:C.red,label:'falling since last upload'};
-  return {arrow:'→',color:C.textMuted,label:'about flat since last upload'};
+function completedDayMoveContext(s){
+  const a=(s?.snapshots||[]).filter(x=>x&&x.date&&Number.isFinite(Number(x.price))).slice().sort((x,y)=>String(x.date).localeCompare(String(y.date)));
+  if(a.length<2) return {pct:null,arrow:'→',color:C.textMuted,label:'Not enough completed daily bars'};
+  // During the session, the newest snapshot is normally yesterday. After the final
+  // daily upload, the newest snapshot can be today. In that case step back one row
+  // so "Previous Day" never duplicates Today's percentage.
+  const liveDate=String(s?.liveSessionDate||'').slice(0,10);
+  let i=a.length-1;
+  if(liveDate && String(a[i]?.date||'').slice(0,10)===liveDate) i-=1;
+  if(i<1) return {pct:null,arrow:'→',color:C.textMuted,label:'Not enough completed daily bars'};
+  const last=Number(a[i].price), prior=Number(a[i-1].price);
+  const pct=prior?((last/prior)-1)*100:null;
+  // Arrow = whether the previous day's percentage move improved or weakened versus
+  // the trading day before it. A negative Previous Day can therefore correctly show ↑.
+  let priorPct=null;
+  if(i>=2){
+    const p2=Number(a[i-2].price);
+    if(p2) priorPct=((prior/p2)-1)*100;
+  }
+  if(pct==null||priorPct==null) return {pct,arrow:'→',color:C.textMuted,label:'Previous day move; not enough history for direction comparison'};
+  const delta=pct-priorPct;
+  if(delta>0.10) return {pct,arrow:'↑',color:C.green,label:'Previous day improved versus the day before'};
+  if(delta<-0.10) return {pct,arrow:'↓',color:C.red,label:'Previous day weakened versus the day before'};
+  return {pct,arrow:'→',color:C.textMuted,label:'Previous day was about unchanged versus the day before'};
 }
 function liveDayMoveHTML(s,fontSize='11px'){
-  const d=displayDayPct(s); if(d==null) return '';
-  const dir=liveDirectionMeta(s), dayColor=d>=0?C.green:C.red;
-  return `<div title="${dir.label}" style="font-size:${fontSize};font-weight:900;white-space:nowrap;"><span style="color:${dayColor};">${pctFmt(d,2)}</span> <span style="color:${dir.color};font-size:1.15em;">${dir.arrow}</span></div>`;
+  const todayPct=displayDayPct(s), prev=completedDayMoveContext(s);
+  if(todayPct==null && prev.pct==null) return '';
+  const todayColor=todayPct==null?C.textMuted:(todayPct>=0?C.green:C.red);
+  const prevColor=prev.pct==null?C.textMuted:(prev.pct>=0?C.green:C.red);
+  return `<div style="font-size:${fontSize};font-weight:900;white-space:nowrap;line-height:1.45;">`+
+    `<div><span style="color:${C.textMuted};font-size:.88em;font-weight:800;">Today</span> <span style="color:${todayColor};">${todayPct==null?'—':pctFmt(todayPct,2)}</span></div>`+
+    `<div title="${prev.label}"><span style="color:${C.textMuted};font-size:.88em;font-weight:800;">Previous Day</span> <span style="color:${prevColor};">${prev.pct==null?'—':pctFmt(prev.pct,2)}</span> <span style="color:${prev.color};font-size:1.12em;">${prev.arrow}</span></div>`+
+  `</div>`;
 }
 function pctFmt(v,d=1){ return v==null?'—':`${v>=0?'+':''}${Number(v).toFixed(d)}%`; }
 function money(v){ return v==null?'—':fmtP(v); }
@@ -9622,9 +9645,39 @@ function exitPersonalityPanel(s,pb,st){
 function cleanPlaybookName(pb){
   return String(pb?.name||'').replace(/^Bench\s*·\s*/i,'').replace(/^Reserve\s*·\s*/i,'').trim();
 }
+function trendTypeLabel(s,pb){
+  const fam=String(pb?.family||evidenceFor(s)?.family||s?.setupFamily||'').toUpperCase();
+  const map={REG_PULLBACK:'Regression Pullback',MOMENTUM:'Momentum',EMA20_RECLAIM:'EMA20 Reclaim',SMA50_RECLAIM:'SMA50 Reclaim',DEEP_PULLBACK:'Deep Pullback',BREAKOUT:'Breakout'};
+  if(map[fam]) return map[fam];
+  const n=cleanPlaybookName(pb);
+  if(/50[- ]Day Reclaim/i.test(n)) return 'SMA50 Reclaim';
+  if(/EMA20 Reclaim/i.test(n)) return 'EMA20 Reclaim';
+  if(/Momentum/i.test(n)) return 'Momentum';
+  if(/Deep Pullback/i.test(n)) return 'Deep Pullback';
+  if(/Regression Pullback/i.test(n)) return 'Regression Pullback';
+  if(/Breakout/i.test(n)) return 'Breakout';
+  return n||'Validated Setup';
+}
+function chartWatchMeta(s,pb,st){
+  const trend=trendTypeLabel(s,pb);
+  // Daily remains the authority for setup/state. 30-minute is a watch/execution view only.
+  if(!s.position && st?.state==='PREPARING' && /Reclaim/i.test(trend)){
+    return {chart:'30-Min',color:C.yellow,reason:`Watch the reclaim trigger intraday. Daily data still decides whether ${trend} is a valid setup.`};
+  }
+  return {chart:'Daily',color:C.teal,reason:s.position?'Position management remains based on the validated daily plan.':'Use the Daily chart unless StockIQ specifically calls for intraday execution.'};
+}
+function detailMetaStrip(s,pb,st){
+  const trend=trendTypeLabel(s,pb), cw=chartWatchMeta(s,pb,st);
+  const day=s.position?positionDays(s):null;
+  return `<div style="margin:0 16px 12px;display:grid;grid-template-columns:${s.position?'repeat(3,minmax(0,1fr))':'repeat(2,minmax(0,1fr))'};gap:8px;">`+
+    `<div style="background:${C.card};border:1px solid ${C.border};border-radius:12px;padding:10px 11px;"><div class="v2lbl">Trend Type</div><div style="color:${C.text};font-size:12.5px;font-weight:900;margin-top:3px;">${trend}</div></div>`+
+    (s.position?`<div style="background:${C.card};border:1px solid ${C.border};border-radius:12px;padding:10px 11px;"><div class="v2lbl">Trade Age</div><div style="color:${C.text};font-size:14px;font-weight:950;margin-top:3px;">Day ${day}/${pb?.hold||'—'}</div></div>`:'')+
+    `<div title="${cw.reason}" style="background:${C.card};border:1px solid ${cw.color}55;border-radius:12px;padding:10px 11px;"><div class="v2lbl">Chart To Watch</div><div style="color:${cw.color};font-size:12.5px;font-weight:950;margin-top:3px;">${cw.chart}</div><div style="color:${C.textMuted};font-size:9.5px;line-height:1.35;margin-top:3px;">${cw.chart==='30-Min'?'Intraday trigger watch':'Primary view'}</div></div>`+
+  `</div>`;
+}
 function positionTop(s,pb,st){
   const p=displayPrice(s),pl=s.position?.entry&&p?((p/s.position.entry)-1)*100:null;
-  return `<div style="padding:16px 16px 10px;"><div style="display:flex;justify-content:space-between;align-items:flex-start;"><div><button onclick="showScreen('home')" style="background:none;border:none;color:${C.textSub};padding:0 0 9px;cursor:pointer;">← Back</button><div style="display:flex;gap:9px;align-items:center;"><span style="color:${C.text};font-size:24px;font-weight:950;">${s.ticker}</span>${badge(st.state)}</div><div style="color:${C.text};font-size:13px;font-weight:700;margin-top:5px;">${companyNameFor(s)}</div><div style="color:${C.textMuted};font-size:11px;margin-top:3px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;">Position Management</div></div><div style="text-align:right;"><div style="color:${C.text};font-size:20px;font-weight:900;">${money(p)}</div><div style="color:${pl>=0?C.green:C.red};font-size:13px;font-weight:900;">${pl==null?'—':pctFmt(pl)}</div>${liveDayMoveHTML(s,'11px')}</div></div></div>`;
+  return `<div style="padding:16px 16px 10px;"><div style="display:flex;justify-content:space-between;align-items:flex-start;"><div><button onclick="showScreen('home')" style="background:none;border:none;color:${C.textSub};padding:0 0 9px;cursor:pointer;">← Back</button><div style="display:flex;gap:9px;align-items:center;"><span style="color:${C.text};font-size:24px;font-weight:950;">${s.ticker}</span>${badge(st.state)}</div><div style="color:${C.text};font-size:13px;font-weight:700;margin-top:5px;">${companyNameFor(s)}</div><div style="color:${C.textMuted};font-size:11px;margin-top:3px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;">Position Management · ${trendTypeLabel(s,pb)}</div></div><div style="text-align:right;"><div style="color:${C.text};font-size:20px;font-weight:900;">${money(p)}</div><div style="color:${pl>=0?C.green:C.red};font-size:13px;font-weight:900;">${pl==null?'—':pctFmt(pl)}</div>${liveDayMoveHTML(s,'11px')}</div></div></div>`;
 }
 function preTop(s,pb,st){
   const canBuy=['BUY','A+ BUY'].includes(st.state), buyLabel=st.state==='A+ BUY'?'A+ BUY':'BUY', label=cleanPlaybookName(pb);
@@ -9652,7 +9705,7 @@ function ownedResearchDetails(s,pb){
 function renderDetail(s){
   const el=document.getElementById('detail-content'); if(!el)return; const pb=pbFor(s); if(!pb){ const ev=evidenceFor(s), rp=researchPromotionLabel(s); el.innerHTML=`<div style="padding:16px;"><button onclick="showScreen('home')" style="background:none;border:none;color:${C.textSub};padding:0 0 12px;">← Back</button><h2 style="color:${C.text};margin:0;">${s.ticker}</h2>${companyNameFor(s)?`<div style="color:${C.textSub};font-size:13px;margin-top:4px;">${companyNameFor(s)}</div>`:''}<div style="margin-top:12px;color:${rp.color};font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;">${rp.label}${ev?.grade?` · ${ev.grade}`:''}</div>${ev?.family?`<div style="color:${C.text};font-size:13px;font-weight:800;margin-top:8px;">Candidate family: ${ev.family.replaceAll('_',' ')}</div>`:''}<p style="color:${C.textSub};font-size:13px;line-height:1.65;">${ev?.summary||'This ticker can show indicators, but StockIQ will not issue trading signals until it has a validated playbook.'}</p><div style="background:${C.card};border:1px solid ${C.border};border-radius:14px;padding:13px 14px;margin:12px 0;"><div style="color:${C.yellow};font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;margin-bottom:7px;">Promotion gate</div><div style="color:${C.textSub};font-size:12px;line-height:1.6;">Current readiness is not enough. Promotion requires useful trade frequency, positive friction-adjusted expectancy, older/newer or OOS survival, parameter-neighborhood robustness, and tolerable downside. Until that evidence is explicitly approved, this stock stays research-only.</div></div>${indicatorPanel(s,{})}</div>`; return; }
   const st=stockState(s),checks=setupChecks(s),conflict=portfolioConflict(s);
-  let html=s.position?positionTop(s,pb,st):preTop(s,pb,st); html+=topCallout(s,pb,st);
+  let html=s.position?positionTop(s,pb,st):preTop(s,pb,st); html+=detailMetaStrip(s,pb,st); html+=topCallout(s,pb,st);
   if(s.position){
     html+=panel('Trade Health',positionHealthHTML(s));
     html+=riskPanel(s,pb);
@@ -10297,7 +10350,7 @@ function showSundayDiscoveryFlow(){
     </div>
   </div>`);
 }
-(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.66 · Top Research Removed';})();
+(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.67 · Stock Detail Clarity';})();
 
 // ── v2.9.54 HISTORY LIFECYCLE ──────────────────────────────────────
 // Research is no longer a catch-all. The visible Research tab contains only:
@@ -10539,7 +10592,7 @@ function renderStockList(){
 }
 
 (function v2953Init(){
-  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.66 · Top Research Removed';
+  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.67 · Stock Detail Clarity';
   // Safe cleanup on load: de-duplicate queue and remove only records that already
   // have evidence. Genuine pending Sunday names are never deleted automatically.
   try{ applyResearchReconciliation(true); }catch(e){ console.warn('Research reconciliation init failed',e); }
@@ -10772,8 +10825,8 @@ saveV2Close=async function(id){
 auth.onAuthStateChanged(user=>{ if(user){ loadSignalLedger(); syncSignalLedgerFromCloud(); } else { SIGNAL_LEDGER=[]; } });
 loadSignalLedger();
 setTimeout(()=>{ try{ updateAndCaptureSignals(); renderFilterBar(); }catch(e){ console.warn('Signal ledger init failed',e); } },800);
-const _v2965Version=document.getElementById('stockiq-version'); if(_v2965Version)_v2965Version.textContent='StockIQ v2.9.66 · Top Research Removed';
-// v2.9.66: top row is reserved for data inputs only. Independent Add Stock/Research is intentionally removed.
+const _v2965Version=document.getElementById('stockiq-version'); if(_v2965Version)_v2965Version.textContent='StockIQ v2.9.67 · Stock Detail Clarity';
+// v2.9.67: stock detail clarity — trend type, Day X/Y, chart guidance, and labeled Today/Previous Day percentages.
 [...document.querySelectorAll('button')].filter(b=>/^(\+\s*)?(Add Stock|Research)$/i.test((b.textContent||'').trim())).forEach(b=>{ if(!b.closest('#tag-bar')){ b.style.display='none'; b.setAttribute('aria-hidden','true'); b.tabIndex=-1; } });
 </script>
 
