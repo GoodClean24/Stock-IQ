@@ -8757,11 +8757,14 @@ function highestSinceEntry(s){ if(!s.position?.date)return null; const start=new
 // The trail is ratchet-only: once it rises, it never moves back down.
 function profitTrailATRMultiplier(s){
   const ep=exitPersonality(s);
-  return ep.key==='RUNNER' ? 3.0 : 2.5;
+  return ep.autoTrail && ep.atrMult!=null ? ep.atrMult : null;
 }
 function validatedAtrProfitTrail(s, includeLatest=true){
   if(!s.position?.entry) return null;
-  const entry=s.position.entry, mult=profitTrailATRMultiplier(s), base=originalStop(s);
+  const ep=exitPersonality(s);
+  if(!ep.autoTrail || ep.atrMult==null || ep.activationPct==null) return null;
+
+  const entry=s.position.entry, mult=ep.atrMult, triggerPct=ep.activationPct, base=originalStop(s);
   const start=new Date(s.position.date);
   let snaps=(s.snapshots||[])
     .filter(x=>x&&x.date&&new Date(x.date)>=start)
@@ -8772,37 +8775,40 @@ function validatedAtrProfitTrail(s, includeLatest=true){
   for(const sn of snaps){
     const barHigh=nvl(sn.high,sn.price);
     if(barHigh!=null) high=Math.max(high,barHigh);
-    if(!checkpointHit && high>=entry*(1+PROFIT_CHECKPOINT_PCT/100)) checkpointHit=true;
+    if(!checkpointHit && high>=entry*(1+triggerPct/100)) checkpointHit=true;
     if(!checkpointHit) continue;
     const atr=nvl(sn.atr,sn.atr14,sn.ATR14);
     if(atr!=null && atr>0){
-      // This candidate is computed from a COMPLETED bar and becomes active next session.
       const candidate=high-mult*atr;
-      best = best==null ? candidate : Math.max(best,candidate);
+      best=best==null?candidate:Math.max(best,candidate);
     }
   }
   if(!checkpointHit || best==null) return null;
-  const trailControls = best > base;
-  return {price:trailControls?best:base,mult,rawTrail:best,base,trailControls};
+  const trailControls=best>base;
+  return {price:trailControls?best:base,mult,triggerPct,rawTrail:best,base,trailControls};
 }
 function suggestedStop(s){
-  const pb=pbFor(s); if(!pb||!s.position?.entry)return {price:null,type:'Emergency Stop',active:false};
-  const base=originalStop(s);
-  // Includes the latest COMPLETED bar: this is the stop to use NEXT session.
+  const pb=pbFor(s);
+  if(!pb||!s.position?.entry) return {price:null,type:'Emergency Stop',active:false};
+  const base=originalStop(s), ep=exitPersonality(s);
   const trail=validatedAtrProfitTrail(s,true);
+
   if(trail){
-    const ep=exitPersonality(s);
-    const why = trail.trailControls
-      ? `+${PROFIT_CHECKPOINT_PCT}% checkpoint reached. The ${trail.mult.toFixed(1)}× ATR ${ep.label.toLowerCase()} trail now controls the active stop and only ratchets upward.`
-      : `+${PROFIT_CHECKPOINT_PCT}% checkpoint reached. The ${trail.mult.toFixed(1)}× ATR ${ep.label.toLowerCase()} trail is monitoring the trade, but it has not yet risen above the original protective stop. The original stop remains active.`;
+    const why=trail.trailControls
+      ? `+${trail.triggerPct}% protection point reached. The ${trail.mult.toFixed(1)}× Wilder ATR trail now controls the active stop and only ratchets upward.`
+      : `+${trail.triggerPct}% protection point reached. The ${trail.mult.toFixed(1)}× Wilder ATR trail is monitoring the trade, but the original protective stop is still higher and remains active.`;
     return {price:trail.price,type:'Active Stop',active:true,atrMult:trail.mult,trailControls:trail.trailControls,why};
   }
-  return {price:base,type:'Emergency Stop',active:false,why:'Original capital-protection stop remains active until the +6% checkpoint is reached.'};
+
+  const why=ep.autoTrail
+    ? `Original capital-protection stop remains active until the +${ep.activationPct}% protection point is reached.`
+    : `${ep.label}: no automatic profit trail is active. Keep the original protective stop and manage the trade through its validated ${pb.hold}-day framework.`;
+  return {price:base,type:'Emergency Stop',active:false,why};
 }
 function activeStopForLatestBar(s){
-  const pb=pbFor(s); if(!pb||!s.position?.entry)return {price:null,type:'Emergency Stop',active:false};
+  const pb=pbFor(s);
+  if(!pb||!s.position?.entry) return {price:null,type:'Emergency Stop',active:false};
   const base=originalStop(s);
-  // Exclude the latest bar because a trail calculated from today's completed bar was NOT active during today.
   const trail=validatedAtrProfitTrail(s,false);
   if(trail) return {price:trail.price,type:'Active Stop',active:true,atrMult:trail.mult,trailControls:trail.trailControls};
   return {price:base,type:'Emergency Stop',active:false};
@@ -8838,12 +8844,30 @@ function runnerHealthy(s){ const pb=pbFor(s),p=curVal(s,'price'),m50=curVal(s,'m
 // This changes position-management language/priority only; it does NOT alter
 // entry rules or force a fixed profit target.
 function exitPersonality(s){
-  const pb=pbFor(s); if(!pb) return {key:'BALANCED',label:'Balanced',families:'Unknown',note:'Use the +6% checkpoint as a real decision point.'};
+  const pb=pbFor(s);
+  if(!pb) return {key:'BALANCED_HOLD',label:'Balanced Hold',families:'Unknown',autoTrail:false,activationPct:null,atrMult:null,note:'Use the family hold window and emergency stop until stronger evidence says otherwise.'};
   const fam=String(s.position?.entryFamily||pb.family||pb.name||'').toUpperCase();
-  if(fam.includes('EMA20')) return {key:'QUICKER',label:'Quicker Harvest',families:'EMA20 Reclaim',note:'At +6%, switch to a 2.5× ATR profit trail. This is provisional because the EMA20 sample was smaller; rotate sooner if momentum stalls or a stronger setup needs the capital.'};
-  if(fam.includes('MOMENTUM')||fam.includes('DEEP_PULLBACK')||fam.includes('SMA50')||fam.includes('50-DAY')||fam.includes('50 DAY')||fam.includes('BREAKOUT')) return {key:'RUNNER',label:'Runner',families:'Momentum / Deep Pullback / SMA50 / Breakout',note:'At +6%, switch to the validated 3× ATR profit trail and strongly favor letting a healthy winner continue.'};
-  if(fam.includes('REG')) return {key:'BALANCED',label:'Balanced',families:'Regression Pullback',note:'At +6%, switch to the validated 2.5× ATR profit trail and make a genuine capital-allocation decision: run healthy strength, harvest weakness, or rotate to a clearly better setup.'};
-  return {key:'BALANCED',label:'Balanced',families:pb.name||'Validated playbook',note:'At +6%, make a real decision instead of using an automatic target.'};
+
+  // v2.9.68 · 3-year Alpaca intraday + winner-lifecycle research.
+  if(fam.includes('SMA50')||fam.includes('50-DAY')||fam.includes('50 DAY')){
+    return {key:'FAST_PROTECT',label:'Fast Protect',families:'SMA50 Reclaim',autoTrail:true,activationPct:6,atrMult:2.5,note:'SMA50 reclaims tend to move quickly and give back more of the burst. At +6%, activate a 2.5× Wilder ATR ratchet.'};
+  }
+  if(fam.includes('EMA20')){
+    return {key:'MEDIUM_HOLD',label:'Medium Hold',families:'EMA20 Reclaim',autoTrail:false,activationPct:null,atrMult:null,note:'The +6% checkpoint is informational. Current research favors the natural 14-day framework over automatically tightening the stop.'};
+  }
+  if(fam.includes('MOMENTUM')){
+    return {key:'RUNNER_HOLD',label:'Runner',families:'Momentum',autoTrail:false,activationPct:null,atrMult:null,note:'Do not tighten at +6%. Current research favors the natural 20-day runner framework; +10% / wider protection remains research-only.'};
+  }
+  if(fam.includes('DEEP_PULLBACK')||fam.includes('DEEP PULLBACK')){
+    return {key:'LONG_RUNNER',label:'Long Runner',families:'Deep Pullback',autoTrail:false,activationPct:null,atrMult:null,note:'Deep Pullbacks develop slowly. Keep the emergency stop and natural 20-day framework; do not squeeze the trade at +6%.'};
+  }
+  if(fam.includes('REG')){
+    return {key:'BALANCED_HOLD',label:'Balanced Hold',families:'Regression Pullback',autoTrail:false,activationPct:null,atrMult:null,note:'Current research favors the natural 20-day framework. Automatic ATR protection did not improve expectancy.'};
+  }
+  if(fam.includes('BREAKOUT')){
+    return {key:'RESEARCH_HOLD',label:'Research Hold',families:'Breakout',autoTrail:false,activationPct:null,atrMult:null,note:'Breakout exit evidence is still too thin for a new automatic trail. Keep the validated hold/stop framework.'};
+  }
+  return {key:'BALANCED_HOLD',label:'Balanced Hold',families:pb.name||'Validated playbook',autoTrail:false,activationPct:null,atrMult:null,note:'Use the validated family hold window and emergency stop.'};
 }
 function positionState(s){
   const pb=pbFor(s); if(!pb||!s.position)return null;
@@ -8861,19 +8885,23 @@ function positionState(s){
   if(earn?.rule==='EXIT BEFORE EARNINGS'&&earn.days!=null&&earn.days<=1&&earn.days>=0) return {state:'EXIT',reason:'Earnings rule says exit before the report.',day:d,stop:nextStop,gainPct,personality};
   if(gainPct!=null&&gainPct>=PROFIT_CHECKPOINT_PCT){
     const healthy=runnerHealthy(s);
-    if(personality.key==='RUNNER'){
-      if(healthy) return {state:'PROTECT & RUN',reason:`Up ${pctFmt(gainPct)}. This ${personality.label.toLowerCase()} family historically left meaningful upside after +6%. Protect profit with the ${nextStop.atrMult?.toFixed(1)||'3.0'}× ATR trail, but favor letting the winner continue while trend strength stays healthy.`,day:d,stop:nextStop,gainPct,personality};
-      return {state:'PROTECT / CONSIDER ROTATION',reason:`Up ${pctFmt(gainPct)}, but runner strength is weakening. This family can run, so do not dump it automatically — keep the validated trail in place and compare it with the best waiting setup.`,day:d,stop:nextStop,gainPct,personality};
+
+    if(personality.autoTrail){
+      if(healthy) return {state:'PROTECT & RUN',reason:`Up ${pctFmt(gainPct)}. ${personality.families} is a fast-protect setup: the +${personality.activationPct}% protection point activates the ${personality.atrMult.toFixed(1)}× Wilder ATR ratchet. Keep the winner only while it remains above the active stop.`,day:d,stop:nextStop,gainPct,personality};
+      return {state:'PROTECT / CONSIDER ROTATION',reason:`Up ${pctFmt(gainPct)}, but strength is weakening. Keep the validated ${personality.atrMult.toFixed(1)}× Wilder ATR protection in place and do not let a fast reclaim burst turn into an avoidable giveback.`,day:d,stop:nextStop,gainPct,personality};
     }
-    if(personality.key==='QUICKER'){
-      return {state:'PROTECT / CONSIDER ROTATION',reason:healthy?`Up ${pctFmt(gainPct)}. EMA20 reclaims historically had the weakest runner evidence after +6%. Protect with the 2.5× ATR trail; keep it only while momentum remains clearly healthy and no better use of capital is waiting.`:`Up ${pctFmt(gainPct)} and momentum is no longer fully healthy. EMA20 reclaim evidence favors harvesting/rotation sooner than the runner families.`,day:d,stop:nextStop,gainPct,personality};
-    }
-    if(healthy) return {state:'DECISION DAY',reason:`Up ${pctFmt(gainPct)}. Regression pullbacks are BALANCED after +6%: the 2.5× ATR trail protects the trade, but this is also a real capital-allocation checkpoint. Keep running only if it still deserves one of your primary slots.`,day:d,stop:nextStop,gainPct,personality};
-    return {state:'PROTECT / CONSIDER ROTATION',reason:`Up ${pctFmt(gainPct)}, but the balanced regression setup is weakening. Keep the 2.5× ATR trail in place and consider rotating if a stronger validated setup is waiting.`,day:d,stop:nextStop,gainPct,personality};
+
+    const familyMsg =
+      personality.key==='LONG_RUNNER' ? 'This family historically needed more time; +6% is still early in the normal lifecycle.' :
+      personality.key==='RUNNER_HOLD' ? 'Momentum is a runner family; current research says not to squeeze it at +6%.' :
+      personality.key==='MEDIUM_HOLD' ? 'EMA20 Reclaim remains inside its natural hold framework; +6% does not automatically tighten the stop.' :
+      personality.key==='BALANCED_HOLD' ? 'Regression Pullback remains inside its balanced natural-hold framework.' :
+      'Exit evidence is not strong enough to justify a new automatic profit trail.';
+    return {state:'BOUGHT',reason:`Up ${pctFmt(gainPct)} · Day ${d}/${pb.hold}. ${familyMsg} Keep the emergency stop and continue the validated management plan${healthy?' while structure remains healthy':'; Trade Health warnings are context, not an automatic exit'}.`,day:d,stop:nextStop,gainPct,personality};
   }
   if(d>=pb.hold){
     if(pb.maxHold>pb.hold&&runnerHealthy(s)&&d<pb.maxHold){
-      if(personality.key==='RUNNER') return {state:'PROTECT & RUN',reason:`Normal ${pb.hold}-day hold is complete and this runner family is still healthy. Keep profit protected and allow the extension toward the max ${pb.maxHold}-day window.`,day:d,stop:nextStop,gainPct,personality};
+      if(['RUNNER_HOLD','LONG_RUNNER'].includes(personality.key)) return {state:'DECISION DAY',reason:`Normal ${pb.hold}-day hold is complete and this runner family is still healthy. Decide deliberately whether the evidence justifies extending toward the max ${pb.maxHold}-day window; do not extend by habit.`,day:d,stop:nextStop,gainPct,personality};
       return {state:'DECISION DAY',reason:`Normal ${pb.hold}-day hold is complete and strength is still healthy. Decide whether this position still earns its capital slot before extending toward day ${pb.maxHold}.`,day:d,stop:nextStop,gainPct,personality};
     }
     return {state:'DECISION DAY',reason:`Normal ${pb.hold}-day hold is complete. Review the trade now; do not extend it by habit.`,day:d,stop:nextStop,gainPct,personality};
@@ -9616,30 +9644,112 @@ function earningsPanel(s,pb){
   return panel('Earnings',`<div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;"><div><div style="color:${C.text};font-size:14px;font-weight:900;">${ruleLabel}</div><div style="color:${statusColor};font-size:12.5px;margin-top:4px;font-weight:850;">${status}</div>${s.earningsSource?`<div style="color:${C.textMuted};font-size:10.5px;margin-top:3px;">Source: ${s.earningsSource}${s.earningsTime?` · ${s.earningsTime}`:''}</div>`:''}</div>${dateBlock}</div>${verifyBlock}${body}`);
 }
 function indicatorPanel(s,pb){ const r=regressionStats(s),rv=relativeVolume(s),h=macdHist(s),atr=curVal(s,'atr'),price=curVal(s,'price'),atrp=atr&&price?atr/price*100:null; const rows=[['EMA20',curVal(s,'ma20','ema20')!=null?money(curVal(s,'ma20','ema20')):'—','Short-term trend'],['SMA50',curVal(s,'ma50')!=null?money(curVal(s,'ma50')):'—','Medium-term trend'],['SMA200',curVal(s,'ma200')!=null?money(curVal(s,'ma200')):'—','Long-term trend'],['RSI',curVal(s,'rsi')!=null?curVal(s,'rsi').toFixed(1):'—','Momentum'],['MACD Hist',h!=null?h.toFixed(2):'—','Momentum direction'],['ATR%',atrp!=null?atrp.toFixed(1)+'%':'—','Typical daily movement'],['Rel Volume',rv!=null?rv.toFixed(2)+'×':'—','Participation'],['Reg Z',r.z!=null?r.z.toFixed(2):'—','Position vs normal trend']]; return panel('Indicators / Learn Why',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">${rows.map(([a,b,c])=>`<div style="background:${C.cardHigh};border-radius:10px;padding:10px;"><div class="v2lbl">${a}</div><div style="color:${C.text};font-size:13px;font-weight:900;">${b}</div><div style="color:${C.textSub};font-size:11.5px;line-height:1.45;margin-top:4px;">${c}</div></div>`).join('')}</div>`); }
+function marketRegimeResearch(){
+  const spy=marketStock('SPY');
+  if(!spy) return {key:'UNKNOWN',label:'Regime Unknown',color:C.textSub,note:'Load current market data before using the regime research layer.'};
+
+  const p=curVal(spy,'price'), m50=curVal(spy,'ma50'), m200=curVal(spy,'ma200');
+  const snaps=(spy.snapshots||[]).slice().sort((a,b)=>new Date(a.date)-new Date(b.date));
+  const prev=snaps.length>1?snaps[snaps.length-2]:null;
+  const prev200=prev?snapVal(prev,'ma200'):null;
+  const m200Rising=m200!=null&&prev200!=null?m200>prev200:null;
+  const mom3=changeN(spy,3);
+
+  const indexes=['SPY','QQQ','SOXX','IWM'].map(t=>marketStock(t)).filter(Boolean);
+  const breadth200=indexes.reduce((n,x)=>{
+    const px=curVal(x,'price'), ma=curVal(x,'ma200');
+    return n+(px!=null&&ma!=null&&px>ma?1:0);
+  },0);
+  const breadth50=indexes.reduce((n,x)=>{
+    const px=curVal(x,'price'), ma=curVal(x,'ma50');
+    return n+(px!=null&&ma!=null&&px>ma?1:0);
+  },0);
+  const need=Math.max(1,Math.ceil(indexes.length*0.6));
+
+  const bull=p!=null&&m50!=null&&m200!=null&&p>m200&&m50>m200&&m200Rising!==false&&breadth200>=need;
+  const bear=p!=null&&m50!=null&&m200!=null&&p<m200&&m50<m200&&m200Rising===false&&breadth200<need;
+
+  if(bull) return {key:'BULL',label:'Bull / Risk-On',color:C.green,mom3,breadth200,breadth50,total:indexes.length,note:'Mature trend environment. Current research favors Momentum, EMA20 Reclaim, Deep Pullback and Regression Pullback.'};
+  if(bear) return {key:'BEAR',label:'Bear / Risk-Off',color:C.red,mom3,breadth200,breadth50,total:indexes.length,note:'Bear-market evidence is still under-researched. Do not grant a regime boost to any family yet.'};
+  if(mom3!=null&&mom3>0) return {key:'CORRECTION_REPAIR',label:'Correction · Repairing',color:C.teal,mom3,breadth200,breadth50,total:indexes.length,note:'The broad market is not fully Bull, but short-term repair is underway. SMA50 Reclaim has shown the clearest research edge here.'};
+  return {key:'CORRECTION_FALLING',label:'Correction · Falling',color:C.orange,mom3,breadth200,breadth50,total:indexes.length,note:'The broad market is not fully healthy and short-term momentum is still weak. Reclaim/pullback families deserve extra caution.'};
+}
+function familyRegimeFit(s,pb){
+  const r=marketRegimeResearch(), fam=String(pb?.family||pb?.name||'').toUpperCase();
+  let fit='NEUTRAL', color=C.textSub, note='No regime-specific boost is being applied.';
+  const isSMA50=fam.includes('SMA50')||fam.includes('50-DAY')||fam.includes('50 DAY');
+  const isEMA20=fam.includes('EMA20');
+  const isMom=fam.includes('MOMENTUM');
+  const isDeep=fam.includes('DEEP_PULLBACK')||fam.includes('DEEP PULLBACK');
+  const isReg=fam.includes('REG');
+  const isBreak=fam.includes('BREAKOUT');
+
+  if(r.key==='BULL'){
+    if(isEMA20||isMom||isDeep||isReg){fit='FAVORED';color=C.green;note='This family showed its strongest three-year evidence in mature Bull conditions.';}
+    else if(isBreak){fit='RESEARCH-FAVORED';color=C.teal;note='Breakout is directionally Bull-favored, but the validated intraday sample is still too small.';}
+    else if(isSMA50){fit='LOWER PRIORITY';color=C.yellow;note='Generic SMA50 Reclaim was weaker in mature Bull conditions; ticker-specific evidence still matters.';}
+  }else if(r.key==='CORRECTION_REPAIR'){
+    if(isSMA50){fit='FAVORED';color=C.green;note='SMA50 Reclaim showed the clearest edge while broad-market correction conditions were repairing.';}
+    else {fit='CAUTION';color=C.yellow;note='This family has less evidence in correction-repair than in its preferred regime.';}
+  }else if(r.key==='CORRECTION_FALLING'){
+    fit='CAUTION';color=C.orange;
+    note=isSMA50?'Reclaims were much riskier while the correction was still falling; wait for repair evidence.':'Current research showed weaker expectancy and/or worse MAE while the broad market was still falling.';
+  }else if(r.key==='BEAR'){
+    fit='UNDER-RESEARCHED';color=C.red;note='StockIQ does not yet have enough bear-regime evidence to promote this family based on regime.';
+  }
+  return {regime:r,fit,color,note};
+}
+function regimeResearchPanel(s,pb){
+  const x=familyRegimeFit(s,pb), r=x.regime;
+  const m3=r.mom3==null?'—':pctFmt(r.mom3);
+  const breadth=r.total?`${r.breadth200}/${r.total} > SMA200`:'—';
+  return panel('Market Regime Research',
+    `<div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;">`+
+      `<div><div style="color:${r.color};font-size:14px;font-weight:950;">${r.label}</div><div style="color:${C.textSub};font-size:11.5px;line-height:1.5;margin-top:5px;">${r.note}</div></div>`+
+      `<div style="text-align:right;flex-shrink:0;"><div class="v2lbl">Family Fit</div><div style="color:${x.color};font-size:12px;font-weight:950;">${x.fit}</div></div>`+
+    `</div>`+
+    `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">`+
+      `<span style="background:${C.cardHigh};border:1px solid ${C.border};border-radius:8px;padding:6px 8px;color:${C.textSub};font-size:10.5px;font-weight:800;">SPY 3D ${m3}</span>`+
+      `<span style="background:${C.cardHigh};border:1px solid ${C.border};border-radius:8px;padding:6px 8px;color:${C.textSub};font-size:10.5px;font-weight:800;">Breadth ${breadth}</span>`+
+    `</div>`+
+    `<div style="color:${C.textMuted};font-size:10px;line-height:1.4;margin-top:9px;">Research layer only — it does not override the validated ticker setup, earnings gate, capital rules or BUY state.</div>`
+  );
+}
 function marketPanel(s,pb){ const t=marketTailwind(s); return panel('Market & Sector',`<div style="display:flex;justify-content:space-between;align-items:center;"><div><div style="color:${t.ok?C.green:C.text};font-size:14px;font-weight:900;">Tailwind: ${t.label}</div><div style="color:${C.textSub};font-size:12.5px;margin-top:4px;line-height:1.5;">${t.text}</div></div><div style="color:${C.textSub};font-size:11px;font-weight:800;">${pb.market||'—'}</div></div>`); }
 function entryPanel(s,pb,st){ const sig=curVal(s,'price'),max=buyUpTo(s); return panel('Entry Plan',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;"><div><div class="v2lbl">Signal Price</div><div class="v2big">${money(sig)}</div></div><div><div class="v2lbl">Buy Up To</div><div class="v2big" style="color:${C.green};">${money(max)}</div></div></div><div style="color:${C.textSub};font-size:12.5px;line-height:1.55;margin-top:10px;">At or below ${money(max)}: OK to buy. Above it: don’t chase. A sharp gap down should be reviewed before entering.</div>`); }
 function riskPanel(s,pb){ if(s.position){ const st=suggestedStop(s),p=curVal(s,'price'),dist=p&&st.price?((p/st.price)-1)*100:null, risk=plannedRisk(s); return panel('Risk Plan',`<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;"><div><div class="v2lbl">Entry</div><div class="v2val">${money(s.position.entry)}</div></div><div><div class="v2lbl">${st.type}</div><div class="v2val" style="color:${st.active?C.purple:C.red};">${money(st.price)}</div></div><div><div class="v2lbl">Distance</div><div class="v2val">${dist==null?'—':dist.toFixed(1)+'%'}</div></div></div><div style="color:${C.textSub};font-size:12.5px;line-height:1.55;margin-top:10px;">Planned risk: ${risk==null?'—':fmtP(risk)}. ${st.why}</div>`);} return panel('Risk Plan',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;"><div><div class="v2lbl">Emergency Stop</div><div class="v2big">-${pb.stopPct}%</div></div><div><div class="v2lbl">Normal Hold</div><div class="v2big">${pb.hold} days</div></div></div><div style="color:${C.textSub};font-size:12.5px;line-height:1.55;margin-top:10px;">The exact stop is calculated from your actual purchase price. Want less risk? Buy fewer shares—don’t squeeze the stop.</div>`); }
 function exitPersonalityPanel(s,pb,st){
   if(!s.position) return '';
-  const ep=exitPersonality(s), gain=st?.gainPct, atCheckpoint=gain!=null&&gain>=PROFIT_CHECKPOINT_PCT;
-  const color=ep.key==='RUNNER'?C.purple:(ep.key==='QUICKER'?C.yellow:C.teal);
-  const high=highestSinceEntry(s), atr=curVal(s,'atr'), stop=suggestedStop(s), mult=stop?.atrMult||profitTrailATRMultiplier(s);
-  let action='';
-  if(ep.key==='RUNNER') action=atCheckpoint?`Let it run while price stays above ${money(stop?.price)}.`:`Protect the downside until +6%.`;
-  else if(ep.key==='QUICKER') action=atCheckpoint?`Protect the gain with the ${mult.toFixed(1)}× ATR trail.`:`Protect the downside until +6%.`;
-  else action=atCheckpoint?`Use the ${mult.toFixed(1)}× ATR trail and reassess strength.`:`Protect the downside until +6%.`;
+  const ep=exitPersonality(s), gain=st?.gainPct;
+  const checkpointReached=gain!=null&&gain>=PROFIT_CHECKPOINT_PCT;
+  const protectionReached=ep.autoTrail&&gain!=null&&gain>=ep.activationPct;
+  const color=ep.key==='FAST_PROTECT'?C.yellow:
+              ['LONG_RUNNER','RUNNER_HOLD'].includes(ep.key)?C.purple:
+              ['MEDIUM_HOLD','BALANCED_HOLD'].includes(ep.key)?C.teal:C.textSub;
+  const high=highestSinceEntry(s), stop=suggestedStop(s);
+
+  const status=ep.autoTrail
+    ? (protectionReached?`+${ep.activationPct}% reached · ${ep.atrMult.toFixed(1)}× ATR active`:`Protect at +${ep.activationPct}%`)
+    : (checkpointReached?'+6% CHECKPOINT · HOLD PLAN':'CHECKPOINT AT +6%');
+
+  const action=ep.autoTrail&&protectionReached
+    ? `Fast-protect mode is active. The ${ep.atrMult.toFixed(1)}× Wilder ATR stop ratchets only upward; do not loosen it.`
+    : checkpointReached&&!ep.autoTrail
+    ? `+6% is informational for this family — not an automatic sell and not an automatic trail. ${ep.note}`
+    : ep.note;
+
   return panel('Exit Personality',
     `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">`+
       `<div style="color:${color};font-size:16px;font-weight:950;">${ep.label.toUpperCase()}</div>`+
-      `<div style="color:${atCheckpoint?C.green:C.textMuted};font-size:12px;font-weight:900;text-align:right;margin-left:auto;">${atCheckpoint?'6% CHECKPOINT REACHED':'CHECKPOINT AT +6%'}</div>`+
+      `<div style="color:${(protectionReached||checkpointReached)?C.green:C.textMuted};font-size:11px;font-weight:900;text-align:right;margin-left:auto;">${status}</div>`+
     `</div>`+
-    `<div style="margin-top:10px;color:${C.text};font-size:13px;font-weight:850;">${action}</div>`+
-    (atCheckpoint?`<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;margin-top:11px;">`+
+    `<div style="margin-top:10px;color:${C.text};font-size:12.5px;font-weight:800;line-height:1.5;">${action}</div>`+
+    `<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;margin-top:11px;">`+
       `<div style="background:${C.cardHigh};border-radius:10px;padding:9px;"><div class="v2lbl">High</div><div class="v2val">${money(high)}</div></div>`+
-      `<div style="background:${C.cardHigh};border-radius:10px;padding:9px;"><div class="v2lbl">ATR</div><div class="v2val">${money(atr)}</div></div>`+
-      `<div style="background:${C.cardHigh};border:1px solid ${color}55;border-radius:10px;padding:9px;"><div class="v2lbl">${mult.toFixed(1)}× Trail</div><div class="v2val" style="color:${color};">${money(stop?.price)}</div></div>`+
       `<div style="background:${C.cardHigh};border-radius:10px;padding:9px;"><div class="v2lbl">Gain</div><div class="v2val" style="color:${gain>=0?C.green:C.red};">${gain==null?'—':pctFmt(gain)}</div></div>`+
-    `</div>`:'')
+      `<div style="background:${C.cardHigh};border-radius:10px;padding:9px;"><div class="v2lbl">${ep.autoTrail?'Active Stop':'Emergency Stop'}</div><div class="v2val" style="color:${ep.autoTrail&&protectionReached?color:C.text};">${money(stop?.price)}</div></div>`+
+      `<div style="background:${C.cardHigh};border-radius:10px;padding:9px;"><div class="v2lbl">Plan</div><div class="v2val">Day ${positionDays(s)||1}/${pb.hold}</div></div>`+
+    `</div>`
   );
 }
 function cleanPlaybookName(pb){
@@ -9705,7 +9815,7 @@ function ownedResearchDetails(s,pb){
 function renderDetail(s){
   const el=document.getElementById('detail-content'); if(!el)return; const pb=pbFor(s); if(!pb){ const ev=evidenceFor(s), rp=researchPromotionLabel(s); el.innerHTML=`<div style="padding:16px;"><button onclick="showScreen('home')" style="background:none;border:none;color:${C.textSub};padding:0 0 12px;">← Back</button><h2 style="color:${C.text};margin:0;">${s.ticker}</h2>${companyNameFor(s)?`<div style="color:${C.textSub};font-size:13px;margin-top:4px;">${companyNameFor(s)}</div>`:''}<div style="margin-top:12px;color:${rp.color};font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;">${rp.label}${ev?.grade?` · ${ev.grade}`:''}</div>${ev?.family?`<div style="color:${C.text};font-size:13px;font-weight:800;margin-top:8px;">Candidate family: ${ev.family.replaceAll('_',' ')}</div>`:''}<p style="color:${C.textSub};font-size:13px;line-height:1.65;">${ev?.summary||'This ticker can show indicators, but StockIQ will not issue trading signals until it has a validated playbook.'}</p><div style="background:${C.card};border:1px solid ${C.border};border-radius:14px;padding:13px 14px;margin:12px 0;"><div style="color:${C.yellow};font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;margin-bottom:7px;">Promotion gate</div><div style="color:${C.textSub};font-size:12px;line-height:1.6;">Current readiness is not enough. Promotion requires useful trade frequency, positive friction-adjusted expectancy, older/newer or OOS survival, parameter-neighborhood robustness, and tolerable downside. Until that evidence is explicitly approved, this stock stays research-only.</div></div>${indicatorPanel(s,{})}</div>`; return; }
   const st=stockState(s),checks=setupChecks(s),conflict=portfolioConflict(s);
-  let html=s.position?positionTop(s,pb,st):preTop(s,pb,st); html+=detailMetaStrip(s,pb,st); html+=topCallout(s,pb,st);
+  let html=s.position?positionTop(s,pb,st):preTop(s,pb,st); html+=detailMetaStrip(s,pb,st); html+=topCallout(s,pb,st); html+=regimeResearchPanel(s,pb);
   if(s.position){
     html+=panel('Trade Health',positionHealthHTML(s));
     html+=riskPanel(s,pb);
@@ -10350,7 +10460,7 @@ function showSundayDiscoveryFlow(){
     </div>
   </div>`);
 }
-(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.67 · Stock Detail Clarity';})();
+(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.68 · Regime + Exit Matrix';})();
 
 // ── v2.9.54 HISTORY LIFECYCLE ──────────────────────────────────────
 // Research is no longer a catch-all. The visible Research tab contains only:
@@ -10592,7 +10702,7 @@ function renderStockList(){
 }
 
 (function v2953Init(){
-  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.67 · Stock Detail Clarity';
+  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.68 · Regime + Exit Matrix';
   // Safe cleanup on load: de-duplicate queue and remove only records that already
   // have evidence. Genuine pending Sunday names are never deleted automatically.
   try{ applyResearchReconciliation(true); }catch(e){ console.warn('Research reconciliation init failed',e); }
@@ -10825,8 +10935,8 @@ saveV2Close=async function(id){
 auth.onAuthStateChanged(user=>{ if(user){ loadSignalLedger(); syncSignalLedgerFromCloud(); } else { SIGNAL_LEDGER=[]; } });
 loadSignalLedger();
 setTimeout(()=>{ try{ updateAndCaptureSignals(); renderFilterBar(); }catch(e){ console.warn('Signal ledger init failed',e); } },800);
-const _v2965Version=document.getElementById('stockiq-version'); if(_v2965Version)_v2965Version.textContent='StockIQ v2.9.67 · Stock Detail Clarity';
-// v2.9.67: stock detail clarity — trend type, Day X/Y, chart guidance, and labeled Today/Previous Day percentages.
+const _v2965Version=document.getElementById('stockiq-version'); if(_v2965Version)_v2965Version.textContent='StockIQ v2.9.68 · Regime + Exit Matrix';
+// v2.9.68: regime research layer + family-specific exit personalities from the 3-year Alpaca intraday study. Entry gates remain unchanged.
 [...document.querySelectorAll('button')].filter(b=>/^(\+\s*)?(Add Stock|Research)$/i.test((b.textContent||'').trim())).forEach(b=>{ if(!b.closest('#tag-bar')){ b.style.display='none'; b.setAttribute('aria-hidden','true'); b.tabIndex=-1; } });
 </script>
 
