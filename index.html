@@ -9721,35 +9721,26 @@ function riskPanel(s,pb){ if(s.position){ const st=suggestedStop(s),p=curVal(s,'
 function exitPersonalityPanel(s,pb,st){
   if(!s.position) return '';
   const ep=exitPersonality(s), gain=st?.gainPct;
-  const checkpointReached=gain!=null&&gain>=PROFIT_CHECKPOINT_PCT;
-  const protectionReached=ep.autoTrail&&gain!=null&&gain>=ep.activationPct;
-  const color=ep.key==='FAST_PROTECT'?C.yellow:
-              ['LONG_RUNNER','RUNNER_HOLD'].includes(ep.key)?C.purple:
-              ['MEDIUM_HOLD','BALANCED_HOLD'].includes(ep.key)?C.teal:C.textSub;
-  const high=highestSinceEntry(s), stop=suggestedStop(s);
+  const stop=suggestedStop(s);
+  const day=positionDays(s)||1;
 
-  const status=ep.autoTrail
-    ? (protectionReached?`+${ep.activationPct}% reached · ${ep.atrMult.toFixed(1)}× ATR active`:`Protect at +${ep.activationPct}%`)
-    : (checkpointReached?'+6% CHECKPOINT · HOLD PLAN':'CHECKPOINT AT +6%');
+  let next='';
+  if(ep.autoTrail){
+    const active=gain!=null&&gain>=ep.activationPct;
+    next=active
+      ? `Stay above ${money(stop?.price)}. ${ep.atrMult.toFixed(1)}× ATR protection is active.`
+      : `At +${ep.activationPct}% gain, ${ep.atrMult.toFixed(1)}× ATR protection activates.`;
+  }else{
+    next=`Hold through Day ${pb.hold} unless the stop or a validated exit rule triggers.`;
+  }
 
-  const action=ep.autoTrail&&protectionReached
-    ? `Fast-protect mode is active. The ${ep.atrMult.toFixed(1)}× Wilder ATR stop ratchets only upward; do not loosen it.`
-    : checkpointReached&&!ep.autoTrail
-    ? `+6% is informational for this family — not an automatic sell and not an automatic trail. ${ep.note}`
-    : ep.note;
-
-  return panel('Exit Personality',
-    `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">`+
-      `<div style="color:${color};font-size:16px;font-weight:950;">${ep.label.toUpperCase()}</div>`+
-      `<div style="color:${(protectionReached||checkpointReached)?C.green:C.textMuted};font-size:11px;font-weight:900;text-align:right;margin-left:auto;">${status}</div>`+
+  return panel('Exit Plan',
+    `<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;">`+
+      `<div style="background:${C.cardHigh};border-radius:10px;padding:9px;"><div class="v2lbl">Stop</div><div class="v2val">${money(stop?.price)}</div></div>`+
+      `<div style="background:${C.cardHigh};border-radius:10px;padding:9px;"><div class="v2lbl">Day</div><div class="v2val">${day}/${pb.hold}</div></div>`+
+      `<div style="background:${C.cardHigh};border-radius:10px;padding:9px;"><div class="v2lbl">Plan</div><div class="v2val" style="font-size:11px;">${ep.label}</div></div>`+
     `</div>`+
-    `<div style="margin-top:10px;color:${C.text};font-size:12.5px;font-weight:800;line-height:1.5;">${action}</div>`+
-    `<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;margin-top:11px;">`+
-      `<div style="background:${C.cardHigh};border-radius:10px;padding:9px;"><div class="v2lbl">High</div><div class="v2val">${money(high)}</div></div>`+
-      `<div style="background:${C.cardHigh};border-radius:10px;padding:9px;"><div class="v2lbl">Gain</div><div class="v2val" style="color:${gain>=0?C.green:C.red};">${gain==null?'—':pctFmt(gain)}</div></div>`+
-      `<div style="background:${C.cardHigh};border-radius:10px;padding:9px;"><div class="v2lbl">${ep.autoTrail?'Active Stop':'Emergency Stop'}</div><div class="v2val" style="color:${ep.autoTrail&&protectionReached?color:C.text};">${money(stop?.price)}</div></div>`+
-      `<div style="background:${C.cardHigh};border-radius:10px;padding:9px;"><div class="v2lbl">Plan</div><div class="v2val">Day ${positionDays(s)||1}/${pb.hold}</div></div>`+
-    `</div>`
+    `<div style="margin-top:9px;color:${C.text};font-size:12.5px;font-weight:850;line-height:1.4;">${next}</div>`
   );
 }
 function cleanPlaybookName(pb){
@@ -9786,8 +9777,72 @@ function detailMetaStrip(s,pb,st){
   `</div>`;
 }
 function positionTop(s,pb,st){
-  const p=displayPrice(s),pl=s.position?.entry&&p?((p/s.position.entry)-1)*100:null;
-  return `<div style="padding:16px 16px 10px;"><div style="display:flex;justify-content:space-between;align-items:flex-start;"><div><button onclick="showScreen('home')" style="background:none;border:none;color:${C.textSub};padding:0 0 9px;cursor:pointer;">← Back</button><div style="display:flex;gap:9px;align-items:center;"><span style="color:${C.text};font-size:24px;font-weight:950;">${s.ticker}</span>${badge(st.state)}</div><div style="color:${C.text};font-size:13px;font-weight:700;margin-top:5px;">${companyNameFor(s)}</div><div style="color:${C.textMuted};font-size:11px;margin-top:3px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;">Position Management · ${trendTypeLabel(s,pb)}</div></div><div style="text-align:right;"><div style="color:${C.text};font-size:20px;font-weight:900;">${money(p)}</div><div style="color:${pl>=0?C.green:C.red};font-size:13px;font-weight:900;">${pl==null?'—':pctFmt(pl)}</div>${liveDayMoveHTML(s,'11px')}</div></div></div>`;
+  const gain=st?.gainPct;
+  const stop=st?.stop||suggestedStop(s);
+  const day=positionDays(s)||1;
+  const ep=exitPersonality(s);
+  const health=positionHealth(s);
+
+  let plan='STAY IN', planColor=C.green;
+  if(st?.state==='SELL'||st?.state==='EXIT NOW'||st?.state==='STOP HIT'){
+    plan='SELL', planColor=C.red;
+  }else if(String(st?.state||'').includes('WATCH')||String(st?.state||'').includes('CONSIDER ROTATION')){
+    plan='WATCH EXIT', planColor=C.yellow;
+  }else if(String(st?.state||'').includes('DECISION')){
+    plan='DECISION DAY', planColor=C.yellow;
+  }
+
+  const watch=[];
+  if(stop?.price!=null){
+    watch.push(`${stop.type||'Stop'}: <b>${money(stop.price)}</b>`);
+  }
+  if(ep.autoTrail){
+    const active=gain!=null&&gain>=ep.activationPct;
+    watch.push(active
+      ? `${ep.atrMult.toFixed(1)}× ATR protection is active`
+      : `At +${ep.activationPct}% → ${ep.atrMult.toFixed(1)}× ATR protection activates`);
+  }
+  if(health?.level&&String(health.level).toUpperCase().includes('WATCH')){
+    watch.push(`Position Health: <b>WATCH</b>`);
+  }else{
+    watch.push(`Position Health changes to <b>WATCH</b>`);
+  }
+  watch.push(`Day <b>${pb.hold}/${pb.hold}</b> reached`);
+
+  const regime=familyRegimeFit(s,pb);
+  const regimeLine=regime?.fit==='FAVORED'
+    ? `${regime.regime.label} · setup favored`
+    : regime?.fit==='LOWER PRIORITY'
+    ? `${regime.regime.label} · no regime boost`
+    : regime?.fit==='CAUTION'
+    ? `${regime.regime.label} · extra caution`
+    : regime?.fit==='UNDER-RESEARCHED'
+    ? `${regime.regime.label} · bear evidence limited`
+    : `${regime?.regime?.label||'Market'} · neutral`;
+
+  return `
+    <div style="background:${C.card};border:1px solid ${C.border};border-radius:16px;padding:15px 16px;margin-bottom:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
+        <div>
+          <div class="v2lbl">CURRENT PLAN</div>
+          <div style="font-size:22px;font-weight:950;color:${planColor};margin-top:2px;">${plan}</div>
+          <div style="font-size:12px;color:${C.textSub};font-weight:800;margin-top:5px;">Day ${day}/${pb.hold} · ${cleanPlaybookName(pb)}</div>
+        </div>
+        <div style="text-align:right;">
+          <div class="v2lbl">P/L</div>
+          <div style="font-size:18px;font-weight:950;color:${gain==null?C.text:(gain>=0?C.green:C.red)};">${gain==null?'—':pctFmt(gain)}</div>
+        </div>
+      </div>
+
+      <div style="margin-top:13px;padding-top:12px;border-top:1px solid ${C.border};">
+        <div class="v2lbl" style="margin-bottom:7px;">WATCH FOR</div>
+        <div style="display:grid;gap:5px;">
+          ${watch.map(x=>`<div style="font-size:12.5px;line-height:1.35;color:${C.text};">• ${x}</div>`).join('')}
+        </div>
+      </div>
+
+      <div style="margin-top:10px;color:${C.textMuted};font-size:10.5px;font-weight:800;">${regimeLine}</div>
+    </div>`;
 }
 function preTop(s,pb,st){
   const canBuy=['BUY','A+ BUY'].includes(st.state), buyLabel=st.state==='A+ BUY'?'A+ BUY':'BUY', label=cleanPlaybookName(pb);
@@ -9815,7 +9870,7 @@ function ownedResearchDetails(s,pb){
 function renderDetail(s){
   const el=document.getElementById('detail-content'); if(!el)return; const pb=pbFor(s); if(!pb){ const ev=evidenceFor(s), rp=researchPromotionLabel(s); el.innerHTML=`<div style="padding:16px;"><button onclick="showScreen('home')" style="background:none;border:none;color:${C.textSub};padding:0 0 12px;">← Back</button><h2 style="color:${C.text};margin:0;">${s.ticker}</h2>${companyNameFor(s)?`<div style="color:${C.textSub};font-size:13px;margin-top:4px;">${companyNameFor(s)}</div>`:''}<div style="margin-top:12px;color:${rp.color};font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;">${rp.label}${ev?.grade?` · ${ev.grade}`:''}</div>${ev?.family?`<div style="color:${C.text};font-size:13px;font-weight:800;margin-top:8px;">Candidate family: ${ev.family.replaceAll('_',' ')}</div>`:''}<p style="color:${C.textSub};font-size:13px;line-height:1.65;">${ev?.summary||'This ticker can show indicators, but StockIQ will not issue trading signals until it has a validated playbook.'}</p><div style="background:${C.card};border:1px solid ${C.border};border-radius:14px;padding:13px 14px;margin:12px 0;"><div style="color:${C.yellow};font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;margin-bottom:7px;">Promotion gate</div><div style="color:${C.textSub};font-size:12px;line-height:1.6;">Current readiness is not enough. Promotion requires useful trade frequency, positive friction-adjusted expectancy, older/newer or OOS survival, parameter-neighborhood robustness, and tolerable downside. Until that evidence is explicitly approved, this stock stays research-only.</div></div>${indicatorPanel(s,{})}</div>`; return; }
   const st=stockState(s),checks=setupChecks(s),conflict=portfolioConflict(s);
-  let html=s.position?positionTop(s,pb,st):preTop(s,pb,st); html+=detailMetaStrip(s,pb,st); html+=topCallout(s,pb,st); html+=regimeResearchPanel(s,pb);
+  let html=s.position?positionTop(s,pb,st):preTop(s,pb,st); html+=detailMetaStrip(s,pb,st); html+=topCallout(s,pb,st);
   if(s.position){
     html+=panel('Trade Health',positionHealthHTML(s));
     html+=riskPanel(s,pb);
@@ -10460,7 +10515,7 @@ function showSundayDiscoveryFlow(){
     </div>
   </div>`);
 }
-(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.68 · Regime + Exit Matrix';})();
+(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.69 · Clear Position Plan';})();
 
 // ── v2.9.54 HISTORY LIFECYCLE ──────────────────────────────────────
 // Research is no longer a catch-all. The visible Research tab contains only:
@@ -10702,7 +10757,7 @@ function renderStockList(){
 }
 
 (function v2953Init(){
-  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.68 · Regime + Exit Matrix';
+  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.69 · Clear Position Plan';
   // Safe cleanup on load: de-duplicate queue and remove only records that already
   // have evidence. Genuine pending Sunday names are never deleted automatically.
   try{ applyResearchReconciliation(true); }catch(e){ console.warn('Research reconciliation init failed',e); }
@@ -10935,8 +10990,8 @@ saveV2Close=async function(id){
 auth.onAuthStateChanged(user=>{ if(user){ loadSignalLedger(); syncSignalLedgerFromCloud(); } else { SIGNAL_LEDGER=[]; } });
 loadSignalLedger();
 setTimeout(()=>{ try{ updateAndCaptureSignals(); renderFilterBar(); }catch(e){ console.warn('Signal ledger init failed',e); } },800);
-const _v2965Version=document.getElementById('stockiq-version'); if(_v2965Version)_v2965Version.textContent='StockIQ v2.9.68 · Regime + Exit Matrix';
-// v2.9.68: regime research layer + family-specific exit personalities from the 3-year Alpaca intraday study. Entry gates remain unchanged.
+const _v2965Version=document.getElementById('stockiq-version'); if(_v2965Version)_v2965Version.textContent='StockIQ v2.9.69 · Clear Position Plan';
+// v2.9.69: simplifies owned-position pages to Current Plan + Watch For + compact Exit Plan. Regime intelligence stays behind the scenes.
 [...document.querySelectorAll('button')].filter(b=>/^(\+\s*)?(Add Stock|Research)$/i.test((b.textContent||'').trim())).forEach(b=>{ if(!b.closest('#tag-bar')){ b.style.display='none'; b.setAttribute('aria-hidden','true'); b.tabIndex=-1; } });
 </script>
 
