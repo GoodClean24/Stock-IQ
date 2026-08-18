@@ -8950,7 +8950,7 @@ function stockState(s){
   const base=preEntryState(s);
   return applyIntradayEntryLayer(s,base);
 }
-function statePriority(state){ return ({'EXIT':0,'PROTECT / CONSIDER ROTATION':1,'DECISION DAY':2,'PROTECT & RUN':3,'WATCH EXIT':4,'BOUGHT':5,'A+ BUY':6,'BUY':7,'TRIGGERED / VERIFY':8,'PREPARING':9,'ENTRY MISSED':10,'WAIT':11,'RESEARCH ONLY':12}[state]??13); }
+function statePriority(state){ return ({'EXIT':0,'PROTECT / CONSIDER ROTATION':1,'DECISION DAY':2,'PROTECT & RUN':3,'WATCH EXIT':4,'BOUGHT':5,'A+ BUY':6,'BUY':7,'TRIGGERED / VERIFY':8,'PREPARING':9,'ENTRY MISSED':10,'ENTRY SIGNAL PASSED':11,'WAIT':12,'RESEARCH ONLY':13}[state]??14); }
 function stateStyle(state){
   if(state==='TRIGGERED / VERIFY') return {bg:C.purple+'22',fg:C.purple,border:C.purple+'66'};
   const map={
@@ -9259,7 +9259,7 @@ function renderHome(){ ensureCorePlaceholders(); renderMarket(); renderPortfolio
 // ── v2 DETAIL ───────────────────────────────────────────────────────────────
 function calloutBox(kind,title,text){ const cfg={green:{bg:C.greenDim,border:C.green+'66',title:C.green},yellow:{bg:C.yellowDim,border:C.yellow+'66',title:C.yellow},red:{bg:C.redDim,border:C.red+'66',title:C.red},blue:{bg:C.blueDim,border:C.blue+'66',title:C.blue},purple:{bg:C.purpleDim,border:C.purple+'66',title:C.purple},teal:{bg:C.tealDim,border:C.teal+'66',title:C.teal}}[kind]||{bg:C.cardHigh,border:C.border,title:C.text}; return `<div style="background:${cfg.bg};border:1px solid ${cfg.border};border-radius:14px;padding:14px 15px;margin:0 16px 12px;"><div style="color:${cfg.title};font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;">${title}</div><div style="color:${C.text};font-size:14px;font-weight:800;line-height:1.45;">${text}</div></div>`; }
 function topCallout(s,pb,st){
-  if(s.position) return ''; if(!st||!st.state) return ''; if(s.position){ if(st.state==='EXIT') return calloutBox('red','Action Needed',st.reason||'Exit the position.'); if(st.state==='PROTECT / CONSIDER ROTATION') return calloutBox('green','Protect / Consider Rotation',st.reason||'Protect the gain and compare this position with the best waiting setup.'); if(st.state==='DECISION DAY') return calloutBox('purple','Decision Day',st.reason||'This trade has reached a real capital-allocation checkpoint.'); if(st.state==='PROTECT & RUN') return calloutBox('purple','Protect & Run',st.reason||'Protect the gain and let the healthy winner continue.'); if(st.state==='WATCH EXIT') return calloutBox('yellow','Pay Attention',st.reason||'The trade is weakening but not broken.'); return calloutBox('teal','Current Plan',st.reason||'Hold the position unless the stop is hit.'); } if(st.state==='A+ BUY') return calloutBox('green','Best Opportunity',st.reason||'The setup is valid and the environment is supportive.'); if(st.state==='BUY') return calloutBox('green','Ready To Buy',st.reason||'The setup is valid.'); if(st.state==='PREPARING') return st?.intraday?.arm
+  if(s.position) return ''; if(!st||!st.state) return ''; if(s.position){ if(st.state==='EXIT') return calloutBox('red','Action Needed',st.reason||'Exit the position.'); if(st.state==='PROTECT / CONSIDER ROTATION') return calloutBox('green','Protect / Consider Rotation',st.reason||'Protect the gain and compare this position with the best waiting setup.'); if(st.state==='DECISION DAY') return calloutBox('purple','Decision Day',st.reason||'This trade has reached a real capital-allocation checkpoint.'); if(st.state==='PROTECT & RUN') return calloutBox('purple','Protect & Run',st.reason||'Protect the gain and let the healthy winner continue.'); if(st.state==='WATCH EXIT') return calloutBox('yellow','Pay Attention',st.reason||'The trade is weakening but not broken.'); return calloutBox('teal','Current Plan',st.reason||'Hold the position unless the stop is hit.'); } if(st.state==='A+ BUY') return calloutBox('green','Best Opportunity',st.reason||'The setup is valid and the environment is supportive.'); if(st.state==='BUY') return calloutBox('green','Ready To Buy',st.reason||'The setup is valid.'); if(st.state==='ENTRY SIGNAL PASSED') return calloutBox('gray','Prior Buy Signal Preserved',st.reason||'A prior verified entry signal occurred; this is not a fresh entry.'); if(st.state==='PREPARING') return st?.intraday?.arm
     ? calloutBox('yellow','Entry Armed',st.reason||'The prior daily setup is qualified and waiting for its execution trigger.')
     : calloutBox('yellow','What Needs To Happen',st.reason||'The setup is close but is not armed yet.'); if(st.state==='TRIGGERED / VERIFY') return calloutBox('purple','Reclaim Triggered — Verify Entry',st.reason||'The prior setup qualified and the reclaim occurred; verify the intraday execution window.'); if(st.state==='ENTRY MISSED') return calloutBox('orange','Entry Missed — Do Not Chase',st.reason||'The valid setup has already moved beyond the allowed entry band.'); return calloutBox('blue','Why It Is Waiting',st.reason||'The setup is not ready yet.'); }
 function checklistHTML(checks){
@@ -9936,7 +9936,7 @@ function preTop(s,pb,st){
   const executionLine=ix?.arm
     ? `<div style="color:${C.textMuted};font-size:10.5px;margin-top:5px;font-weight:800;">Qualified ${ix.arm.dailyDate} · RSI ${ix.arm.priorRSI==null?'—':Number(ix.arm.priorRSI).toFixed(1)} · SMA50 trigger ${money(ix.arm.trigger)}</div>`
     : '';
-  return `<div style="padding:16px 16px 10px;"><button onclick="showScreen('home')" style="background:none;border:none;color:${C.textSub};padding:0 0 9px;cursor:pointer;">← Back</button><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;"><div style="min-width:0;"><div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;"><span style="color:${C.text};font-size:24px;font-weight:950;">${s.ticker}</span>${badge(st.state)}</div><div style="color:${C.text};font-size:13px;font-weight:700;margin-top:5px;">${companyNameFor(s)}</div>${label?`<div style="color:${C.textSub};font-size:12px;margin-top:3px;">${label}</div>`:''}${executionLine}<div style="color:${C.textMuted};font-size:9px;margin-top:5px;">v2.9.80</div></div><div style="text-align:right;flex-shrink:0;"><div style="color:${C.text};font-size:20px;font-weight:900;margin-bottom:2px;">${money(displayPrice(s))}</div>${liveDayMoveHTML(s,'11px')} ${canBuy?`<button onclick="showV2BuyFlow('${s.id}','${buyLabel}')" style="border:none;border-radius:10px;background:${C.green};color:#000;font-size:13px;font-weight:950;padding:9px 18px;cursor:pointer;box-shadow:0 0 0 1px ${C.green}33;">${buyLabel}</button>`:''}</div></div></div>`;
+  return `<div style="padding:16px 16px 10px;"><button onclick="showScreen('home')" style="background:none;border:none;color:${C.textSub};padding:0 0 9px;cursor:pointer;">← Back</button><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;"><div style="min-width:0;"><div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;"><span style="color:${C.text};font-size:24px;font-weight:950;">${s.ticker}</span>${badge(st.state)}</div><div style="color:${C.text};font-size:13px;font-weight:700;margin-top:5px;">${companyNameFor(s)}</div>${label?`<div style="color:${C.textSub};font-size:12px;margin-top:3px;">${label}</div>`:''}${executionLine}<div style="color:${C.textMuted};font-size:9px;margin-top:5px;">v2.9.81</div></div><div style="text-align:right;flex-shrink:0;"><div style="color:${C.text};font-size:20px;font-weight:900;margin-bottom:2px;">${money(displayPrice(s))}</div>${liveDayMoveHTML(s,'11px')} ${canBuy?`<button onclick="showV2BuyFlow('${s.id}','${buyLabel}')" style="border:none;border-radius:10px;background:${C.green};color:#000;font-size:13px;font-weight:950;padding:9px 18px;cursor:pointer;box-shadow:0 0 0 1px ${C.green}33;">${buyLabel}</button>`:''}</div></div></div>`;
 }
 function ownedResearchDetails(s,pb){
   const research = [
@@ -9971,7 +9971,7 @@ function renderDetail(s){
     html+=panel('Manage Position',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;"><button onclick="showV2CloseFlow('${s.id}')" style="padding:11px;border-radius:10px;border:1px solid ${C.red}66;background:${C.redDim};color:${C.red};font-weight:800;cursor:pointer;">Sell</button><button onclick="showV2StopFlow('${s.id}')" style="padding:11px;border-radius:10px;border:1px solid ${C.border};background:${C.cardHigh};color:${C.text};font-weight:800;cursor:pointer;">Update Stop</button></div>`);
     html+=ownedResearchDetails(s,pb);
   }
-  else { html+=setupEducationPanel(s,pb,st); html+=panel('Setup Requirements',checklistHTML(checks)); if(['BUY','A+ BUY','TRIGGERED / VERIFY','ENTRY MISSED'].includes(st.state) || st?.intraday?.arm)html+=entryPanel(s,pb,st); html+=riskPanel(s,pb); html+=regressionPanel(s,pb); html+=earningsPanel(s,pb); html+=marketPanel(s,pb); if(conflict)html+=panel('Portfolio Conflict',`<div style="color:${C.yellow};font-size:12.5px;line-height:1.55;font-weight:700;">${conflict}</div>`); html+=historyPanel(s,pb); html+=yourTradeProofPanel(s,pb); html+=sweetSpotPanel(s,pb); html+=indicatorPanel(s,pb); }
+  else { html+=setupEducationPanel(s,pb,st); html+=panel('Setup Requirements',checklistHTML(checks)); if(['BUY','A+ BUY','TRIGGERED / VERIFY','ENTRY MISSED','ENTRY SIGNAL PASSED'].includes(st.state) || st?.intraday?.arm)html+=entryPanel(s,pb,st); html+=riskPanel(s,pb); html+=regressionPanel(s,pb); html+=earningsPanel(s,pb); html+=marketPanel(s,pb); if(conflict)html+=panel('Portfolio Conflict',`<div style="color:${C.yellow};font-size:12.5px;line-height:1.55;font-weight:700;">${conflict}</div>`); html+=historyPanel(s,pb); html+=yourTradeProofPanel(s,pb); html+=sweetSpotPanel(s,pb); html+=indicatorPanel(s,pb); }
   el.innerHTML=html;
 }
 function openDetail(id){ const s=stocks.find(x=>String(x.id)===String(id)); if(!s)return; showScreen('detail'); renderDetail(s); }
@@ -10155,8 +10155,11 @@ async function applyV2Daily(){
       if(candidate){
         u.intradayEntryArm=candidate;
         // A new daily arm supersedes any older session signal.
-        if(!base.intradayEntrySignal || base.intradayEntrySignal.armDailyDate!==candidate.dailyDate){
+        if(!base.intradayEntrySignal){
           u.intradayEntrySignal=null;
+        }else{
+          // Preserve verified historical signals permanently for forward-test audit.
+          u.intradayEntrySignal=base.intradayEntrySignal;
         }
       }else if(oldArm){
         const latestDaily=snapshotDateOnly(latest.date);
@@ -10168,7 +10171,8 @@ async function applyV2Daily(){
           u.intradayEntrySignal=base.intradayEntrySignal||null;
         }else{
           u.intradayEntryArm=null;
-          u.intradayEntrySignal=null;
+          // Do not erase a previously verified intraday signal.
+          u.intradayEntrySignal=base.intradayEntrySignal||null;
         }
       }
     }
@@ -10672,10 +10676,44 @@ function evaluateSma50IntradayEntry(s){
   s=withRecentDailyHistory(s);
 
   const sessionDate=snapshotDateOnly(s?.intradaySessionDate||s?.liveSessionDate);
+  const signal=s?.intradayEntrySignal;
+
+  // A verified historical entry signal is permanent evidence.
+  // Uploading a later intraday session must NEVER make it disappear or revert
+  // the ticker to generic PREPARING.
+  if(signal?.triggered && signal?.sessionDate){
+    const signalDate=snapshotDateOnly(signal.sessionDate);
+
+    if(sessionDate && signalDate && sessionDate>signalDate){
+      return {
+        arm:{
+          armed:true,
+          dailyDate:signal.armDailyDate,
+          targetSessionDate:signal.armTargetSessionDate||signalDate,
+          trigger:Number(signal.trigger),
+          maxFill:Number(signal.maxFill),
+          priorRSI:signal.priorRSI??null
+        },
+        sessionDate,
+        signalDate,
+        triggered:true,
+        triggeredAt:signal.triggeredAt||null,
+        entryPrice:Number.isFinite(Number(signal.entryPrice))?Number(signal.entryPrice):Number(signal.trigger),
+        lastPrice:Number.isFinite(Number(s?.livePrice))?Number(s.livePrice):null,
+        observedPrice:Number.isFinite(Number(signal.entryPrice))?Number(signal.entryPrice):Number(signal.trigger),
+        maxFill:Number(signal.maxFill),
+        tooLate:false,
+        needsIntradayVerify:false,
+        verified:true,
+        historicalSignal:true,
+        expired:true,
+        source:signal.source||'Intraday 30-Min'
+      };
+    }
+  }
+
   const arm=currentSma50Arm(s,sessionDate||null);
   if(!arm) return null;
-
-  const signal=s?.intradayEntrySignal;
 
   // Once a 30-minute execution has been verified, never re-judge that historical
   // fill using the CURRENT price. The chase guard applies to the entry fill only.
@@ -10814,6 +10852,16 @@ function applyIntradayEntryLayer(s,baseState){
   // it cannot retroactively turn a valid armed setup back into PREPARING-for-RSI.
   const frozenChecks=frozenSma50ExecutionChecks(s,x.arm,x.triggered);
 
+  if(x.historicalSignal && x.expired){
+    return {
+      ...baseState,
+      state:'ENTRY SIGNAL PASSED',
+      checks:frozenChecks,
+      intraday:x,
+      reason:`A valid 30-minute BUY trigger occurred on ${x.signalDate} at a modeled entry of ${money(x.entryPrice)}. That signal is preserved in StockIQ. Because a later session is now being evaluated and no position was recorded, do not treat this as a fresh BUY or revert it to PREPARING.`
+    };
+  }
+
   if(!x.triggered){
     return {
       ...baseState,
@@ -10858,7 +10906,10 @@ function intradayEntryPlanPanel(s,pb,st){
   if(!x?.arm) return '';
 
   let status='ARMED', color=C.yellow;
-  if(x.triggered && x.needsIntradayVerify){
+  if(x.historicalSignal && x.expired){
+    status='PRIOR BUY SIGNAL — NOT A FRESH ENTRY';
+    color=C.textMuted;
+  }else if(x.triggered && x.needsIntradayVerify){
     status='TRIGGER CROSSED — UPLOAD 30-MIN';
     color=C.purple;
   }else if(x.triggered && x.tooLate){
@@ -10872,7 +10923,9 @@ function intradayEntryPlanPanel(s,pb,st){
   const entryDisplay=x.entryPrice!=null?money(x.entryPrice):'—';
 
   let note='';
-  if(!x.triggered){
+  if(x.historicalSignal && x.expired){
+    note=`StockIQ verified the ${x.signalDate} entry at ${entryDisplay}. Today's intraday upload does not erase that signal. Since no position was recorded, this is historical evidence now — not a new BUY.`;
+  }else if(!x.triggered){
     note=`Qualified from the completed ${x.arm.dailyDate} daily bar. Waiting only for the frozen SMA50 reclaim.`;
   }else if(x.needsIntradayVerify){
     note=`The frozen SMA50 was crossed, but current price cannot tell us the fill. Upload this session's 30-minute Alpaca file before judging BUY vs missed.`;
@@ -10971,6 +11024,7 @@ async function applyV2IntradayFile(input){
             triggeredAt:x.triggeredAt,
             trigger:x.arm.trigger,
             entryPrice:x.entryPrice,
+            priorRSI:x.arm.priorRSI,
             maxFill:x.arm.maxFill,
             lastPrice:Number(last.close),
             source:x.source
@@ -10998,7 +11052,7 @@ async function applyV2IntradayFile(input){
 // ── v2 initialization ────────────────────────────────────────────────────────
 (function initStockIQV2(){
   const style=document.createElement('style'); style.textContent=`.v2lbl{color:${C.textSub};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}.v2val{color:${C.text};font-size:14px;font-weight:900}.v2big{color:${C.text};font-size:18px;font-weight:950}`; document.head.appendChild(style);
-  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.80 · Intraday Session Arm Fix';
+  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.81 · Persist Verified Entry Signal';
   const topButtons=[...document.querySelectorAll('button')]; const add=topButtons.find(b=>b.textContent.includes('Add Stock')); if(add){ add.style.display='none'; add.setAttribute('aria-hidden','true'); add.tabIndex=-1; } const scan=topButtons.find(b=>b.textContent.includes('Import Scan')); if(scan){scan.textContent='Daily Data';scan.onclick=showDailyDataFlow;scan.setAttribute('aria-label','Upload daily multi-ticker data');}
   if(scan && !document.getElementById('intraday-data-btn')){ const b=document.createElement('button'); b.id='intraday-data-btn'; b.textContent='Intraday Data'; b.onclick=showIntradayDataFlow; b.setAttribute('aria-label','Upload current 30-minute execution data'); b.style.cssText=scan.style.cssText; b.style.borderColor=C.yellow; b.style.color=C.yellow; scan.parentNode.insertBefore(b,scan.nextSibling); }
   if(scan && !document.getElementById('sunday-discovery-btn')){ const b=document.createElement('button'); b.id='sunday-discovery-btn'; b.textContent='Sunday Discovery'; b.onclick=showSundayDiscoveryFlow; b.setAttribute('aria-label','Upload Sunday scanner discovery report'); b.style.cssText=scan.style.cssText; b.style.borderColor=C.purple; b.style.color=C.purple; const anchor=document.getElementById('intraday-data-btn')||scan; anchor.parentNode.insertBefore(b,anchor.nextSibling); }
@@ -11181,7 +11235,7 @@ function showSundayDiscoveryFlow(){
     </div>
   </div>`);
 }
-(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.80 · Intraday Session Arm Fix';})();
+(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.81 · Persist Verified Entry Signal';})();
 
 // ── v2.9.54 HISTORY LIFECYCLE ──────────────────────────────────────
 // Research is no longer a catch-all. The visible Research tab contains only:
@@ -11423,7 +11477,7 @@ function renderStockList(){
 }
 
 (function v2953Init(){
-  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.80 · Intraday Session Arm Fix';
+  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.81 · Persist Verified Entry Signal';
   // Safe cleanup on load: de-duplicate queue and remove only records that already
   // have evidence. Genuine pending Sunday names are never deleted automatically.
   try{ applyResearchReconciliation(true); }catch(e){ console.warn('Research reconciliation init failed',e); }
@@ -11656,8 +11710,8 @@ saveV2Close=async function(id){
 auth.onAuthStateChanged(user=>{ if(user){ loadSignalLedger(); syncSignalLedgerFromCloud(); } else { SIGNAL_LEDGER=[]; } });
 loadSignalLedger();
 setTimeout(()=>{ try{ updateAndCaptureSignals(); renderFilterBar(); }catch(e){ console.warn('Signal ledger init failed',e); } },800);
-const _v2965Version=document.getElementById('stockiq-version'); if(_v2965Version)_v2965Version.textContent='StockIQ v2.9.80 · Intraday Session Arm Fix';
-// v2.9.80: fixes historical/live intraday session alignment. SMA50 arms are recovered from the completed trading day immediately before the uploaded intraday session, so an 8/17 MTSI file correctly uses the 8/14 qualifying bar even when newer app data already exists.
+const _v2965Version=document.getElementById('stockiq-version'); if(_v2965Version)_v2965Version.textContent='StockIQ v2.9.81 · Persist Verified Entry Signal';
+// v2.9.81: preserves verified intraday BUY signals across later-session uploads. A valid 8/17 MTSI signal can no longer disappear or revert to PREPARING when 8/18 data is uploaded; if no position was recorded it becomes ENTRY SIGNAL PASSED.
 [...document.querySelectorAll('button')].filter(b=>/^(\+\s*)?(Add Stock|Research)$/i.test((b.textContent||'').trim())).forEach(b=>{ if(!b.closest('#tag-bar')){ b.style.display='none'; b.setAttribute('aria-hidden','true'); b.tabIndex=-1; } });
 </script>
 
