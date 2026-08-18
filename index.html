@@ -9936,7 +9936,7 @@ function preTop(s,pb,st){
   const executionLine=ix?.arm
     ? `<div style="color:${C.textMuted};font-size:10.5px;margin-top:5px;font-weight:800;">Qualified ${ix.arm.dailyDate} · RSI ${ix.arm.priorRSI==null?'—':Number(ix.arm.priorRSI).toFixed(1)} · SMA50 trigger ${money(ix.arm.trigger)}</div>`
     : '';
-  return `<div style="padding:16px 16px 10px;"><button onclick="showScreen('home')" style="background:none;border:none;color:${C.textSub};padding:0 0 9px;cursor:pointer;">← Back</button><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;"><div style="min-width:0;"><div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;"><span style="color:${C.text};font-size:24px;font-weight:950;">${s.ticker}</span>${badge(st.state)}</div><div style="color:${C.text};font-size:13px;font-weight:700;margin-top:5px;">${companyNameFor(s)}</div>${label?`<div style="color:${C.textSub};font-size:12px;margin-top:3px;">${label}</div>`:''}${executionLine}<div style="color:${C.textMuted};font-size:9px;margin-top:5px;">v2.9.78</div></div><div style="text-align:right;flex-shrink:0;"><div style="color:${C.text};font-size:20px;font-weight:900;margin-bottom:2px;">${money(displayPrice(s))}</div>${liveDayMoveHTML(s,'11px')} ${canBuy?`<button onclick="showV2BuyFlow('${s.id}','${buyLabel}')" style="border:none;border-radius:10px;background:${C.green};color:#000;font-size:13px;font-weight:950;padding:9px 18px;cursor:pointer;box-shadow:0 0 0 1px ${C.green}33;">${buyLabel}</button>`:''}</div></div></div>`;
+  return `<div style="padding:16px 16px 10px;"><button onclick="showScreen('home')" style="background:none;border:none;color:${C.textSub};padding:0 0 9px;cursor:pointer;">← Back</button><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;"><div style="min-width:0;"><div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;"><span style="color:${C.text};font-size:24px;font-weight:950;">${s.ticker}</span>${badge(st.state)}</div><div style="color:${C.text};font-size:13px;font-weight:700;margin-top:5px;">${companyNameFor(s)}</div>${label?`<div style="color:${C.textSub};font-size:12px;margin-top:3px;">${label}</div>`:''}${executionLine}<div style="color:${C.textMuted};font-size:9px;margin-top:5px;">v2.9.79</div></div><div style="text-align:right;flex-shrink:0;"><div style="color:${C.text};font-size:20px;font-weight:900;margin-bottom:2px;">${money(displayPrice(s))}</div>${liveDayMoveHTML(s,'11px')} ${canBuy?`<button onclick="showV2BuyFlow('${s.id}','${buyLabel}')" style="border:none;border-radius:10px;background:${C.green};color:#000;font-size:13px;font-weight:950;padding:9px 18px;cursor:pointer;box-shadow:0 0 0 1px ${C.green}33;">${buyLabel}</button>`:''}</div></div></div>`;
 }
 function ownedResearchDetails(s,pb){
   const research = [
@@ -10628,92 +10628,140 @@ function intradayBarsForCurrentSession(s){
 }
 
 function evaluateSma50IntradayEntry(s){
+  s=withRecentDailyHistory(s);
   const arm=currentSma50Arm(s);
   if(!arm) return null;
 
-  // An arm is valid for the NEXT trading session after the completed daily bar.
-  // We do not need a holiday calendar: any observed session date > arm.dailyDate
-  // is the execution session. A later completed daily import expires the old arm.
   const sessionDate=snapshotDateOnly(s?.intradaySessionDate||s?.liveSessionDate);
   const signal=s?.intradayEntrySignal;
 
+  // Once a 30-minute execution has been verified, never re-judge that historical
+  // fill using the CURRENT price. The chase guard applies to the entry fill only.
   if(signal?.triggered && signal.armDailyDate===arm.dailyDate){
-    const observed=Number.isFinite(Number(s?.livePrice))?Number(s.livePrice):
-                   Number.isFinite(Number(signal.lastPrice))?Number(signal.lastPrice):null;
-    const tooLate=observed!=null && observed>arm.maxFill;
+    const entryPrice=Number.isFinite(Number(signal.entryPrice))
+      ? Number(signal.entryPrice)
+      : (Number.isFinite(Number(signal.trigger)) ? Number(signal.trigger) : null);
+    const lastPrice=Number.isFinite(Number(s?.livePrice))
+      ? Number(s.livePrice)
+      : (Number.isFinite(Number(signal.lastPrice)) ? Number(signal.lastPrice) : null);
+    const tooLate=entryPrice!=null && entryPrice>arm.maxFill;
+
     return {
-      arm,sessionDate:signal.sessionDate||sessionDate,triggered:true,
-      triggeredAt:signal.triggeredAt||null,observedPrice:observed,
-      maxFill:arm.maxFill,tooLate,source:signal.source||'Intraday'
+      arm,
+      sessionDate:signal.sessionDate||sessionDate,
+      triggered:true,
+      triggeredAt:signal.triggeredAt||null,
+      entryPrice,
+      lastPrice,
+      observedPrice:entryPrice,
+      maxFill:arm.maxFill,
+      tooLate,
+      needsIntradayVerify:false,
+      verified:true,
+      source:signal.source||'Intraday 30-Min'
     };
   }
 
   if(!sessionDate || sessionDate<=arm.dailyDate){
-    return {arm,sessionDate:null,triggered:false,tooLate:false,source:'Armed for next session'};
+    return {
+      arm,sessionDate:null,triggered:false,triggeredAt:null,
+      entryPrice:null,lastPrice:null,observedPrice:null,
+      maxFill:arm.maxFill,tooLate:false,needsIntradayVerify:false,
+      verified:false,source:'Armed for next session'
+    };
   }
 
   const bars=intradayBarsForCurrentSession(s);
-  let triggered=false, triggeredAt=null, observedPrice=null, source='Intraday 30-Min';
 
+  // 30-minute bars are the execution authority.
   if(bars.length){
-    const first=bars[0];
-    if(Number(first.open)>=arm.trigger){
-      triggered=true; triggeredAt=first.dateTime; observedPrice=Number(first.open);
-    }else{
-      const hit=bars.find(b=>Number(b.high)>=arm.trigger);
-      if(hit){
-        triggered=true; triggeredAt=hit.dateTime;
-        // A stop order is modeled at the frozen trigger unless the session gapped
-        // through it. This is an execution reference, not a claimed brokerage fill.
-        observedPrice=arm.trigger;
+    let hitBar=null, entryPrice=null, triggeredAt=null;
+
+    for(const b of bars){
+      const o=Number(b.open), h=Number(b.high);
+      if(!Number.isFinite(o)||!Number.isFinite(h)) continue;
+
+      if(o>=arm.trigger){
+        // The bar gapped through the stop. Model entry at the bar open.
+        hitBar=b;
+        entryPrice=o;
+        triggeredAt=b.dateTime;
+        break;
+      }
+
+      if(h>=arm.trigger){
+        // Price traded up through the frozen stop during this bar.
+        hitBar=b;
+        entryPrice=arm.trigger;
+        triggeredAt=b.dateTime;
+        break;
       }
     }
+
     const last=bars[bars.length-1];
-    if(last && Number.isFinite(Number(last.close))) observedPrice=Number(last.close);
-  }
+    const lastPrice=last&&Number.isFinite(Number(last.close))?Number(last.close):null;
 
-  // Existing Daily Data exports already carry a live price. That lets StockIQ
-  // recognize a reclaim before the first completed 30-minute bar if the user
-  // performs an early live refresh.
-  const lp=Number(s?.livePrice);
-  if(!triggered && Number.isFinite(lp) && lp>=arm.trigger){
-    triggered=true;
-    triggeredAt=s?.liveAsOfET||`${sessionDate} live`;
-    observedPrice=lp;
-    source='Live Price';
-  }
-
-  // Recovery path for a build installed AFTER the session has already completed:
-  // if the prior qualifying daily close was below the frozen SMA50 and the next
-  // completed daily close is above it, the reclaim definitely occurred sometime
-  // during that session. Without intraday bars we do NOT pretend to know the exact
-  // fill or whether a chase-limit order would have filled.
-  let needsIntradayVerify=false;
-  if(!triggered){
-    const latest=latestSnap(s);
-    const latestDate=snapshotDateOnly(latest?.date);
-    const latestClose=Number(snapVal(latest,'price'));
-    if(latestDate && latestDate>arm.dailyDate &&
-       Number.isFinite(latestClose) && latestClose>=arm.trigger &&
-       Number(arm.priorClose)<Number(arm.trigger)){
-      triggered=true;
-      triggeredAt=`${latestDate} session`;
-      observedPrice=latestClose;
-      sessionDate=latestDate;
-      source='Completed Daily Recovery';
-      needsIntradayVerify=true;
+    if(hitBar){
+      const tooLate=entryPrice>arm.maxFill;
+      return {
+        arm,sessionDate,triggered:true,triggeredAt,
+        entryPrice,lastPrice,observedPrice:entryPrice,
+        maxFill:arm.maxFill,tooLate,
+        needsIntradayVerify:false,verified:true,
+        source:'Intraday 30-Min'
+      };
     }
+
+    return {
+      arm,sessionDate,triggered:false,triggeredAt:null,
+      entryPrice:null,lastPrice,observedPrice:null,
+      maxFill:arm.maxFill,tooLate:false,
+      needsIntradayVerify:false,verified:true,
+      source:'Intraday 30-Min'
+    };
   }
 
-  const tooLate=triggered && !needsIntradayVerify &&
-    observedPrice!=null && observedPrice>arm.maxFill;
+  // Live/daily price can tell us the frozen trigger has been crossed, but it
+  // cannot reconstruct the executable fill. Never call this BUY or MISSED from
+  // current price alone; ask for the 30-minute file.
+  const lp=Number(s?.livePrice);
+  if(Number.isFinite(lp) && lp>=arm.trigger){
+    return {
+      arm,sessionDate,triggered:true,
+      triggeredAt:s?.liveAsOfET||`${sessionDate} session`,
+      entryPrice:null,lastPrice:lp,observedPrice:null,
+      maxFill:arm.maxFill,tooLate:false,
+      needsIntradayVerify:true,verified:false,
+      source:'Live Price'
+    };
+  }
+
+  // Post-close recovery when the build was installed after the session.
+  const latest=latestSnap(s);
+  const latestDate=snapshotDateOnly(latest?.date);
+  const latestClose=Number(snapVal(latest,'price'));
+
+  if(latestDate && latestDate>arm.dailyDate &&
+     Number.isFinite(latestClose) && latestClose>=arm.trigger &&
+     Number(arm.priorClose)<Number(arm.trigger)){
+    return {
+      arm,sessionDate:latestDate,triggered:true,
+      triggeredAt:`${latestDate} session`,
+      entryPrice:null,lastPrice:latestClose,observedPrice:null,
+      maxFill:arm.maxFill,tooLate:false,
+      needsIntradayVerify:true,verified:false,
+      source:'Completed Daily Recovery'
+    };
+  }
 
   return {
-    arm,sessionDate,triggered,triggeredAt,observedPrice,
-    maxFill:arm.maxFill,tooLate,source,needsIntradayVerify
+    arm,sessionDate,triggered:false,triggeredAt:null,
+    entryPrice:null,lastPrice:Number.isFinite(lp)?lp:null,observedPrice:null,
+    maxFill:arm.maxFill,tooLate:false,
+    needsIntradayVerify:false,verified:false,
+    source:'Waiting for trigger'
   };
 }
-
 function applyIntradayEntryLayer(s,baseState){
   if(s?.position || !isSma50ReclaimStock(s)) return baseState;
   const x=evaluateSma50IntradayEntry(s);
@@ -10759,38 +10807,53 @@ function applyIntradayEntryLayer(s,baseState){
     state:'BUY',
     checks:frozenChecks,
     intraday:x,
-    reason:`INTRADAY RECLAIM TRIGGERED. The setup was already qualified on ${x.arm.dailyDate}; SMA50 ${money(x.arm.trigger)} was crossed ${x.triggeredAt?`at ${x.triggeredAt}`:'today'}. Current entry remains inside the ${money(x.arm.maxFill)} chase limit.`
+    reason:`30-MIN ENTRY VERIFIED. The ${x.arm.dailyDate} setup qualified first; the frozen SMA50 ${money(x.arm.trigger)} then triggered at a modeled entry of ${money(x.entryPrice)}.`
   };
 }
 
 function intradayEntryPlanPanel(s,pb,st){
   const x=st?.intraday||evaluateSma50IntradayEntry(s);
   if(!x?.arm) return '';
-  const status=x.triggered?(x.needsIntradayVerify?'TRIGGERED — VERIFY 30-MIN':(x.tooLate?'MISSED — DO NOT CHASE':'TRIGGERED — BUY')):'ARMED';
-  const color=x.triggered?(x.tooLate?C.orange:C.green):C.yellow;
-  const note=x.triggered
-    ? (x.needsIntradayVerify
-        ? `The reclaim occurred after the prior daily setup qualified. Upload that session's 30-minute file to reconstruct whether the entry was executable inside the chase guard.`
-        : x.tooLate
-          ? `The reclaim happened, but the first observed price is beyond the frozen max-fill price.`
-          : `The reclaim condition has fired. Record the actual fill with the Buy button if you execute it.`)
-    : `The setup was qualified from the completed ${x.arm.dailyDate} daily bar. Place the order before the next session if you want automatic execution.`;
+
+  let status='ARMED', color=C.yellow;
+  if(x.triggered && x.needsIntradayVerify){
+    status='TRIGGER CROSSED — UPLOAD 30-MIN';
+    color=C.purple;
+  }else if(x.triggered && x.tooLate){
+    status='ENTRY MISSED — DO NOT CHASE';
+    color=C.orange;
+  }else if(x.triggered && x.verified){
+    status='30-MIN ENTRY VERIFIED';
+    color=C.green;
+  }
+
+  const entryDisplay=x.entryPrice!=null?money(x.entryPrice):'—';
+
+  let note='';
+  if(!x.triggered){
+    note=`Qualified from the completed ${x.arm.dailyDate} daily bar. Waiting only for the frozen SMA50 reclaim.`;
+  }else if(x.needsIntradayVerify){
+    note=`The frozen SMA50 was crossed, but current price cannot tell us the fill. Upload this session's 30-minute Alpaca file before judging BUY vs missed.`;
+  }else if(x.tooLate){
+    note=`The first executable price was ${entryDisplay}, above the ${money(x.arm.maxFill)} chase guard. No entry.`;
+  }else{
+    note=`The 30-minute file confirms the reclaim. Modeled entry: ${entryDisplay}${x.triggeredAt?` · trigger bar ${x.triggeredAt}`:''}.`;
+  }
 
   return panel('Intraday Entry Plan',
     `<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;">`+
       `<div style="color:${color};font-size:15px;font-weight:950;">${status}</div>`+
-      `<div style="color:${C.textMuted};font-size:10px;font-weight:800;">Prior RSI ${x.arm.priorRSI==null?'—':Number(x.arm.priorRSI).toFixed(1)}</div>`+
+      `<div style="color:${C.textMuted};font-size:10px;font-weight:800;">Qualified ${x.arm.dailyDate} · RSI ${x.arm.priorRSI==null?'—':Number(x.arm.priorRSI).toFixed(1)}</div>`+
     `</div>`+
-    `<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px;">`+
-      `<div style="background:${C.cardHigh};border-radius:10px;padding:9px;"><div class="v2lbl">Buy-Stop Trigger</div><div class="v2val">${money(x.arm.trigger)}</div></div>`+
-      `<div style="background:${C.cardHigh};border-radius:10px;padding:9px;"><div class="v2lbl">Max Fill / Chase Guard</div><div class="v2val">${money(x.arm.maxFill)}</div></div>`+
+    `<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:10px;">`+
+      `<div style="background:${C.cardHigh};border-radius:10px;padding:9px;"><div class="v2lbl">SMA50 Trigger</div><div class="v2val">${money(x.arm.trigger)}</div></div>`+
+      `<div style="background:${C.cardHigh};border-radius:10px;padding:9px;"><div class="v2lbl">Verified Entry</div><div class="v2val">${entryDisplay}</div></div>`+
+      `<div style="background:${C.cardHigh};border-radius:10px;padding:9px;"><div class="v2lbl">Chase Guard</div><div class="v2val">${money(x.arm.maxFill)}</div></div>`+
     `</div>`+
-    `<div style="margin-top:9px;color:${C.text};font-size:12px;font-weight:800;line-height:1.45;">${note}</div>`+
-    `<div style="margin-top:6px;color:${C.textMuted};font-size:10.5px;line-height:1.4;">Qualification bar: ${x.arm.dailyDate} · frozen RSI ${x.arm.priorRSI==null?'—':Number(x.arm.priorRSI).toFixed(1)}. Current RSI ${curVal(s,'rsi')==null?'—':Number(curVal(s,'rsi')).toFixed(1)} is context only and cannot cancel an already-qualified entry plan.</div>`+
-    `<div style="margin-top:5px;color:${C.textMuted};font-size:10.5px;line-height:1.4;">Order concept: buy stop-limit with the stop at the frozen SMA50 trigger and the limit at the max-fill price. If it gaps beyond the max-fill price, let it go rather than chase.</div>`
+    `<div style="margin-top:9px;color:${C.text};font-size:12px;font-weight:850;line-height:1.45;">${note}</div>`+
+    `<div style="margin-top:6px;color:${C.textMuted};font-size:10.5px;line-height:1.4;">Current RSI ${curVal(s,'rsi')==null?'—':Number(curVal(s,'rsi')).toFixed(1)} is context only. It cannot cancel the ${x.arm.dailyDate} setup after that completed bar qualified.</div>`
   );
 }
-
 function parseIntradayCSV(text){
   const lines=String(text||'').replace(/\r/g,'').split('\n').filter(x=>x.trim());
   if(lines.length<2) return new Map();
@@ -10863,6 +10926,7 @@ async function applyV2IntradayFile(input){
             sessionDate,
             triggeredAt:x.triggeredAt,
             trigger:x.arm.trigger,
+            entryPrice:x.entryPrice,
             maxFill:x.arm.maxFill,
             lastPrice:Number(last.close),
             source:x.source
@@ -10880,7 +10944,7 @@ async function applyV2IntradayFile(input){
     try{ await saveDailyOverlayCloud(dailyOverlayByTicker); }catch(e){ console.warn('Intraday cloud sync failed; local update kept',e); }
     closeAllOverlays();
     renderHome();
-    alert(`Intraday update complete: ${updated} tickers · ${armed} armed reclaim setup${armed===1?'':'s'} · ${triggered} trigger${triggered===1?'':'s'} fired.`);
+    alert(`Intraday update complete: ${updated} tickers · ${armed} armed SMA50 setup${armed===1?'':'s'} · ${triggered} verified trigger${triggered===1?'':'s'}.`);
   }catch(e){
     console.error('Intraday import failed',e);
     alert('Intraday import failed: '+(e?.message||String(e)));
@@ -10890,7 +10954,7 @@ async function applyV2IntradayFile(input){
 // ── v2 initialization ────────────────────────────────────────────────────────
 (function initStockIQV2(){
   const style=document.createElement('style'); style.textContent=`.v2lbl{color:${C.textSub};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}.v2val{color:${C.text};font-size:14px;font-weight:900}.v2big{color:${C.text};font-size:18px;font-weight:950}`; document.head.appendChild(style);
-  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.78 · MTSI Runtime State Fix';
+  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.79 · SMA50 Intraday Execution Fix';
   const topButtons=[...document.querySelectorAll('button')]; const add=topButtons.find(b=>b.textContent.includes('Add Stock')); if(add){ add.style.display='none'; add.setAttribute('aria-hidden','true'); add.tabIndex=-1; } const scan=topButtons.find(b=>b.textContent.includes('Import Scan')); if(scan){scan.textContent='Daily Data';scan.onclick=showDailyDataFlow;scan.setAttribute('aria-label','Upload daily multi-ticker data');}
   if(scan && !document.getElementById('intraday-data-btn')){ const b=document.createElement('button'); b.id='intraday-data-btn'; b.textContent='Intraday Data'; b.onclick=showIntradayDataFlow; b.setAttribute('aria-label','Upload current 30-minute execution data'); b.style.cssText=scan.style.cssText; b.style.borderColor=C.yellow; b.style.color=C.yellow; scan.parentNode.insertBefore(b,scan.nextSibling); }
   if(scan && !document.getElementById('sunday-discovery-btn')){ const b=document.createElement('button'); b.id='sunday-discovery-btn'; b.textContent='Sunday Discovery'; b.onclick=showSundayDiscoveryFlow; b.setAttribute('aria-label','Upload Sunday scanner discovery report'); b.style.cssText=scan.style.cssText; b.style.borderColor=C.purple; b.style.color=C.purple; const anchor=document.getElementById('intraday-data-btn')||scan; anchor.parentNode.insertBefore(b,anchor.nextSibling); }
@@ -11073,7 +11137,7 @@ function showSundayDiscoveryFlow(){
     </div>
   </div>`);
 }
-(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.78 · MTSI Runtime State Fix';})();
+(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.79 · SMA50 Intraday Execution Fix';})();
 
 // ── v2.9.54 HISTORY LIFECYCLE ──────────────────────────────────────
 // Research is no longer a catch-all. The visible Research tab contains only:
@@ -11315,7 +11379,7 @@ function renderStockList(){
 }
 
 (function v2953Init(){
-  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.78 · MTSI Runtime State Fix';
+  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.79 · SMA50 Intraday Execution Fix';
   // Safe cleanup on load: de-duplicate queue and remove only records that already
   // have evidence. Genuine pending Sunday names are never deleted automatically.
   try{ applyResearchReconciliation(true); }catch(e){ console.warn('Research reconciliation init failed',e); }
@@ -11548,8 +11612,8 @@ saveV2Close=async function(id){
 auth.onAuthStateChanged(user=>{ if(user){ loadSignalLedger(); syncSignalLedgerFromCloud(); } else { SIGNAL_LEDGER=[]; } });
 loadSignalLedger();
 setTimeout(()=>{ try{ updateAndCaptureSignals(); renderFilterBar(); }catch(e){ console.warn('Signal ledger init failed',e); } },800);
-const _v2965Version=document.getElementById('stockiq-version'); if(_v2965Version)_v2965Version.textContent='StockIQ v2.9.78 · MTSI Runtime State Fix';
-// v2.9.78: fixes recent-history load order at runtime, preserves the rolling daily tail across imports, and makes the SMA50 detail page/state/checklist consume the same prior-session data.
+const _v2965Version=document.getElementById('stockiq-version'); if(_v2965Version)_v2965Version.textContent='StockIQ v2.9.79 · SMA50 Intraday Execution Fix';
+// v2.9.79: fixes SMA50 intraday execution end-to-end. Entry price is frozen at the first executable trigger, current price can never retroactively create a missed entry, and live/daily crosses require 30-minute verification before BUY.
 [...document.querySelectorAll('button')].filter(b=>/^(\+\s*)?(Add Stock|Research)$/i.test((b.textContent||'').trim())).forEach(b=>{ if(!b.closest('#tag-bar')){ b.style.display='none'; b.setAttribute('aria-hidden','true'); b.tabIndex=-1; } });
 </script>
 
