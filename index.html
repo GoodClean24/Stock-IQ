@@ -9836,6 +9836,7 @@ function positionTop(s,pb,st){
 
   return `
     <div style="margin-bottom:14px;">
+      <button onclick="history.back()" style="background:none;border:none;padding:0;margin:0 0 10px 0;color:${C.textSub};font-size:12px;font-weight:850;cursor:pointer;">← Back</button>
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;">
         <div style="min-width:0;">
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
@@ -9843,7 +9844,6 @@ function positionTop(s,pb,st){
             <div style="font-size:11px;font-weight:950;color:${C.teal};border:1px solid ${C.teal}66;border-radius:7px;padding:4px 7px;">BOUGHT</div>
           </div>
           <div style="font-size:13px;color:${C.text};font-weight:800;margin-top:3px;">${s.name||s.company||''}</div>
-          <div style="font-size:12px;color:${C.textMuted};margin-top:3px;">${cleanPlaybookName(pb)}</div>
         </div>
 
         <div style="text-align:right;min-width:170px;">
@@ -9883,12 +9883,30 @@ function positionTop(s,pb,st){
       </div>
 
       <div style="margin-top:13px;padding-top:12px;border-top:1px solid ${C.border};">
-        <div class="v2lbl" style="margin-bottom:7px;">WATCH FOR</div>
-        <div style="display:grid;gap:5px;">
-          ${stop?.price!=null?`<div style="font-size:12.5px;line-height:1.35;color:${C.text};">• ${stop.type||'Emergency Stop'}: <b>${money(stop.price)}</b></div>`:''}
-          ${ep.autoTrail?`<div style="font-size:12.5px;line-height:1.35;color:${C.text};">• At +${ep.activationPct}% → ${ep.atrMult.toFixed(1)}× ATR protection activates</div>`:''}
-          <div style="font-size:12.5px;line-height:1.35;color:${C.text};">• Position Health changes to <b>WATCH</b></div>
-          <div style="font-size:12.5px;line-height:1.35;color:${C.text};">• Review at <b>Day ${pb.hold}</b> if still in the trade</div>
+        <div class="v2lbl" style="margin-bottom:9px;">WATCH FOR</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;">
+          ${stop?.price!=null?`
+            <div style="background:${C.cardHigh};border:1px solid ${C.red}55;border-radius:11px;padding:10px 11px;">
+              <div style="font-size:10px;font-weight:950;color:${C.red};letter-spacing:.7px;">🛑 STOP</div>
+              <div style="font-size:17px;font-weight:950;color:${C.text};margin-top:3px;">${money(stop.price)}</div>
+              <div style="font-size:10.5px;color:${C.textMuted};margin-top:2px;">${stop.type||'Emergency stop'}</div>
+            </div>`:''}
+          ${ep.autoTrail?`
+            <div style="background:${C.cardHigh};border:1px solid ${C.yellow}55;border-radius:11px;padding:10px 11px;">
+              <div style="font-size:10px;font-weight:950;color:${C.yellow};letter-spacing:.7px;">🛡 PROFIT PROTECTION</div>
+              <div style="font-size:15px;font-weight:950;color:${C.text};margin-top:3px;">At +${ep.activationPct}%</div>
+              <div style="font-size:10.5px;color:${C.textMuted};margin-top:2px;">${ep.atrMult.toFixed(1)}× ATR trail activates</div>
+            </div>`:''}
+          <div style="background:${C.cardHigh};border:1px solid ${C.yellow}33;border-radius:11px;padding:10px 11px;">
+            <div style="font-size:10px;font-weight:950;color:${C.yellow};letter-spacing:.7px;">⚠️ HEALTH</div>
+            <div style="font-size:15px;font-weight:950;color:${C.text};margin-top:3px;">Watch for change</div>
+            <div style="font-size:10.5px;color:${C.textMuted};margin-top:2px;">HEALTHY → WATCH</div>
+          </div>
+          <div style="background:${C.cardHigh};border:1px solid ${C.teal}33;border-radius:11px;padding:10px 11px;">
+            <div style="font-size:10px;font-weight:950;color:${C.teal};letter-spacing:.7px;">📅 REVIEW</div>
+            <div style="font-size:15px;font-weight:950;color:${C.text};margin-top:3px;">Day ${pb.hold}</div>
+            <div style="font-size:10.5px;color:${C.textMuted};margin-top:2px;">Review if still in trade</div>
+          </div>
         </div>
         <div style="margin-top:8px;color:${C.textMuted};font-size:10.5px;line-height:1.35;">${holdExplain}</div>
       </div>
@@ -10734,7 +10752,7 @@ async function applyV2IntradayFile(input){
 // ── v2 initialization ────────────────────────────────────────────────────────
 (function initStockIQV2(){
   const style=document.createElement('style'); style.textContent=`.v2lbl{color:${C.textSub};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}.v2val{color:${C.text};font-size:14px;font-weight:900}.v2big{color:${C.text};font-size:18px;font-weight:950}`; document.head.appendChild(style);
-  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.72 · Owned Header Clarity';
+  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.73 · Visual Watch Plan';
   const topButtons=[...document.querySelectorAll('button')]; const add=topButtons.find(b=>b.textContent.includes('Add Stock')); if(add){ add.style.display='none'; add.setAttribute('aria-hidden','true'); add.tabIndex=-1; } const scan=topButtons.find(b=>b.textContent.includes('Import Scan')); if(scan){scan.textContent='Daily Data';scan.onclick=showDailyDataFlow;scan.setAttribute('aria-label','Upload daily multi-ticker data');}
   if(scan && !document.getElementById('intraday-data-btn')){ const b=document.createElement('button'); b.id='intraday-data-btn'; b.textContent='Intraday Data'; b.onclick=showIntradayDataFlow; b.setAttribute('aria-label','Upload current 30-minute execution data'); b.style.cssText=scan.style.cssText; b.style.borderColor=C.yellow; b.style.color=C.yellow; scan.parentNode.insertBefore(b,scan.nextSibling); }
   if(scan && !document.getElementById('sunday-discovery-btn')){ const b=document.createElement('button'); b.id='sunday-discovery-btn'; b.textContent='Sunday Discovery'; b.onclick=showSundayDiscoveryFlow; b.setAttribute('aria-label','Upload Sunday scanner discovery report'); b.style.cssText=scan.style.cssText; b.style.borderColor=C.purple; b.style.color=C.purple; const anchor=document.getElementById('intraday-data-btn')||scan; anchor.parentNode.insertBefore(b,anchor.nextSibling); }
@@ -10917,7 +10935,7 @@ function showSundayDiscoveryFlow(){
     </div>
   </div>`);
 }
-(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.72 · Owned Header Clarity';})();
+(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.73 · Visual Watch Plan';})();
 
 // ── v2.9.54 HISTORY LIFECYCLE ──────────────────────────────────────
 // Research is no longer a catch-all. The visible Research tab contains only:
@@ -11159,7 +11177,7 @@ function renderStockList(){
 }
 
 (function v2953Init(){
-  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.72 · Owned Header Clarity';
+  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.73 · Visual Watch Plan';
   // Safe cleanup on load: de-duplicate queue and remove only records that already
   // have evidence. Genuine pending Sunday names are never deleted automatically.
   try{ applyResearchReconciliation(true); }catch(e){ console.warn('Research reconciliation init failed',e); }
@@ -11392,8 +11410,8 @@ saveV2Close=async function(id){
 auth.onAuthStateChanged(user=>{ if(user){ loadSignalLedger(); syncSignalLedgerFromCloud(); } else { SIGNAL_LEDGER=[]; } });
 loadSignalLedger();
 setTimeout(()=>{ try{ updateAndCaptureSignals(); renderFilterBar(); }catch(e){ console.warn('Signal ledger init failed',e); } },800);
-const _v2965Version=document.getElementById('stockiq-version'); if(_v2965Version)_v2965Version.textContent='StockIQ v2.9.72 · Owned Header Clarity';
-// v2.9.72: restores the owned-stock ticker header and Today/Previous Day moves, removes duplicate meta boxes, and clarifies Day X of Y as a research window rather than a mandatory hold.
+const _v2965Version=document.getElementById('stockiq-version'); if(_v2965Version)_v2965Version.textContent='StockIQ v2.9.73 · Visual Watch Plan';
+// v2.9.73: restores Back on owned detail, removes duplicate trend text under company name, and converts Watch For into a compact visual action grid.
 [...document.querySelectorAll('button')].filter(b=>/^(\+\s*)?(Add Stock|Research)$/i.test((b.textContent||'').trim())).forEach(b=>{ if(!b.closest('#tag-bar')){ b.style.display='none'; b.setAttribute('aria-hidden','true'); b.tabIndex=-1; } });
 </script>
 
