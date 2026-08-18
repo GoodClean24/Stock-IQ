@@ -276,7 +276,8 @@ function dailyOverlayFields(u){
     'regZ126','regSlope126','regCenter126','regResidualSD126','sector','industry',
     'lastEarningsDate','earningsDate','earningsTime','earningsVerified','earningsSource',
     'nearHighSamples','nearHighAvg10','nearHighWin10','nearHighBreakout10','nearHighFailure10',
-    'nearHighBehavior','analyzed','prepWatch','missedOpportunities','_v2Placeholder'
+    'nearHighBehavior','analyzed','prepWatch','missedOpportunities','intradayEntryArm','intradayEntrySignal',
+    'intradaySessionDate','intradayAsOfET','intradayBars','_v2Placeholder'
   ];
   const o={};
   for(const k of keep) if(u[k]!==undefined) o[k]=u[k];
@@ -8136,29 +8137,53 @@ function displayDayPct(s){
   return Number.isFinite(v)?v:(Number.isFinite(Number(s?.pct))?Number(s.pct):null);
 }
 function completedDayMoveContext(s){
-  const a=(s?.snapshots||[]).filter(x=>x&&x.date&&Number.isFinite(Number(x.price))).slice().sort((x,y)=>String(x.date).localeCompare(String(y.date)));
-  if(a.length<2) return {pct:null,arrow:'→',color:C.textMuted,label:'Not enough completed daily bars'};
-  // During the session, the newest snapshot is normally yesterday. After the final
-  // daily upload, the newest snapshot can be today. In that case step back one row
-  // so "Previous Day" never duplicates Today's percentage.
-  const liveDate=String(s?.liveSessionDate||'').slice(0,10);
-  let i=a.length-1;
-  if(liveDate && String(a[i]?.date||'').slice(0,10)===liveDate) i-=1;
-  if(i<1) return {pct:null,arrow:'→',color:C.textMuted,label:'Not enough completed daily bars'};
-  const last=Number(a[i].price), prior=Number(a[i-1].price);
-  const pct=prior?((last/prior)-1)*100:null;
-  // Arrow = whether the previous day's percentage move improved or weakened versus
-  // the trading day before it. A negative Previous Day can therefore correctly show ↑.
-  let priorPct=null;
-  if(i>=2){
-    const p2=Number(a[i-2].price);
-    if(p2) priorPct=((prior/p2)-1)*100;
+  // Canonical meaning:
+  //   Today        = current/live session vs the prior completed close.
+  //   Previous Day = the prior completed close vs the completed close before it.
+  //
+  // Deduplicate by trading date first. Historical overlays can contain duplicate
+  // same-date rows from baseline + imported tails; letting duplicates through can
+  // create a bogus "previous day" calculation.
+  const byDate=new Map();
+  for(const sn of (s?.snapshots||[])){
+    const d=String(sn?.date||'').slice(0,10);
+    const p=Number(sn?.price);
+    if(d && Number.isFinite(p)) byDate.set(d,{...sn,date:d,price:p});
   }
-  if(pct==null||priorPct==null) return {pct,arrow:'→',color:C.textMuted,label:'Previous day move; not enough history for direction comparison'};
+  const a=[...byDate.values()].sort((x,y)=>String(x.date).localeCompare(String(y.date)));
+  if(a.length<2) return {pct:null,arrow:'→',color:C.textMuted,label:'Not enough completed daily bars'};
+
+  const sessionDate=String(s?.liveSessionDate||s?.intradaySessionDate||'').slice(0,10);
+
+  // Previous Day must be strictly BEFORE the current/live session.
+  let completed=a;
+  if(sessionDate) completed=a.filter(x=>String(x.date)<sessionDate);
+
+  // If there is no live session date (for example an old/static row), use the
+  // latest two completed bars as a safe fallback.
+  if(completed.length<2){
+    completed=a.slice(0,-1);
+  }
+  if(completed.length<2) return {pct:null,arrow:'→',color:C.textMuted,label:'Not enough completed daily bars'};
+
+  const prevDay=completed[completed.length-1];
+  const dayBefore=completed[completed.length-2];
+  const pct=dayBefore.price ? ((prevDay.price/dayBefore.price)-1)*100 : null;
+
+  // Arrow intentionally means whether the Previous Day's daily return improved
+  // or weakened versus the daily return one session earlier.
+  let priorPct=null;
+  if(completed.length>=3){
+    const twoBack=completed[completed.length-3];
+    if(twoBack.price) priorPct=((dayBefore.price/twoBack.price)-1)*100;
+  }
+  if(pct==null||priorPct==null){
+    return {pct,arrow:'→',color:C.textMuted,label:`Previous Day = ${prevDay.date} vs ${dayBefore.date}`};
+  }
   const delta=pct-priorPct;
-  if(delta>0.10) return {pct,arrow:'↑',color:C.green,label:'Previous day improved versus the day before'};
-  if(delta<-0.10) return {pct,arrow:'↓',color:C.red,label:'Previous day weakened versus the day before'};
-  return {pct,arrow:'→',color:C.textMuted,label:'Previous day was about unchanged versus the day before'};
+  if(delta>0.10) return {pct,arrow:'↑',color:C.green,label:`Previous Day = ${prevDay.date} vs ${dayBefore.date}; daily move improved versus the session before`};
+  if(delta<-0.10) return {pct,arrow:'↓',color:C.red,label:`Previous Day = ${prevDay.date} vs ${dayBefore.date}; daily move weakened versus the session before`};
+  return {pct,arrow:'→',color:C.textMuted,label:`Previous Day = ${prevDay.date} vs ${dayBefore.date}; daily move was about unchanged versus the session before`};
 }
 function liveDayMoveHTML(s,fontSize='11px'){
   const todayPct=displayDayPct(s), prev=completedDayMoveContext(s);
@@ -8408,7 +8433,7 @@ function setupChecks(s){
     add('Price above 200-day average',longTrend,`Current ${p==null?'—':money(p)} · 200-day ${m200==null?'—':money(m200)}${p!=null&&m200!=null&&!longTrend?` · needs ${pctFmt((m200/p-1)*100)} to reclaim`:''}`);
     add('Regression trend rising',regUp,'The 126-day regression path is still moving higher.');
     add('RSI in 35–60 range',rsi!=null&&rsi>=35&&rsi<=60,`Current RSI ${rsi==null?'—':rsi.toFixed(1)}`);
-    add('Price reclaimed 50-day average',crossUp(s,'price','ma50'),`Current ${p==null?'—':money(p)} · 50-day ${m50==null?'—':money(m50)}${p!=null&&m50!=null&&p<m50?` · needs ${pctFmt((m50/p-1)*100)} to reclaim`:' · waiting for a fresh cross above'}`);
+    add('Fresh reclaim above 50-day average',crossUp(s,'price','ma50'),`Completed daily close ${p==null?'—':money(p)} · 50-day ${m50==null?'—':money(m50)}${p!=null&&m50!=null&&p<m50?` · needs ${pctFmt((m50/p-1)*100)} to reclaim`:' · daily reclaim must be a fresh cross'}`);
     add('MACD histogram improving',hist!=null&&prevHist!=null&&hist>prevHist,`Helpful confirmation, but it no longer blocks a valid BUY.`,false,'A+');
   }
 
@@ -8911,7 +8936,7 @@ function positionState(s){
     ? 'The position remains inside its validated management plan. Trade Health is weakening, so watch the warnings closely, but do not override the validated stop/exit rules.'
     : 'The position remains inside its validated management plan.',day:d,stop:nextStop,gainPct,personality,health};
 }
-function stockState(s){ return s.position?positionState(s):preEntryState(s); }
+function stockState(s){ if(s.position)return positionState(s); const base=preEntryState(s); return applyIntradayEntryLayer(s,base); }
 function statePriority(state){ return ({'EXIT':0,'PROTECT / CONSIDER ROTATION':1,'DECISION DAY':2,'PROTECT & RUN':3,'WATCH EXIT':4,'BOUGHT':5,'A+ BUY':6,'BUY':7,'PREPARING':8,'ENTRY MISSED':9,'WAIT':10,'RESEARCH ONLY':11}[state]??12); }
 function stateStyle(state){
   const map={
@@ -8921,7 +8946,12 @@ function stateStyle(state){
 }
 function badge(state){ const st=stateStyle(state); return `<span style="background:${st.b};border:1px solid ${st.c}55;color:${st.c};font-size:10px;font-weight:900;padding:3px 8px;border-radius:6px;letter-spacing:.04em;white-space:nowrap;">${state}</span>`; }
 
-function buyUpTo(s){ const p=curVal(s,'price'); return p?p*1.02:null; }
+function buyUpTo(s){
+  const x=evaluateSma50IntradayEntry(s);
+  if(x?.arm?.maxFill) return x.arm.maxFill;
+  const p=curVal(s,'price');
+  return p?p*1.02:null;
+}
 function plannedRisk(s){ if(!s.position?.entry||!s.position?.shares)return null; const stop=originalStop(s); return stop!=null?(s.position.entry-stop)*s.position.shares:null; }
 function clusterExposure(){ const open=capitalOpenPositions(); const counts={}; open.forEach(s=>{const c=pbFor(s)?.cluster||'Other';counts[c]=(counts[c]||0)+1;}); return counts; }
 function portfolioConflict(s){ if(!isValidatedStock(s)||s.position)return null; const pb=pbFor(s), exp=clusterExposure(), n=exp[pb.cluster]||0; if(pb.cluster==='Energy'&&n>=1)return 'Energy exposure is already full. DVN and MPC often move together.'; if(pb.cluster==='Tech / AI / Semis'&&n>=2)return 'Tech / AI exposure is already full. Consider replacing a weaker similar trade instead of adding.'; if(pb.cluster==='Industrial / Aerospace'&&n>=1)return 'You already hold a similar industrial/aerospace trade. Consider reduced size or choose the stronger setup.'; return null; }
@@ -9716,7 +9746,12 @@ function regimeResearchPanel(s,pb){
   );
 }
 function marketPanel(s,pb){ const t=marketTailwind(s); return panel('Market & Sector',`<div style="display:flex;justify-content:space-between;align-items:center;"><div><div style="color:${t.ok?C.green:C.text};font-size:14px;font-weight:900;">Tailwind: ${t.label}</div><div style="color:${C.textSub};font-size:12.5px;margin-top:4px;line-height:1.5;">${t.text}</div></div><div style="color:${C.textSub};font-size:11px;font-weight:800;">${pb.market||'—'}</div></div>`); }
-function entryPanel(s,pb,st){ const sig=curVal(s,'price'),max=buyUpTo(s); return panel('Entry Plan',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;"><div><div class="v2lbl">Signal Price</div><div class="v2big">${money(sig)}</div></div><div><div class="v2lbl">Buy Up To</div><div class="v2big" style="color:${C.green};">${money(max)}</div></div></div><div style="color:${C.textSub};font-size:12.5px;line-height:1.55;margin-top:10px;">At or below ${money(max)}: OK to buy. Above it: don’t chase. A sharp gap down should be reviewed before entering.</div>`); }
+function entryPanel(s,pb,st){
+  const ix=st?.intraday||evaluateSma50IntradayEntry(s);
+  if(ix?.arm) return intradayEntryPlanPanel(s,pb,st);
+  const sig=curVal(s,'price'),max=buyUpTo(s);
+  return panel('Entry Plan',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;"><div><div class="v2lbl">Signal Price</div><div class="v2big">${money(sig)}</div></div><div><div class="v2lbl">Buy Up To</div><div class="v2big" style="color:${C.green};">${money(max)}</div></div></div><div style="color:${C.textSub};font-size:12.5px;line-height:1.55;margin-top:10px;">At or below ${money(max)}: OK to buy. Above it: don’t chase. A sharp gap down should be reviewed before entering.</div>`);
+}
 function riskPanel(s,pb){ if(s.position){ const st=suggestedStop(s),p=curVal(s,'price'),dist=p&&st.price?((p/st.price)-1)*100:null, risk=plannedRisk(s); return panel('Risk Plan',`<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;"><div><div class="v2lbl">Entry</div><div class="v2val">${money(s.position.entry)}</div></div><div><div class="v2lbl">${st.type}</div><div class="v2val" style="color:${st.active?C.purple:C.red};">${money(st.price)}</div></div><div><div class="v2lbl">Distance</div><div class="v2val">${dist==null?'—':dist.toFixed(1)+'%'}</div></div></div><div style="color:${C.textSub};font-size:12.5px;line-height:1.55;margin-top:10px;">Planned risk: ${risk==null?'—':fmtP(risk)}. ${st.why}</div>`);} return panel('Risk Plan',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;"><div><div class="v2lbl">Emergency Stop</div><div class="v2big">-${pb.stopPct}%</div></div><div><div class="v2lbl">Normal Hold</div><div class="v2big">${pb.hold} days</div></div></div><div style="color:${C.textSub};font-size:12.5px;line-height:1.55;margin-top:10px;">The exact stop is calculated from your actual purchase price. Want less risk? Buy fewer shares—don’t squeeze the stop.</div>`); }
 function exitPersonalityPanel(s,pb,st){
   if(!s.position) return '';
@@ -9762,8 +9797,8 @@ function trendTypeLabel(s,pb){
 function chartWatchMeta(s,pb,st){
   const trend=trendTypeLabel(s,pb);
   // Daily remains the authority for setup/state. 30-minute is a watch/execution view only.
-  if(!s.position && st?.state==='PREPARING' && /Reclaim/i.test(trend)){
-    return {chart:'30-Min',color:C.yellow,reason:`Watch the reclaim trigger intraday. Daily data still decides whether ${trend} is a valid setup.`};
+  if(!s.position && /SMA50 Reclaim/i.test(trend) && (st?.intraday?.arm || st?.state==='PREPARING')){
+    return {chart:'30-Min',color:C.yellow,reason:`The completed daily setup is armed. 30-minute/live data is now used only to execute the frozen SMA50 reclaim trigger.`};
   }
   return {chart:'Daily',color:C.teal,reason:s.position?'Position management remains based on the validated daily plan.':'Use the Daily chart unless StockIQ specifically calls for intraday execution.'};
 }
@@ -9880,7 +9915,7 @@ function renderDetail(s){
     html+=panel('Manage Position',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;"><button onclick="showV2CloseFlow('${s.id}')" style="padding:11px;border-radius:10px;border:1px solid ${C.red}66;background:${C.redDim};color:${C.red};font-weight:800;cursor:pointer;">Sell</button><button onclick="showV2StopFlow('${s.id}')" style="padding:11px;border-radius:10px;border:1px solid ${C.border};background:${C.cardHigh};color:${C.text};font-weight:800;cursor:pointer;">Update Stop</button></div>`);
     html+=ownedResearchDetails(s,pb);
   }
-  else { html+=setupEducationPanel(s,pb); html+=panel('Setup Requirements',checklistHTML(checks)); if(['BUY','A+ BUY'].includes(st.state))html+=entryPanel(s,pb,st); html+=riskPanel(s,pb); html+=regressionPanel(s,pb); html+=earningsPanel(s,pb); html+=marketPanel(s,pb); if(conflict)html+=panel('Portfolio Conflict',`<div style="color:${C.yellow};font-size:12.5px;line-height:1.55;font-weight:700;">${conflict}</div>`); html+=historyPanel(s,pb); html+=yourTradeProofPanel(s,pb); html+=sweetSpotPanel(s,pb); html+=indicatorPanel(s,pb); }
+  else { html+=setupEducationPanel(s,pb); html+=panel('Setup Requirements',checklistHTML(checks)); if(['BUY','A+ BUY'].includes(st.state) || st?.intraday?.arm)html+=entryPanel(s,pb,st); html+=riskPanel(s,pb); html+=regressionPanel(s,pb); html+=earningsPanel(s,pb); html+=marketPanel(s,pb); if(conflict)html+=panel('Portfolio Conflict',`<div style="color:${C.yellow};font-size:12.5px;line-height:1.55;font-weight:700;">${conflict}</div>`); html+=historyPanel(s,pb); html+=yourTradeProofPanel(s,pb); html+=sweetSpotPanel(s,pb); html+=indicatorPanel(s,pb); }
   el.innerHTML=html;
 }
 function openDetail(id){ const s=stocks.find(x=>String(x.id)===String(id)); if(!s)return; showScreen('detail'); renderDetail(s); }
@@ -10053,6 +10088,34 @@ async function applyV2Daily(){
     const importedLive=Number.isFinite(Number(latest.livePrice))?Number(latest.livePrice):latest.price;
     const liveMovePct=(priorLive&&importedLive)?((importedLive/priorLive)-1)*100:null;
     let u={...base,price:latest.price,change:prev?.price?latest.price-prev.price:0,pct:prev?.price?((latest.price/prev.price)-1)*100:0,livePrice:importedLive,liveDayPct:Number.isFinite(Number(latest.liveDayPct))?Number(latest.liveDayPct):(prev?.price?((latest.price/prev.price)-1)*100:0),liveMovePct,liveSessionDate:latest.liveSessionDate||latest.date,liveAsOfET:latest.liveAsOfET||null,rsi:latest.rsi,vol:latest.vol,avgvol:latest.avgvol,ma20:latest.ma20,ema20:latest.ema20,ma50:latest.ma50,ma200:latest.ma200,macdLine:latest.macdLine,signalLine:latest.signalLine,atr:latest.atr,hi52:latest.hi52,lo52:latest.lo52,regZ126:latest.regZ126,regSlope126:latest.regSlope126,regCenter126:latest.regCenter126,regResidualSD126:latest.regResidualSD126,sector:latest.sector||base.sector,industry:latest.industry||base.industry,lastEarningsDate:latest.lastEarnDate||(base.lastEarningsDate||null),earningsDate:latest.earnVerified===true?(latest.earnDate||(latest.earnOffset!=null?earnDateFromOffset(latest.earnOffset,latest.date):null)):null,earningsTime:latest.earnTime||(base.earningsTime||''),earningsVerified:latest.earnVerified===true,earningsSource:latest.earnVerified===true?(latest.earnSource||(latest.earnDate?'CSV date':(latest.earnOffset!=null?'CSV offset':'VERIFIED'))):(latest.earnSource||'UNVERIFIED'),nearHighSamples:latest.nearHighSamples??base.nearHighSamples,nearHighAvg10:latest.nearHighAvg10??base.nearHighAvg10,nearHighWin10:latest.nearHighWin10??base.nearHighWin10,nearHighBreakout10:latest.nearHighBreakout10??base.nearHighBreakout10,nearHighFailure10:latest.nearHighFailure10??base.nearHighFailure10,nearHighBehavior:latest.nearHighBehavior||base.nearHighBehavior||null,analyzed:latest.date,snapshots:mergeSnapshotHistory(V2_BASELINE[t]||[],mergeSnapshotHistory(base.snapshots||[],rows)),type:'Swing Trade',coreStatus:CORE_TICKERS.includes(t)?'CORE PLAYBOOK':BENCH_TICKERS.includes(t)?'BENCH':MARKET_TICKERS.includes(t)?'MARKET':(base.coreStatus||'RESEARCH ONLY'),_v2Placeholder:false};
+
+
+    // Freeze next-session SMA50 Reclaim eligibility from the completed daily bar.
+    // This is what prevents an intraday RSI rise from retroactively cancelling an
+    // entry plan that was already valid the night before.
+    if(!u.position && isValidatedStock(u) && isSma50ReclaimStock(u)){
+      const candidate=sma50ArmFromDailyState(u);
+      const oldArm=base.intradayEntryArm;
+      if(candidate){
+        u.intradayEntryArm=candidate;
+        // A new daily arm supersedes any older session signal.
+        if(!base.intradayEntrySignal || base.intradayEntrySignal.armDailyDate!==candidate.dailyDate){
+          u.intradayEntrySignal=null;
+        }
+      }else if(oldArm){
+        const latestDaily=snapshotDateOnly(latest.date);
+        // Keep the arm while the file still represents the same completed daily
+        // bar (typical intraday refresh). Once a newer completed daily bar arrives,
+        // the unused old arm expires.
+        if(latestDaily===oldArm.dailyDate){
+          u.intradayEntryArm=oldArm;
+          u.intradayEntrySignal=base.intradayEntrySignal||null;
+        }else{
+          u.intradayEntryArm=null;
+          u.intradayEntrySignal=null;
+        }
+      }
+    }
 
     // PREPARING forward-test: if price runs +6% before the setup becomes BUY,
     // record a missed opportunity once. This is evidence for future rule tuning,
@@ -10330,12 +10393,336 @@ loadSundayDiscoveryState();
 // 4) validated ATR trails now activate next session and stop breaches use OHLC,
 //    preventing same-bar lookahead and missed intraday/gap stop events.
 
+
+// ── INTRADAY EXECUTION LAYER · v2.9.70 ──────────────────────────────────────
+// Research architecture:
+//   DAILY completed bars decide whether a setup is eligible.
+//   30-minute / live data can execute ONLY a setup that was already armed.
+//   Live RSI or other intraday movement cannot retroactively cancel the frozen
+//   prior-day eligibility after a valid SMA50 Reclaim plan was armed.
+//
+// Current production use is intentionally narrow:
+//   - SMA50 Reclaim only (the family with the deepest 3-year intraday entry study)
+//   - the prior completed DAILY bar must be PREPARING with the reclaim as the
+//     single missing required trigger
+//   - trigger = frozen prior-day SMA50
+//   - stop-limit max fill = +2% above the frozen trigger (chase protection)
+// Other families keep their existing completed-daily entry rules.
+
+function isSma50ReclaimStock(s){
+  const pb=pbFor(s);
+  const fam=String(pb?.family||s?.setupFamily||'').toUpperCase();
+  return fam==='SMA50_RECLAIM' || fam.includes('SMA50') ||
+         String(s?.ticker||'').toUpperCase()==='MTSI' ||
+         /50[- ]Day Reclaim/i.test(String(pb?.name||''));
+}
+function snapshotDateOnly(v){ return String(v||'').slice(0,10); }
+
+function stockAtCompletedDate(s,date){
+  const target=snapshotDateOnly(date);
+  const snaps=(s?.snapshots||[])
+    .filter(x=>x?.date && snapshotDateOnly(x.date)<=target)
+    .slice()
+    .sort((a,b)=>snapshotDateOnly(a.date).localeCompare(snapshotDateOnly(b.date)));
+  if(!snaps.length) return null;
+  const last=snaps[snaps.length-1];
+
+  // curVal() prefers top-level fields, so explicitly overwrite every live market
+  // input with the frozen completed-bar values.
+  return {
+    ...s,
+    price:snapVal(last,'price'),
+    livePrice:null,liveDayPct:null,liveSessionDate:null,liveAsOfET:null,
+    rsi:snapVal(last,'rsi'),
+    vol:snapVal(last,'vol'),
+    avgvol:snapVal(last,'avgvol'),
+    ma20:snapVal(last,'ma20','ema20'),
+    ema20:snapVal(last,'ema20','ma20'),
+    ma50:snapVal(last,'ma50'),
+    ma200:snapVal(last,'ma200'),
+    macdLine:snapVal(last,'macdLine'),
+    signalLine:snapVal(last,'signalLine'),
+    atr:snapVal(last,'atr'),
+    hi52:snapVal(last,'hi52'),
+    lo52:snapVal(last,'lo52'),
+    regZ126:snapVal(last,'regZ126'),
+    regSlope126:snapVal(last,'regSlope126'),
+    regCenter126:snapVal(last,'regCenter126'),
+    regResidualSD126:snapVal(last,'regResidualSD126'),
+    analyzed:target,
+    snapshots:snaps,
+    intradayBars:[],
+    intradaySessionDate:null,
+    intradayEntrySignal:null
+  };
+}
+
+function sma50ArmFromDailyState(s){
+  if(!isSma50ReclaimStock(s) || s?.position || !isValidatedStock(s)) return null;
+  const base=preEntryState(s);
+  if(base?.state!=='PREPARING') return null;
+  const required=(base.checks||[]).filter(x=>x.required);
+  const missing=required.filter(x=>!x.ok);
+  if(missing.length!==1 || !/50-day|50 day/i.test(String(missing[0]?.label||''))) return null;
+
+  const dailyDate=snapshotDateOnly(latestSnap(s)?.date||s?.analyzed);
+  const trigger=curVal(s,'ma50');
+  const priorPrice=curVal(s,'price');
+  if(!dailyDate || !(trigger>0) || !(priorPrice>0) || priorPrice>=trigger) return null;
+
+  const earnings=entryEarningsGate(s,pbFor(s));
+  if(!earnings.ok) return null;
+  const ext=entryExtensionGate(s,pbFor(s));
+  if(!ext.ok) return null;
+
+  return {
+    family:'SMA50_RECLAIM',
+    armed:true,
+    dailyDate,
+    trigger,
+    maxFill:trigger*1.02,
+    priorClose:priorPrice,
+    priorRSI:curVal(s,'rsi'),
+    priorATR:curVal(s,'atr'),
+    createdAt:new Date().toISOString()
+  };
+}
+
+function currentSma50Arm(s){
+  if(!isSma50ReclaimStock(s)||s?.position) return null;
+  const stored=s?.intradayEntryArm;
+  if(stored?.armed && stored.trigger>0) return stored;
+  return sma50ArmFromDailyState(s);
+}
+
+function intradayBarsForCurrentSession(s){
+  const bars=Array.isArray(s?.intradayBars)?s.intradayBars:[];
+  const session=snapshotDateOnly(s?.intradaySessionDate||s?.liveSessionDate);
+  if(!session) return [];
+  return bars.filter(b=>snapshotDateOnly(b.sessionDate||b.dateTime)===session)
+             .slice()
+             .sort((a,b)=>String(a.dateTime||'').localeCompare(String(b.dateTime||'')));
+}
+
+function evaluateSma50IntradayEntry(s){
+  const arm=currentSma50Arm(s);
+  if(!arm) return null;
+
+  // An arm is valid for the NEXT trading session after the completed daily bar.
+  // We do not need a holiday calendar: any observed session date > arm.dailyDate
+  // is the execution session. A later completed daily import expires the old arm.
+  const sessionDate=snapshotDateOnly(s?.intradaySessionDate||s?.liveSessionDate);
+  const signal=s?.intradayEntrySignal;
+
+  if(signal?.triggered && signal.armDailyDate===arm.dailyDate){
+    const observed=Number.isFinite(Number(s?.livePrice))?Number(s.livePrice):
+                   Number.isFinite(Number(signal.lastPrice))?Number(signal.lastPrice):null;
+    const tooLate=observed!=null && observed>arm.maxFill;
+    return {
+      arm,sessionDate:signal.sessionDate||sessionDate,triggered:true,
+      triggeredAt:signal.triggeredAt||null,observedPrice:observed,
+      maxFill:arm.maxFill,tooLate,source:signal.source||'Intraday'
+    };
+  }
+
+  if(!sessionDate || sessionDate<=arm.dailyDate){
+    return {arm,sessionDate:null,triggered:false,tooLate:false,source:'Armed for next session'};
+  }
+
+  const bars=intradayBarsForCurrentSession(s);
+  let triggered=false, triggeredAt=null, observedPrice=null, source='Intraday 30-Min';
+
+  if(bars.length){
+    const first=bars[0];
+    if(Number(first.open)>=arm.trigger){
+      triggered=true; triggeredAt=first.dateTime; observedPrice=Number(first.open);
+    }else{
+      const hit=bars.find(b=>Number(b.high)>=arm.trigger);
+      if(hit){
+        triggered=true; triggeredAt=hit.dateTime;
+        // A stop order is modeled at the frozen trigger unless the session gapped
+        // through it. This is an execution reference, not a claimed brokerage fill.
+        observedPrice=arm.trigger;
+      }
+    }
+    const last=bars[bars.length-1];
+    if(last && Number.isFinite(Number(last.close))) observedPrice=Number(last.close);
+  }
+
+  // Existing Daily Data exports already carry a live price. That lets StockIQ
+  // recognize a reclaim before the first completed 30-minute bar if the user
+  // performs an early live refresh.
+  const lp=Number(s?.livePrice);
+  if(!triggered && Number.isFinite(lp) && lp>=arm.trigger){
+    triggered=true;
+    triggeredAt=s?.liveAsOfET||`${sessionDate} live`;
+    observedPrice=lp;
+    source='Live Price';
+  }
+
+  const tooLate=triggered && observedPrice!=null && observedPrice>arm.maxFill;
+  return {arm,sessionDate,triggered,triggeredAt,observedPrice,maxFill:arm.maxFill,tooLate,source};
+}
+
+function applyIntradayEntryLayer(s,baseState){
+  if(s?.position || !isSma50ReclaimStock(s)) return baseState;
+  const x=evaluateSma50IntradayEntry(s);
+  if(!x?.arm) return baseState;
+
+  if(!x.triggered){
+    return {
+      ...baseState,
+      state:'PREPARING',
+      intraday:x,
+      reason:`ENTRY ARMED from ${x.arm.dailyDate}. The prior daily setup is frozen; today's RSI cannot cancel it. Buy-stop trigger ${money(x.arm.trigger)} · max fill ${money(x.arm.maxFill)}.`
+    };
+  }
+
+  if(x.tooLate){
+    return {
+      ...baseState,
+      state:'ENTRY MISSED',
+      intraday:x,
+      reason:`The frozen SMA50 trigger (${money(x.arm.trigger)}) fired, but price is already above the ${money(x.arm.maxFill)} chase limit. Do not chase; wait for a new setup.`
+    };
+  }
+
+  return {
+    ...baseState,
+    state:'BUY',
+    intraday:x,
+    reason:`INTRADAY RECLAIM TRIGGERED. The setup was already qualified on ${x.arm.dailyDate}; SMA50 ${money(x.arm.trigger)} was crossed ${x.triggeredAt?`at ${x.triggeredAt}`:'today'}. Current entry remains inside the ${money(x.arm.maxFill)} chase limit.`
+  };
+}
+
+function intradayEntryPlanPanel(s,pb,st){
+  const x=st?.intraday||evaluateSma50IntradayEntry(s);
+  if(!x?.arm) return '';
+  const status=x.triggered?(x.tooLate?'MISSED — DO NOT CHASE':'TRIGGERED — BUY'):'ARMED';
+  const color=x.triggered?(x.tooLate?C.orange:C.green):C.yellow;
+  const note=x.triggered
+    ? (x.tooLate
+        ? `The reclaim happened, but the entry has moved beyond the frozen max-fill price.`
+        : `The reclaim condition has fired. Record the actual fill with the Buy button if you execute it.`)
+    : `The setup was qualified from the completed ${x.arm.dailyDate} daily bar. Place the order before the next session if you want automatic execution.`;
+
+  return panel('Intraday Entry Plan',
+    `<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;">`+
+      `<div style="color:${color};font-size:15px;font-weight:950;">${status}</div>`+
+      `<div style="color:${C.textMuted};font-size:10px;font-weight:800;">Prior RSI ${x.arm.priorRSI==null?'—':Number(x.arm.priorRSI).toFixed(1)}</div>`+
+    `</div>`+
+    `<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px;">`+
+      `<div style="background:${C.cardHigh};border-radius:10px;padding:9px;"><div class="v2lbl">Buy-Stop Trigger</div><div class="v2val">${money(x.arm.trigger)}</div></div>`+
+      `<div style="background:${C.cardHigh};border-radius:10px;padding:9px;"><div class="v2lbl">Max Fill / Chase Guard</div><div class="v2val">${money(x.arm.maxFill)}</div></div>`+
+    `</div>`+
+    `<div style="margin-top:9px;color:${C.text};font-size:12px;font-weight:800;line-height:1.45;">${note}</div>`+
+    `<div style="margin-top:6px;color:${C.textMuted};font-size:10.5px;line-height:1.4;">Order concept: buy stop-limit with the stop at the frozen SMA50 trigger and the limit at the max-fill price. If it gaps beyond the max-fill price, let it go rather than chase.</div>`
+  );
+}
+
+function parseIntradayCSV(text){
+  const lines=String(text||'').replace(/\r/g,'').split('\n').filter(x=>x.trim());
+  if(lines.length<2) return new Map();
+  const delim=lines[0].includes('\t')?'\t':',';
+  const headers=splitCSVLine(lines[0],delim).map(x=>String(x).trim());
+  const find=(...names)=>headers.findIndex(h=>names.some(n=>h.toLowerCase()===String(n).toLowerCase()));
+  const I={
+    dt:find('DateTime','Datetime','Timestamp','Date Time'),
+    ticker:find('Symbol','Ticker'),
+    open:find('Open'),high:find('High'),low:find('Low'),close:find('Close'),vol:find('Volume')
+  };
+  if(I.dt<0||I.ticker<0||I.open<0||I.high<0||I.low<0||I.close<0) throw new Error('Intraday CSV needs DateTime, Symbol, Open, High, Low and Close columns.');
+  const num=(c,i)=>{const v=parseFloat(String(c[i]??'').replace(/,/g,''));return Number.isFinite(v)?v:null;};
+  const groups=new Map();
+  for(let i=1;i<lines.length;i++){
+    const c=splitCSVLine(lines[i],delim);
+    const ticker=String(c[I.ticker]||'').trim().toUpperCase();
+    const rawDT=String(c[I.dt]||'').trim();
+    if(!ticker||!rawDT) continue;
+    const sessionDate=rawDT.slice(0,10);
+    const row={dateTime:rawDT,sessionDate,open:num(c,I.open),high:num(c,I.high),low:num(c,I.low),close:num(c,I.close),volume:num(c,I.vol)};
+    if(!groups.has(ticker)) groups.set(ticker,[]);
+    groups.get(ticker).push(row);
+  }
+  for(const [t,rows] of groups){
+    rows.sort((a,b)=>String(a.dateTime).localeCompare(String(b.dateTime)));
+    const latestDate=rows.map(r=>r.sessionDate).sort().slice(-1)[0];
+    groups.set(t,rows.filter(r=>r.sessionDate===latestDate).slice(-13));
+  }
+  return groups;
+}
+
+function showIntradayDataFlow(){
+  showModal(`<div style="background:${C.card};border-radius:20px;padding:24px;border:1px solid ${C.yellow}55;">
+    <div style="color:${C.text};font-size:20px;font-weight:950;margin-bottom:6px;">Upload Intraday 30-Min Data</div>
+    <div style="color:${C.textSub};font-size:12.5px;line-height:1.6;margin-bottom:12px;">Use the Alpaca 30-minute CSV. StockIQ keeps only the latest session and uses it for execution timing — never to rewrite the completed-daily setup rules.</div>
+    <div style="background:${C.cardHigh};border-radius:11px;padding:10px 11px;margin-bottom:14px;color:${C.text};font-size:11.5px;line-height:1.55;">
+      <b>Best workflow:</b> Daily Data after the close arms tomorrow's setup. If a SMA50 Reclaim is ARMED, place the stop-limit before the next session. Upload intraday data after the first 30-minute bar (7:00 AM PT / 10:00 AM ET) and again only if the setup is still waiting.
+    </div>
+    <input id="v2-intraday-file" type="file" accept=".csv,.txt" style="display:none" onchange="applyV2IntradayFile(this)">
+    <button onclick="document.getElementById('v2-intraday-file').click()" style="width:100%;padding:14px;border:none;border-radius:12px;background:${C.yellow};color:#000;font-weight:950;cursor:pointer;">Select Intraday CSV</button>
+  </div>`);
+}
+async function applyV2IntradayFile(input){
+  const file=input?.files?.[0]; if(!file) return;
+  try{
+    const groups=parseIntradayCSV(await file.text());
+    if(!groups.size) throw new Error('No intraday bars were found.');
+    const byTicker=new Map(stocks.map(s=>[String(s.ticker||'').toUpperCase(),s]));
+    let updated=0, triggered=0, armed=0;
+
+    for(const [t,bars] of groups){
+      const s=byTicker.get(t);
+      if(!s||!bars.length) continue;
+      const sessionDate=bars[bars.length-1].sessionDate;
+      const last=bars[bars.length-1];
+
+      s.intradayBars=bars;
+      s.intradaySessionDate=sessionDate;
+      s.intradayAsOfET=String(last.dateTime||'').slice(11,16)||null;
+
+      const x=evaluateSma50IntradayEntry(s);
+      if(x?.arm){
+        armed++;
+        if(x.triggered){
+          triggered++;
+          s.intradayEntrySignal={
+            triggered:true,
+            armDailyDate:x.arm.dailyDate,
+            sessionDate,
+            triggeredAt:x.triggeredAt,
+            trigger:x.arm.trigger,
+            maxFill:x.arm.maxFill,
+            lastPrice:Number(last.close),
+            source:x.source
+          };
+        }
+      }
+      updated++;
+
+      // Keep intraday fields in the lightweight shared overlay, not in the giant
+      // historical Firestore stock document.
+      dailyOverlayByTicker.set(t,dailyOverlayFields(s));
+    }
+
+    persistDailyOverlayLocal();
+    try{ await saveDailyOverlayCloud(dailyOverlayByTicker); }catch(e){ console.warn('Intraday cloud sync failed; local update kept',e); }
+    closeAllOverlays();
+    renderHome();
+    alert(`Intraday update complete: ${updated} tickers · ${armed} armed reclaim setup${armed===1?'':'s'} · ${triggered} trigger${triggered===1?'':'s'} fired.`);
+  }catch(e){
+    console.error('Intraday import failed',e);
+    alert('Intraday import failed: '+(e?.message||String(e)));
+  }
+}
+
 // ── v2 initialization ────────────────────────────────────────────────────────
 (function initStockIQV2(){
   const style=document.createElement('style'); style.textContent=`.v2lbl{color:${C.textSub};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}.v2val{color:${C.text};font-size:14px;font-weight:900}.v2big{color:${C.text};font-size:18px;font-weight:950}`; document.head.appendChild(style);
-  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.39 · Sunday Discovery Pipeline';
+  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.70 · Intraday Entry Engine';
   const topButtons=[...document.querySelectorAll('button')]; const add=topButtons.find(b=>b.textContent.includes('Add Stock')); if(add){ add.style.display='none'; add.setAttribute('aria-hidden','true'); add.tabIndex=-1; } const scan=topButtons.find(b=>b.textContent.includes('Import Scan')); if(scan){scan.textContent='Daily Data';scan.onclick=showDailyDataFlow;scan.setAttribute('aria-label','Upload daily multi-ticker data');}
-  if(scan && !document.getElementById('sunday-discovery-btn')){ const b=document.createElement('button'); b.id='sunday-discovery-btn'; b.textContent='Sunday Discovery'; b.onclick=showSundayDiscoveryFlow; b.setAttribute('aria-label','Upload Sunday scanner discovery report'); b.style.cssText=scan.style.cssText; b.style.borderColor=C.purple; b.style.color=C.purple; scan.parentNode.insertBefore(b,scan.nextSibling); }
+  if(scan && !document.getElementById('intraday-data-btn')){ const b=document.createElement('button'); b.id='intraday-data-btn'; b.textContent='Intraday Data'; b.onclick=showIntradayDataFlow; b.setAttribute('aria-label','Upload current 30-minute execution data'); b.style.cssText=scan.style.cssText; b.style.borderColor=C.yellow; b.style.color=C.yellow; scan.parentNode.insertBefore(b,scan.nextSibling); }
+  if(scan && !document.getElementById('sunday-discovery-btn')){ const b=document.createElement('button'); b.id='sunday-discovery-btn'; b.textContent='Sunday Discovery'; b.onclick=showSundayDiscoveryFlow; b.setAttribute('aria-label','Upload Sunday scanner discovery report'); b.style.cssText=scan.style.cssText; b.style.borderColor=C.purple; b.style.color=C.purple; const anchor=document.getElementById('intraday-data-btn')||scan; anchor.parentNode.insertBefore(b,anchor.nextSibling); }
   activeTag='Ready Now'; sortMode='opportunity';
 })();
 
@@ -10515,7 +10902,7 @@ function showSundayDiscoveryFlow(){
     </div>
   </div>`);
 }
-(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.69 · Clear Position Plan';})();
+(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.70 · Intraday Entry Engine';})();
 
 // ── v2.9.54 HISTORY LIFECYCLE ──────────────────────────────────────
 // Research is no longer a catch-all. The visible Research tab contains only:
@@ -10757,7 +11144,7 @@ function renderStockList(){
 }
 
 (function v2953Init(){
-  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.69 · Clear Position Plan';
+  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.70 · Intraday Entry Engine';
   // Safe cleanup on load: de-duplicate queue and remove only records that already
   // have evidence. Genuine pending Sunday names are never deleted automatically.
   try{ applyResearchReconciliation(true); }catch(e){ console.warn('Research reconciliation init failed',e); }
@@ -10990,8 +11377,8 @@ saveV2Close=async function(id){
 auth.onAuthStateChanged(user=>{ if(user){ loadSignalLedger(); syncSignalLedgerFromCloud(); } else { SIGNAL_LEDGER=[]; } });
 loadSignalLedger();
 setTimeout(()=>{ try{ updateAndCaptureSignals(); renderFilterBar(); }catch(e){ console.warn('Signal ledger init failed',e); } },800);
-const _v2965Version=document.getElementById('stockiq-version'); if(_v2965Version)_v2965Version.textContent='StockIQ v2.9.69 · Clear Position Plan';
-// v2.9.69: simplifies owned-position pages to Current Plan + Watch For + compact Exit Plan. Regime intelligence stays behind the scenes.
+const _v2965Version=document.getElementById('stockiq-version'); if(_v2965Version)_v2965Version.textContent='StockIQ v2.9.70 · Intraday Entry Engine';
+// v2.9.70: adds frozen prior-day SMA50 Reclaim entry arming, live/30-minute execution, intraday upload, and corrected Previous Day math.
 [...document.querySelectorAll('button')].filter(b=>/^(\+\s*)?(Add Stock|Research)$/i.test((b.textContent||'').trim())).forEach(b=>{ if(!b.closest('#tag-bar')){ b.style.display='none'; b.setAttribute('aria-hidden','true'); b.tabIndex=-1; } });
 </script>
 
