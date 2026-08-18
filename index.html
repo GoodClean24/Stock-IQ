@@ -95,7 +95,7 @@ input[type=number]{-moz-appearance:textfield;}
   <div id="portfolio-box"></div>
   <div id="position-watch"></div>
   <!-- Tonight's Best Opportunities — the ranking engine -->
-  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">v2.9.64 · Cross-Device State Hardening</div>
+  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">v2.9.83 · Back To Main Fix</div>
   <div id="tonights-opportunities"></div>
   <!-- Filter tags + sort -->
   <div id="filter-bar" style="background:#11141C;border-bottom:1px solid #1E2230;padding:9px 20px;"></div>
@@ -2033,7 +2033,7 @@ function openBacktest(id){
   document.getElementById('backtest-content').innerHTML=`
    <div class="wide-content">
     <div style="background:${C.card};border-bottom:1px solid ${C.border};padding:16px 20px;display:flex;align-items:center;gap:12px;">
-      <button onclick="openDetail('${s.id}')" style="background:none;border:none;color:${C.textSub};font-size:24px;cursor:pointer;line-height:1;">←</button>
+      <button onclick="stockIQBackFromDetail()" style="background:none;border:none;color:${C.textSub};font-size:24px;cursor:pointer;line-height:1;">←</button>
       <div><div style="color:${C.text};font-size:18px;font-weight:700;">${s.ticker} · strategy backtest</div>
       <div style="color:#AEB4C2;font-size:12px;">${bt.strategy||getStrategyFor(s)} · how our system did on this stock's own history</div></div>
     </div>
@@ -2537,7 +2537,7 @@ function renderCleanDetail(s){
   document.getElementById('detail-content').innerHTML=`
    <div class="wide-content">
     <div style="background:${C.card};border-bottom:1px solid ${C.border};padding:16px 20px;display:flex;align-items:center;justify-content:space-between;">      <div style="display:flex;align-items:center;gap:12px;">
-        <button onclick="showScreen('home');renderHome();" style="background:none;border:none;color:${C.textSub};font-size:24px;cursor:pointer;line-height:1;">←</button>
+        <button onclick="stockIQBackFromDetail()" style="background:none;border:none;color:${C.textSub};font-size:24px;cursor:pointer;line-height:1;">←</button>
         <div><div style="display:flex;align-items:baseline;gap:7px;"><span style="color:${C.text};font-size:20px;font-weight:600;">${s.ticker}</span><span onclick="editStockName('${s.id}')" style="color:#8A90A0;font-size:13px;font-weight:500;cursor:pointer;">${(s.name&&s.name.toUpperCase()!==s.ticker.toUpperCase())?s.name:'+ add name'}</span></div>
         <div style="color:#AEB4C2;font-size:12px;">${(s.type||'swing').toLowerCase().replace(' trade','')}${s.sector?` · ${s.sector}`:''}</div></div>
       </div>
@@ -2772,7 +2772,7 @@ function renderDetail(s) {
     <!-- Header -->
     <div style="background:${C.card};border-bottom:1px solid ${C.border};padding:16px 20px;position:sticky;top:0;z-index:10;">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
-        <button onclick="showScreen('home');renderHome();" style="background:none;border:none;color:${C.textSub};font-size:24px;cursor:pointer;padding:0;line-height:1;">←</button>
+        <button onclick="stockIQBackFromDetail()" style="background:none;border:none;color:${C.textSub};font-size:24px;cursor:pointer;padding:0;line-height:1;">←</button>
         <div style="flex:1;">
           <div style="color:${C.text};font-size:26px;font-weight:900;letter-spacing:-0.02em;">${s.ticker}</div>
           <div style="color:${C.textSub};font-size:13px;">${s.name}</div>
@@ -10004,9 +10004,11 @@ function stockIQActiveScreen(){
   return el?.id?.replace(/^screen-/,'') || 'home';
 }
 function stockIQBackFromDetail(){
-  const target=(stockIQDetailReturnScreen && stockIQDetailReturnScreen!=='detail') ? stockIQDetailReturnScreen : 'home';
-  showScreen(target);
-  if(target==='home') renderHome();
+  // v2.9.83: Ticker Back is intentionally simple and deterministic.
+  // From any ticker/detail page, return to the main StockIQ dashboard.
+  detailStockId = null;
+  showScreen('home');
+  renderHome();
 }
 function renderDetail(s){
   s=withRecentDailyHistory(s);
@@ -11122,7 +11124,7 @@ async function applyV2IntradayFile(input){
 // ── v2 initialization ────────────────────────────────────────────────────────
 (function initStockIQV2(){
   const style=document.createElement('style'); style.textContent=`.v2lbl{color:${C.textSub};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}.v2val{color:${C.text};font-size:14px;font-weight:900}.v2big{color:${C.text};font-size:18px;font-weight:950}`; document.head.appendChild(style);
-  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.82 · Daily Date + Back Navigation Fix';
+  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.83 · Back To Main Fix';
   const topButtons=[...document.querySelectorAll('button')]; const add=topButtons.find(b=>b.textContent.includes('Add Stock')); if(add){ add.style.display='none'; add.setAttribute('aria-hidden','true'); add.tabIndex=-1; } const scan=topButtons.find(b=>b.textContent.includes('Import Scan')); if(scan){scan.textContent='Daily Data';scan.onclick=showDailyDataFlow;scan.setAttribute('aria-label','Upload daily multi-ticker data');}
   if(scan && !document.getElementById('intraday-data-btn')){ const b=document.createElement('button'); b.id='intraday-data-btn'; b.textContent='Intraday Data'; b.onclick=showIntradayDataFlow; b.setAttribute('aria-label','Upload current 30-minute execution data'); b.style.cssText=scan.style.cssText; b.style.borderColor=C.yellow; b.style.color=C.yellow; scan.parentNode.insertBefore(b,scan.nextSibling); }
   if(scan && !document.getElementById('sunday-discovery-btn')){ const b=document.createElement('button'); b.id='sunday-discovery-btn'; b.textContent='Sunday Discovery'; b.onclick=showSundayDiscoveryFlow; b.setAttribute('aria-label','Upload Sunday scanner discovery report'); b.style.cssText=scan.style.cssText; b.style.borderColor=C.purple; b.style.color=C.purple; const anchor=document.getElementById('intraday-data-btn')||scan; anchor.parentNode.insertBefore(b,anchor.nextSibling); }
@@ -11305,7 +11307,7 @@ function showSundayDiscoveryFlow(){
     </div>
   </div>`);
 }
-(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.82 · Daily Date + Back Navigation Fix';})();
+(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.83 · Back To Main Fix';})();
 
 // ── v2.9.54 HISTORY LIFECYCLE ──────────────────────────────────────
 // Research is no longer a catch-all. The visible Research tab contains only:
@@ -11547,7 +11549,7 @@ function renderStockList(){
 }
 
 (function v2953Init(){
-  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.82 · Daily Date + Back Navigation Fix';
+  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.83 · Back To Main Fix';
   // Safe cleanup on load: de-duplicate queue and remove only records that already
   // have evidence. Genuine pending Sunday names are never deleted automatically.
   try{ applyResearchReconciliation(true); }catch(e){ console.warn('Research reconciliation init failed',e); }
@@ -11780,7 +11782,7 @@ saveV2Close=async function(id){
 auth.onAuthStateChanged(user=>{ if(user){ loadSignalLedger(); syncSignalLedgerFromCloud(); } else { SIGNAL_LEDGER=[]; } });
 loadSignalLedger();
 setTimeout(()=>{ try{ updateAndCaptureSignals(); renderFilterBar(); }catch(e){ console.warn('Signal ledger init failed',e); } },800);
-const _v2965Version=document.getElementById('stockiq-version'); if(_v2965Version)_v2965Version.textContent='StockIQ v2.9.82 · Daily Date + Back Navigation Fix';
+const _v2965Version=document.getElementById('stockiq-version'); if(_v2965Version)_v2965Version.textContent='StockIQ v2.9.83 · Back To Main Fix';
 // v2.9.82: preserves the v2.9.81 verified-entry persistence logic; fixes canonical daily CSV dates, filename/date validation, and Detail Back navigation.
 [...document.querySelectorAll('button')].filter(b=>/^(\+\s*)?(Add Stock|Research)$/i.test((b.textContent||'').trim())).forEach(b=>{ if(!b.closest('#tag-bar')){ b.style.display='none'; b.setAttribute('aria-hidden','true'); b.tabIndex=-1; } });
 </script>
