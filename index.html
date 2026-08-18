@@ -9816,7 +9816,7 @@ function positionTop(s,pb,st){
   const stop=st?.stop||suggestedStop(s);
   const day=positionDays(s)||1;
   const ep=exitPersonality(s);
-  const health=positionHealth(s);
+  const health=positionHealthSummary(s);
 
   let plan='STAY IN', planColor=C.green;
   if(st?.state==='SELL'||st?.state==='EXIT NOW'||st?.state==='STOP HIT'){
@@ -9837,7 +9837,7 @@ function positionTop(s,pb,st){
       ? `${ep.atrMult.toFixed(1)}× ATR protection is active`
       : `At +${ep.activationPct}% → ${ep.atrMult.toFixed(1)}× ATR protection activates`);
   }
-  if(health?.level&&String(health.level).toUpperCase().includes('WATCH')){
+  if(health?.label&&String(health.label).toUpperCase().includes('WATCH')){
     watch.push(`Position Health: <b>WATCH</b>`);
   }else{
     watch.push(`Position Health changes to <b>WATCH</b>`);
@@ -10719,7 +10719,7 @@ async function applyV2IntradayFile(input){
 // ── v2 initialization ────────────────────────────────────────────────────────
 (function initStockIQV2(){
   const style=document.createElement('style'); style.textContent=`.v2lbl{color:${C.textSub};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}.v2val{color:${C.text};font-size:14px;font-weight:900}.v2big{color:${C.text};font-size:18px;font-weight:950}`; document.head.appendChild(style);
-  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.70 · Intraday Entry Engine';
+  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.71 · Intraday Entry + Bought Stock Fix';
   const topButtons=[...document.querySelectorAll('button')]; const add=topButtons.find(b=>b.textContent.includes('Add Stock')); if(add){ add.style.display='none'; add.setAttribute('aria-hidden','true'); add.tabIndex=-1; } const scan=topButtons.find(b=>b.textContent.includes('Import Scan')); if(scan){scan.textContent='Daily Data';scan.onclick=showDailyDataFlow;scan.setAttribute('aria-label','Upload daily multi-ticker data');}
   if(scan && !document.getElementById('intraday-data-btn')){ const b=document.createElement('button'); b.id='intraday-data-btn'; b.textContent='Intraday Data'; b.onclick=showIntradayDataFlow; b.setAttribute('aria-label','Upload current 30-minute execution data'); b.style.cssText=scan.style.cssText; b.style.borderColor=C.yellow; b.style.color=C.yellow; scan.parentNode.insertBefore(b,scan.nextSibling); }
   if(scan && !document.getElementById('sunday-discovery-btn')){ const b=document.createElement('button'); b.id='sunday-discovery-btn'; b.textContent='Sunday Discovery'; b.onclick=showSundayDiscoveryFlow; b.setAttribute('aria-label','Upload Sunday scanner discovery report'); b.style.cssText=scan.style.cssText; b.style.borderColor=C.purple; b.style.color=C.purple; const anchor=document.getElementById('intraday-data-btn')||scan; anchor.parentNode.insertBefore(b,anchor.nextSibling); }
@@ -10902,7 +10902,7 @@ function showSundayDiscoveryFlow(){
     </div>
   </div>`);
 }
-(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.70 · Intraday Entry Engine';})();
+(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.71 · Intraday Entry + Bought Stock Fix';})();
 
 // ── v2.9.54 HISTORY LIFECYCLE ──────────────────────────────────────
 // Research is no longer a catch-all. The visible Research tab contains only:
@@ -11144,7 +11144,7 @@ function renderStockList(){
 }
 
 (function v2953Init(){
-  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.70 · Intraday Entry Engine';
+  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.71 · Intraday Entry + Bought Stock Fix';
   // Safe cleanup on load: de-duplicate queue and remove only records that already
   // have evidence. Genuine pending Sunday names are never deleted automatically.
   try{ applyResearchReconciliation(true); }catch(e){ console.warn('Research reconciliation init failed',e); }
@@ -11377,8 +11377,8 @@ saveV2Close=async function(id){
 auth.onAuthStateChanged(user=>{ if(user){ loadSignalLedger(); syncSignalLedgerFromCloud(); } else { SIGNAL_LEDGER=[]; } });
 loadSignalLedger();
 setTimeout(()=>{ try{ updateAndCaptureSignals(); renderFilterBar(); }catch(e){ console.warn('Signal ledger init failed',e); } },800);
-const _v2965Version=document.getElementById('stockiq-version'); if(_v2965Version)_v2965Version.textContent='StockIQ v2.9.70 · Intraday Entry Engine';
-// v2.9.70: adds frozen prior-day SMA50 Reclaim entry arming, live/30-minute execution, intraday upload, and corrected Previous Day math.
+const _v2965Version=document.getElementById('stockiq-version'); if(_v2965Version)_v2965Version.textContent='StockIQ v2.9.71 · Intraday Entry + Bought Stock Fix';
+// v2.9.71: fixes BOUGHT-stock detail runtime error while preserving v2.9.70 intraday entry engine and Previous Day correction.
 [...document.querySelectorAll('button')].filter(b=>/^(\+\s*)?(Add Stock|Research)$/i.test((b.textContent||'').trim())).forEach(b=>{ if(!b.closest('#tag-bar')){ b.style.display='none'; b.setAttribute('aria-hidden','true'); b.tabIndex=-1; } });
 </script>
 
