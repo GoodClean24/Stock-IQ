@@ -8068,6 +8068,13 @@ const V2_RECENT_DAILY_REPAIR = {"ONTO":[{"date":"2026-08-13","price":337.82,"ope
 
 function pbFor(s){ if(!s) return null; const t=String(s.ticker||'').toUpperCase(); return PLAYBOOKS[t] || genericPromotedPlaybook(t, RESEARCH_PROMOTION_EVIDENCE[t]) || null; }
 function recentRepairRows(t){ return V2_RECENT_DAILY_REPAIR[String(t||'').toUpperCase()]||[]; }
+
+function withRecentDailyHistory(s){
+  if(!s) return s;
+  const repair=recentRepairRows(s.ticker);
+  if(!repair.length) return s;
+  return {...s,snapshots:mergeSnapshotHistory(s.snapshots||[],repair)};
+}
 function mergeSnapshotHistory(baseRows, liveRows){
   const byDate=new Map();
   [...(baseRows||[]),...(liveRows||[])].forEach(r=>{ if(r&&r.date) byDate.set(String(r.date),r); });
@@ -8140,6 +8147,7 @@ function displayDayPct(s){
   return Number.isFinite(v)?v:(Number.isFinite(Number(s?.pct))?Number(s.pct):null);
 }
 function completedDayMoveContext(s){
+  s=withRecentDailyHistory(s);
   const byDate=new Map();
   for(const sn of (s?.snapshots||[])){
     const d=String(sn?.date||'').slice(0,10);
@@ -8936,7 +8944,12 @@ function positionState(s){
     ? 'The position remains inside its validated management plan. Trade Health is weakening, so watch the warnings closely, but do not override the validated stop/exit rules.'
     : 'The position remains inside its validated management plan.',day:d,stop:nextStop,gainPct,personality,health};
 }
-function stockState(s){ if(s.position)return positionState(s); const base=preEntryState(s); return applyIntradayEntryLayer(s,base); }
+function stockState(s){
+  s=withRecentDailyHistory(s);
+  if(s.position)return positionState(s);
+  const base=preEntryState(s);
+  return applyIntradayEntryLayer(s,base);
+}
 function statePriority(state){ return ({'EXIT':0,'PROTECT / CONSIDER ROTATION':1,'DECISION DAY':2,'PROTECT & RUN':3,'WATCH EXIT':4,'BOUGHT':5,'A+ BUY':6,'BUY':7,'TRIGGERED / VERIFY':8,'PREPARING':9,'ENTRY MISSED':10,'WAIT':11,'RESEARCH ONLY':12}[state]??13); }
 function stateStyle(state){
   if(state==='TRIGGERED / VERIFY') return {bg:C.purple+'22',fg:C.purple,border:C.purple+'66'};
@@ -9919,7 +9932,11 @@ function positionTop(s,pb,st){
 }
 function preTop(s,pb,st){
   const canBuy=['BUY','A+ BUY'].includes(st.state), buyLabel=st.state==='A+ BUY'?'A+ BUY':'BUY', label=cleanPlaybookName(pb);
-  return `<div style="padding:16px 16px 10px;"><button onclick="showScreen('home')" style="background:none;border:none;color:${C.textSub};padding:0 0 9px;cursor:pointer;">← Back</button><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;"><div style="min-width:0;"><div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;"><span style="color:${C.text};font-size:24px;font-weight:950;">${s.ticker}</span>${badge(st.state)}</div><div style="color:${C.text};font-size:13px;font-weight:700;margin-top:5px;">${companyNameFor(s)}</div>${label?`<div style="color:${C.textSub};font-size:12px;margin-top:3px;">${label}</div>`:''}</div><div style="text-align:right;flex-shrink:0;"><div style="color:${C.text};font-size:20px;font-weight:900;margin-bottom:2px;">${money(displayPrice(s))}</div>${liveDayMoveHTML(s,'11px')} ${canBuy?`<button onclick="showV2BuyFlow('${s.id}','${buyLabel}')" style="border:none;border-radius:10px;background:${C.green};color:#000;font-size:13px;font-weight:950;padding:9px 18px;cursor:pointer;box-shadow:0 0 0 1px ${C.green}33;">${buyLabel}</button>`:''}</div></div></div>`;
+  const ix=st?.intraday;
+  const executionLine=ix?.arm
+    ? `<div style="color:${C.textMuted};font-size:10.5px;margin-top:5px;font-weight:800;">Qualified ${ix.arm.dailyDate} · RSI ${ix.arm.priorRSI==null?'—':Number(ix.arm.priorRSI).toFixed(1)} · SMA50 trigger ${money(ix.arm.trigger)}</div>`
+    : '';
+  return `<div style="padding:16px 16px 10px;"><button onclick="showScreen('home')" style="background:none;border:none;color:${C.textSub};padding:0 0 9px;cursor:pointer;">← Back</button><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;"><div style="min-width:0;"><div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;"><span style="color:${C.text};font-size:24px;font-weight:950;">${s.ticker}</span>${badge(st.state)}</div><div style="color:${C.text};font-size:13px;font-weight:700;margin-top:5px;">${companyNameFor(s)}</div>${label?`<div style="color:${C.textSub};font-size:12px;margin-top:3px;">${label}</div>`:''}${executionLine}<div style="color:${C.textMuted};font-size:9px;margin-top:5px;">v2.9.78</div></div><div style="text-align:right;flex-shrink:0;"><div style="color:${C.text};font-size:20px;font-weight:900;margin-bottom:2px;">${money(displayPrice(s))}</div>${liveDayMoveHTML(s,'11px')} ${canBuy?`<button onclick="showV2BuyFlow('${s.id}','${buyLabel}')" style="border:none;border-radius:10px;background:${C.green};color:#000;font-size:13px;font-weight:950;padding:9px 18px;cursor:pointer;box-shadow:0 0 0 1px ${C.green}33;">${buyLabel}</button>`:''}</div></div></div>`;
 }
 function ownedResearchDetails(s,pb){
   const research = [
@@ -9941,6 +9958,7 @@ function ownedResearchDetails(s,pb){
 }
 
 function renderDetail(s){
+  s=withRecentDailyHistory(s);
   const el=document.getElementById('detail-content'); if(!el)return; const pb=pbFor(s); if(!pb){ const ev=evidenceFor(s), rp=researchPromotionLabel(s); el.innerHTML=`<div style="padding:16px;"><button onclick="showScreen('home')" style="background:none;border:none;color:${C.textSub};padding:0 0 12px;">← Back</button><h2 style="color:${C.text};margin:0;">${s.ticker}</h2>${companyNameFor(s)?`<div style="color:${C.textSub};font-size:13px;margin-top:4px;">${companyNameFor(s)}</div>`:''}<div style="margin-top:12px;color:${rp.color};font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;">${rp.label}${ev?.grade?` · ${ev.grade}`:''}</div>${ev?.family?`<div style="color:${C.text};font-size:13px;font-weight:800;margin-top:8px;">Candidate family: ${ev.family.replaceAll('_',' ')}</div>`:''}<p style="color:${C.textSub};font-size:13px;line-height:1.65;">${ev?.summary||'This ticker can show indicators, but StockIQ will not issue trading signals until it has a validated playbook.'}</p><div style="background:${C.card};border:1px solid ${C.border};border-radius:14px;padding:13px 14px;margin:12px 0;"><div style="color:${C.yellow};font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;margin-bottom:7px;">Promotion gate</div><div style="color:${C.textSub};font-size:12px;line-height:1.6;">Current readiness is not enough. Promotion requires useful trade frequency, positive friction-adjusted expectancy, older/newer or OOS survival, parameter-neighborhood robustness, and tolerable downside. Until that evidence is explicitly approved, this stock stays research-only.</div></div>${indicatorPanel(s,{})}</div>`; return; }
   const st=stockState(s),checks=(Array.isArray(st?.checks)&&st.checks.length)?st.checks:setupChecks(s),conflict=portfolioConflict(s);
   let html=s.position?positionTop(s,pb,st):preTop(s,pb,st); if(!s.position)html+=detailMetaStrip(s,pb,st); html+=topCallout(s,pb,st);
@@ -9953,7 +9971,7 @@ function renderDetail(s){
     html+=panel('Manage Position',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;"><button onclick="showV2CloseFlow('${s.id}')" style="padding:11px;border-radius:10px;border:1px solid ${C.red}66;background:${C.redDim};color:${C.red};font-weight:800;cursor:pointer;">Sell</button><button onclick="showV2StopFlow('${s.id}')" style="padding:11px;border-radius:10px;border:1px solid ${C.border};background:${C.cardHigh};color:${C.text};font-weight:800;cursor:pointer;">Update Stop</button></div>`);
     html+=ownedResearchDetails(s,pb);
   }
-  else { html+=setupEducationPanel(s,pb,st); html+=panel('Setup Requirements',checklistHTML(checks)); if(['BUY','A+ BUY'].includes(st.state) || st?.intraday?.arm)html+=entryPanel(s,pb,st); html+=riskPanel(s,pb); html+=regressionPanel(s,pb); html+=earningsPanel(s,pb); html+=marketPanel(s,pb); if(conflict)html+=panel('Portfolio Conflict',`<div style="color:${C.yellow};font-size:12.5px;line-height:1.55;font-weight:700;">${conflict}</div>`); html+=historyPanel(s,pb); html+=yourTradeProofPanel(s,pb); html+=sweetSpotPanel(s,pb); html+=indicatorPanel(s,pb); }
+  else { html+=setupEducationPanel(s,pb,st); html+=panel('Setup Requirements',checklistHTML(checks)); if(['BUY','A+ BUY','TRIGGERED / VERIFY','ENTRY MISSED'].includes(st.state) || st?.intraday?.arm)html+=entryPanel(s,pb,st); html+=riskPanel(s,pb); html+=regressionPanel(s,pb); html+=earningsPanel(s,pb); html+=marketPanel(s,pb); if(conflict)html+=panel('Portfolio Conflict',`<div style="color:${C.yellow};font-size:12.5px;line-height:1.55;font-weight:700;">${conflict}</div>`); html+=historyPanel(s,pb); html+=yourTradeProofPanel(s,pb); html+=sweetSpotPanel(s,pb); html+=indicatorPanel(s,pb); }
   el.innerHTML=html;
 }
 function openDetail(id){ const s=stocks.find(x=>String(x.id)===String(id)); if(!s)return; showScreen('detail'); renderDetail(s); }
@@ -10182,7 +10200,20 @@ async function applyV2Daily(){
   // v2.9.34: DO NOT write the entire daily market universe to Firestore.
   // Store a lightweight market-data overlay locally; user-owned state still
   // saves to Firestore through normal BUY/SELL/favorite/manual-edit actions.
-  dailyOverlayByTicker = new Map(updates.map(u=>[String(u.ticker||'').toUpperCase(), dailyOverlayFields(u)]));
+  {
+    const nextOverlay=new Map();
+    for(const u0 of updates){
+      const t=String(u0.ticker||'').toUpperCase();
+      const prior=dailyOverlayByTicker.get(t);
+      const u=withRecentDailyHistory(u0);
+      const mergedRecent=mergeSnapshotHistory(
+        mergeSnapshotHistory(prior?.snapshots||[], recentRepairRows(t)),
+        u.snapshots||[]
+      );
+      nextOverlay.set(t,dailyOverlayFields({...u,snapshots:mergedRecent}));
+    }
+    dailyOverlayByTicker=nextOverlay;
+  }
   persistDailyOverlayLocal();
   // v2.9.51: save the lightweight latest-daily overlay once so laptop/phone
   // load the same completed dataset. This replaces device-only local state.
@@ -10532,6 +10563,7 @@ function sma50ArmFromDailyState(s){
 }
 
 function recoverPriorSma50Arm(s){
+  s=withRecentDailyHistory(s);
   if(!isSma50ReclaimStock(s)||s?.position||!isValidatedStock(s)) return null;
 
   const snaps=(s?.snapshots||[])
@@ -10858,7 +10890,7 @@ async function applyV2IntradayFile(input){
 // ── v2 initialization ────────────────────────────────────────────────────────
 (function initStockIQV2(){
   const style=document.createElement('style'); style.textContent=`.v2lbl{color:${C.textSub};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}.v2val{color:${C.text};font-size:14px;font-weight:900}.v2big{color:${C.text};font-size:18px;font-weight:950}`; document.head.appendChild(style);
-  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.77 · Recent Daily History Repair';
+  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.78 · MTSI Runtime State Fix';
   const topButtons=[...document.querySelectorAll('button')]; const add=topButtons.find(b=>b.textContent.includes('Add Stock')); if(add){ add.style.display='none'; add.setAttribute('aria-hidden','true'); add.tabIndex=-1; } const scan=topButtons.find(b=>b.textContent.includes('Import Scan')); if(scan){scan.textContent='Daily Data';scan.onclick=showDailyDataFlow;scan.setAttribute('aria-label','Upload daily multi-ticker data');}
   if(scan && !document.getElementById('intraday-data-btn')){ const b=document.createElement('button'); b.id='intraday-data-btn'; b.textContent='Intraday Data'; b.onclick=showIntradayDataFlow; b.setAttribute('aria-label','Upload current 30-minute execution data'); b.style.cssText=scan.style.cssText; b.style.borderColor=C.yellow; b.style.color=C.yellow; scan.parentNode.insertBefore(b,scan.nextSibling); }
   if(scan && !document.getElementById('sunday-discovery-btn')){ const b=document.createElement('button'); b.id='sunday-discovery-btn'; b.textContent='Sunday Discovery'; b.onclick=showSundayDiscoveryFlow; b.setAttribute('aria-label','Upload Sunday scanner discovery report'); b.style.cssText=scan.style.cssText; b.style.borderColor=C.purple; b.style.color=C.purple; const anchor=document.getElementById('intraday-data-btn')||scan; anchor.parentNode.insertBefore(b,anchor.nextSibling); }
@@ -11041,7 +11073,7 @@ function showSundayDiscoveryFlow(){
     </div>
   </div>`);
 }
-(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.77 · Recent Daily History Repair';})();
+(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.78 · MTSI Runtime State Fix';})();
 
 // ── v2.9.54 HISTORY LIFECYCLE ──────────────────────────────────────
 // Research is no longer a catch-all. The visible Research tab contains only:
@@ -11283,7 +11315,7 @@ function renderStockList(){
 }
 
 (function v2953Init(){
-  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.77 · Recent Daily History Repair';
+  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.78 · MTSI Runtime State Fix';
   // Safe cleanup on load: de-duplicate queue and remove only records that already
   // have evidence. Genuine pending Sunday names are never deleted automatically.
   try{ applyResearchReconciliation(true); }catch(e){ console.warn('Research reconciliation init failed',e); }
@@ -11516,8 +11548,8 @@ saveV2Close=async function(id){
 auth.onAuthStateChanged(user=>{ if(user){ loadSignalLedger(); syncSignalLedgerFromCloud(); } else { SIGNAL_LEDGER=[]; } });
 loadSignalLedger();
 setTimeout(()=>{ try{ updateAndCaptureSignals(); renderFilterBar(); }catch(e){ console.warn('Signal ledger init failed',e); } },800);
-const _v2965Version=document.getElementById('stockiq-version'); if(_v2965Version)_v2965Version.textContent='StockIQ v2.9.77 · Recent Daily History Repair';
-// v2.9.77: restores the user's known Aug. 13/14 completed daily history into the rolling data tail, repairs Previous Day math when a recent bar is missing, and makes prior-session SMA50 arms take precedence over today's post-move RSI.
+const _v2965Version=document.getElementById('stockiq-version'); if(_v2965Version)_v2965Version.textContent='StockIQ v2.9.78 · MTSI Runtime State Fix';
+// v2.9.78: fixes recent-history load order at runtime, preserves the rolling daily tail across imports, and makes the SMA50 detail page/state/checklist consume the same prior-session data.
 [...document.querySelectorAll('button')].filter(b=>/^(\+\s*)?(Add Stock|Research)$/i.test((b.textContent||'').trim())).forEach(b=>{ if(!b.closest('#tag-bar')){ b.style.display='none'; b.setAttribute('aria-hidden','true'); b.tabIndex=-1; } });
 </script>
 
