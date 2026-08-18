@@ -9936,7 +9936,7 @@ function preTop(s,pb,st){
   const executionLine=ix?.arm
     ? `<div style="color:${C.textMuted};font-size:10.5px;margin-top:5px;font-weight:800;">Qualified ${ix.arm.dailyDate} · RSI ${ix.arm.priorRSI==null?'—':Number(ix.arm.priorRSI).toFixed(1)} · SMA50 trigger ${money(ix.arm.trigger)}</div>`
     : '';
-  return `<div style="padding:16px 16px 10px;"><button onclick="showScreen('home')" style="background:none;border:none;color:${C.textSub};padding:0 0 9px;cursor:pointer;">← Back</button><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;"><div style="min-width:0;"><div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;"><span style="color:${C.text};font-size:24px;font-weight:950;">${s.ticker}</span>${badge(st.state)}</div><div style="color:${C.text};font-size:13px;font-weight:700;margin-top:5px;">${companyNameFor(s)}</div>${label?`<div style="color:${C.textSub};font-size:12px;margin-top:3px;">${label}</div>`:''}${executionLine}<div style="color:${C.textMuted};font-size:9px;margin-top:5px;">v2.9.79</div></div><div style="text-align:right;flex-shrink:0;"><div style="color:${C.text};font-size:20px;font-weight:900;margin-bottom:2px;">${money(displayPrice(s))}</div>${liveDayMoveHTML(s,'11px')} ${canBuy?`<button onclick="showV2BuyFlow('${s.id}','${buyLabel}')" style="border:none;border-radius:10px;background:${C.green};color:#000;font-size:13px;font-weight:950;padding:9px 18px;cursor:pointer;box-shadow:0 0 0 1px ${C.green}33;">${buyLabel}</button>`:''}</div></div></div>`;
+  return `<div style="padding:16px 16px 10px;"><button onclick="showScreen('home')" style="background:none;border:none;color:${C.textSub};padding:0 0 9px;cursor:pointer;">← Back</button><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;"><div style="min-width:0;"><div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;"><span style="color:${C.text};font-size:24px;font-weight:950;">${s.ticker}</span>${badge(st.state)}</div><div style="color:${C.text};font-size:13px;font-weight:700;margin-top:5px;">${companyNameFor(s)}</div>${label?`<div style="color:${C.textSub};font-size:12px;margin-top:3px;">${label}</div>`:''}${executionLine}<div style="color:${C.textMuted};font-size:9px;margin-top:5px;">v2.9.80</div></div><div style="text-align:right;flex-shrink:0;"><div style="color:${C.text};font-size:20px;font-weight:900;margin-bottom:2px;">${money(displayPrice(s))}</div>${liveDayMoveHTML(s,'11px')} ${canBuy?`<button onclick="showV2BuyFlow('${s.id}','${buyLabel}')" style="border:none;border-radius:10px;background:${C.green};color:#000;font-size:13px;font-weight:950;padding:9px 18px;cursor:pointer;box-shadow:0 0 0 1px ${C.green}33;">${buyLabel}</button>`:''}</div></div></div>`;
 }
 function ownedResearchDetails(s,pb){
   const research = [
@@ -10552,6 +10552,11 @@ function sma50ArmFromDailyState(s){
     family:'SMA50_RECLAIM',
     armed:true,
     dailyDate,
+    targetSessionDate:(()=>{
+      const d=new Date(dailyDate+'T12:00:00');
+      do { d.setDate(d.getDate()+1); } while(d.getDay()===0 || d.getDay()===6);
+      return d.toISOString().slice(0,10);
+    })(),
     trigger,
     maxFill:trigger*1.02,
     priorClose:priorPrice,
@@ -10562,7 +10567,14 @@ function sma50ArmFromDailyState(s){
   };
 }
 
-function recoverPriorSma50Arm(s){
+function previousTradingDate(dateStr){
+  const d=new Date(String(dateStr).slice(0,10)+'T12:00:00');
+  if(Number.isNaN(d.getTime())) return null;
+  do { d.setDate(d.getDate()-1); } while(d.getDay()===0 || d.getDay()===6);
+  return d.toISOString().slice(0,10);
+}
+
+function recoverPriorSma50Arm(s,targetSessionDate=null){
   s=withRecentDailyHistory(s);
   if(!isSma50ReclaimStock(s)||s?.position||!isValidatedStock(s)) return null;
 
@@ -10571,34 +10583,63 @@ function recoverPriorSma50Arm(s){
     .slice()
     .sort((a,b)=>snapshotDateOnly(a.date).localeCompare(snapshotDateOnly(b.date)));
 
-  if(snaps.length<2) return null;
+  if(!snaps.length) return null;
 
-  // Safety rule: recover ONLY the immediately prior completed trading bar.
-  // Never resurrect an older arm just because it happens to match history.
+  // If evaluating an intraday file, recover the setup from the completed
+  // trading day immediately BEFORE THAT FILE'S SESSION.
+  //
+  // Example:
+  //   Uploaded intraday session = 2026-08-17
+  //   Qualifying completed daily bar = 2026-08-14
+  //
+  // This remains correct even if the app already contains an 8/18 snapshot.
+  if(targetSessionDate){
+    const priorDate=previousTradingDate(targetSessionDate);
+    if(!priorDate) return null;
+    const frozen=stockAtCompletedDate(s,priorDate);
+    if(!frozen) return null;
+    const latestFrozenDate=snapshotDateOnly(latestSnap(frozen)?.date);
+    if(latestFrozenDate!==priorDate) return null;
+    const arm=sma50ArmFromDailyState(frozen);
+    return arm ? {...arm,recovered:true,targetSessionDate:snapshotDateOnly(targetSessionDate)} : null;
+  }
+
+  // No intraday session supplied: use the immediately prior completed
+  // snapshot as a fallback for a live next-session plan.
+  if(snaps.length<2) return null;
   const d=snapshotDateOnly(snaps[snaps.length-2].date);
   const frozen=stockAtCompletedDate(s,d);
   if(!frozen) return null;
-
   const arm=sma50ArmFromDailyState(frozen);
   return arm ? {...arm,recovered:true} : null;
 }
-
-function currentSma50Arm(s){
+function currentSma50Arm(s,targetSessionDate=null){
   if(!isSma50ReclaimStock(s)||s?.position) return null;
-  const stored=s?.intradayEntryArm;
-  if(stored?.armed && stored.trigger>0) return stored;
 
-  // Recovery first: if yesterday was the qualified setup bar, preserve it.
-  // This is the key MTSI case — today's stronger RSI cannot erase yesterday's
-  // already-valid setup after the reclaim occurs.
-  const prior=recoverPriorSma50Arm(s);
+  const stored=s?.intradayEntryArm;
+  if(stored?.armed && stored.trigger>0){
+    // A stored arm only belongs to the intended next session. When a historical
+    // intraday file is uploaded, do not let a newer stored arm override it.
+    if(!targetSessionDate || !stored.targetSessionDate ||
+       snapshotDateOnly(stored.targetSessionDate)===snapshotDateOnly(targetSessionDate)){
+      return stored;
+    }
+  }
+
+  // For an uploaded intraday session, session-aware recovery is authoritative.
+  if(targetSessionDate){
+    const prior=recoverPriorSma50Arm(s,targetSessionDate);
+    if(prior) return prior;
+  }
+
+  // For normal live operation, recover the immediately prior completed bar.
+  const prior=recoverPriorSma50Arm(s,null);
   if(prior) return prior;
 
-  // Only if there is no prior-session arm do we evaluate the current completed bar.
+  // Finally, arm from the current completed daily state if it is waiting only
+  // on the SMA50 reclaim for the next session.
   return sma50ArmFromDailyState(s);
 }
-
-
 function frozenSma50ExecutionChecks(s,arm,triggered){
   const frozen=stockAtCompletedDate(s,arm?.dailyDate);
   const checks=Array.isArray(arm?.frozenChecks)&&arm.frozenChecks.length
@@ -10629,10 +10670,11 @@ function intradayBarsForCurrentSession(s){
 
 function evaluateSma50IntradayEntry(s){
   s=withRecentDailyHistory(s);
-  const arm=currentSma50Arm(s);
-  if(!arm) return null;
 
   const sessionDate=snapshotDateOnly(s?.intradaySessionDate||s?.liveSessionDate);
+  const arm=currentSma50Arm(s,sessionDate||null);
+  if(!arm) return null;
+
   const signal=s?.intradayEntrySignal;
 
   // Once a 30-minute execution has been verified, never re-judge that historical
@@ -10904,6 +10946,7 @@ async function applyV2IntradayFile(input){
     if(!groups.size) throw new Error('No intraday bars were found.');
     const byTicker=new Map(stocks.map(s=>[String(s.ticker||'').toUpperCase(),s]));
     let updated=0, triggered=0, armed=0;
+    const fileSymbols=groups.size;
 
     for(const [t,bars] of groups){
       const s=byTicker.get(t);
@@ -10923,6 +10966,7 @@ async function applyV2IntradayFile(input){
           s.intradayEntrySignal={
             triggered:true,
             armDailyDate:x.arm.dailyDate,
+            armTargetSessionDate:x.arm.targetSessionDate||sessionDate,
             sessionDate,
             triggeredAt:x.triggeredAt,
             trigger:x.arm.trigger,
@@ -10944,7 +10988,7 @@ async function applyV2IntradayFile(input){
     try{ await saveDailyOverlayCloud(dailyOverlayByTicker); }catch(e){ console.warn('Intraday cloud sync failed; local update kept',e); }
     closeAllOverlays();
     renderHome();
-    alert(`Intraday update complete: ${updated} tickers · ${armed} armed SMA50 setup${armed===1?'':'s'} · ${triggered} verified trigger${triggered===1?'':'s'}.`);
+    alert(`Intraday update complete: ${fileSymbols} symbol${fileSymbols===1?'':'s'} in file · ${updated} matched StockIQ · ${armed} armed SMA50 setup${armed===1?'':'s'} · ${triggered} verified trigger${triggered===1?'':'s'}.`);
   }catch(e){
     console.error('Intraday import failed',e);
     alert('Intraday import failed: '+(e?.message||String(e)));
@@ -10954,7 +10998,7 @@ async function applyV2IntradayFile(input){
 // ── v2 initialization ────────────────────────────────────────────────────────
 (function initStockIQV2(){
   const style=document.createElement('style'); style.textContent=`.v2lbl{color:${C.textSub};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}.v2val{color:${C.text};font-size:14px;font-weight:900}.v2big{color:${C.text};font-size:18px;font-weight:950}`; document.head.appendChild(style);
-  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.79 · SMA50 Intraday Execution Fix';
+  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.80 · Intraday Session Arm Fix';
   const topButtons=[...document.querySelectorAll('button')]; const add=topButtons.find(b=>b.textContent.includes('Add Stock')); if(add){ add.style.display='none'; add.setAttribute('aria-hidden','true'); add.tabIndex=-1; } const scan=topButtons.find(b=>b.textContent.includes('Import Scan')); if(scan){scan.textContent='Daily Data';scan.onclick=showDailyDataFlow;scan.setAttribute('aria-label','Upload daily multi-ticker data');}
   if(scan && !document.getElementById('intraday-data-btn')){ const b=document.createElement('button'); b.id='intraday-data-btn'; b.textContent='Intraday Data'; b.onclick=showIntradayDataFlow; b.setAttribute('aria-label','Upload current 30-minute execution data'); b.style.cssText=scan.style.cssText; b.style.borderColor=C.yellow; b.style.color=C.yellow; scan.parentNode.insertBefore(b,scan.nextSibling); }
   if(scan && !document.getElementById('sunday-discovery-btn')){ const b=document.createElement('button'); b.id='sunday-discovery-btn'; b.textContent='Sunday Discovery'; b.onclick=showSundayDiscoveryFlow; b.setAttribute('aria-label','Upload Sunday scanner discovery report'); b.style.cssText=scan.style.cssText; b.style.borderColor=C.purple; b.style.color=C.purple; const anchor=document.getElementById('intraday-data-btn')||scan; anchor.parentNode.insertBefore(b,anchor.nextSibling); }
@@ -11137,7 +11181,7 @@ function showSundayDiscoveryFlow(){
     </div>
   </div>`);
 }
-(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.79 · SMA50 Intraday Execution Fix';})();
+(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.80 · Intraday Session Arm Fix';})();
 
 // ── v2.9.54 HISTORY LIFECYCLE ──────────────────────────────────────
 // Research is no longer a catch-all. The visible Research tab contains only:
@@ -11379,7 +11423,7 @@ function renderStockList(){
 }
 
 (function v2953Init(){
-  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.79 · SMA50 Intraday Execution Fix';
+  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.80 · Intraday Session Arm Fix';
   // Safe cleanup on load: de-duplicate queue and remove only records that already
   // have evidence. Genuine pending Sunday names are never deleted automatically.
   try{ applyResearchReconciliation(true); }catch(e){ console.warn('Research reconciliation init failed',e); }
@@ -11612,8 +11656,8 @@ saveV2Close=async function(id){
 auth.onAuthStateChanged(user=>{ if(user){ loadSignalLedger(); syncSignalLedgerFromCloud(); } else { SIGNAL_LEDGER=[]; } });
 loadSignalLedger();
 setTimeout(()=>{ try{ updateAndCaptureSignals(); renderFilterBar(); }catch(e){ console.warn('Signal ledger init failed',e); } },800);
-const _v2965Version=document.getElementById('stockiq-version'); if(_v2965Version)_v2965Version.textContent='StockIQ v2.9.79 · SMA50 Intraday Execution Fix';
-// v2.9.79: fixes SMA50 intraday execution end-to-end. Entry price is frozen at the first executable trigger, current price can never retroactively create a missed entry, and live/daily crosses require 30-minute verification before BUY.
+const _v2965Version=document.getElementById('stockiq-version'); if(_v2965Version)_v2965Version.textContent='StockIQ v2.9.80 · Intraday Session Arm Fix';
+// v2.9.80: fixes historical/live intraday session alignment. SMA50 arms are recovered from the completed trading day immediately before the uploaded intraday session, so an 8/17 MTSI file correctly uses the 8/14 qualifying bar even when newer app data already exists.
 [...document.querySelectorAll('button')].filter(b=>/^(\+\s*)?(Add Stock|Research)$/i.test((b.textContent||'').trim())).forEach(b=>{ if(!b.closest('#tag-bar')){ b.style.display='none'; b.setAttribute('aria-hidden','true'); b.tabIndex=-1; } });
 </script>
 
