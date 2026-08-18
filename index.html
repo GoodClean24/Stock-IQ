@@ -7449,6 +7449,46 @@ function parseCSVDate(str) {
   return date ? date.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : str;
 }
 
+// v2.9.82: Market-data dates are stored canonically as YYYY-MM-DD.
+// UI formatting may be friendly, but trading/session logic must never depend
+// on browser parsing of display strings such as "Aug 18, 2026".
+function parseCSVDateISO(str) {
+  if(str==null) return null;
+  const s=String(str).trim();
+  if(!s) return null;
+
+  let m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if(m){
+    const y=Number(m[1]), mo=Number(m[2]), d=Number(m[3]);
+    const dt=new Date(y,mo-1,d);
+    if(dt.getFullYear()===y && dt.getMonth()===mo-1 && dt.getDate()===d){
+      return `${String(y).padStart(4,'0')}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    }
+    return null;
+  }
+
+  m=s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2}|\d{4})$/);
+  if(m){
+    let y=Number(m[3]); if(y<100) y+=2000;
+    const mo=Number(m[1]), d=Number(m[2]);
+    const dt=new Date(y,mo-1,d);
+    if(dt.getFullYear()===y && dt.getMonth()===mo-1 && dt.getDate()===d){
+      return `${String(y).padStart(4,'0')}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    }
+    return null;
+  }
+
+  // Backward compatibility for older saved friendly dates.
+  const dt=parseAppDateStr(s);
+  if(!dt || isNaN(dt)) return null;
+  return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+}
+function dailyDateFromFilename(name){
+  const m=String(name||'').match(/(?:^|[_-])(\d{4}-\d{2}-\d{2})(?=(?:\(\d+\))?(?:\.[^.]+)?$)/i)
+       || String(name||'').match(/StockIQ[_ -]?Daily[_ -]?(\d{4}-\d{2}-\d{2})/i);
+  return m ? m[1] : null;
+}
+
 function parseCSV(text) {
   const lines = text.trim().split(/\r?\n/);
   if(lines.length < 2) return [];
@@ -9936,7 +9976,7 @@ function preTop(s,pb,st){
   const executionLine=ix?.arm
     ? `<div style="color:${C.textMuted};font-size:10.5px;margin-top:5px;font-weight:800;">Qualified ${ix.arm.dailyDate} · RSI ${ix.arm.priorRSI==null?'—':Number(ix.arm.priorRSI).toFixed(1)} · SMA50 trigger ${money(ix.arm.trigger)}</div>`
     : '';
-  return `<div style="padding:16px 16px 10px;"><button onclick="showScreen('home')" style="background:none;border:none;color:${C.textSub};padding:0 0 9px;cursor:pointer;">← Back</button><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;"><div style="min-width:0;"><div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;"><span style="color:${C.text};font-size:24px;font-weight:950;">${s.ticker}</span>${badge(st.state)}</div><div style="color:${C.text};font-size:13px;font-weight:700;margin-top:5px;">${companyNameFor(s)}</div>${label?`<div style="color:${C.textSub};font-size:12px;margin-top:3px;">${label}</div>`:''}${executionLine}<div style="color:${C.textMuted};font-size:9px;margin-top:5px;">v2.9.81</div></div><div style="text-align:right;flex-shrink:0;"><div style="color:${C.text};font-size:20px;font-weight:900;margin-bottom:2px;">${money(displayPrice(s))}</div>${liveDayMoveHTML(s,'11px')} ${canBuy?`<button onclick="showV2BuyFlow('${s.id}','${buyLabel}')" style="border:none;border-radius:10px;background:${C.green};color:#000;font-size:13px;font-weight:950;padding:9px 18px;cursor:pointer;box-shadow:0 0 0 1px ${C.green}33;">${buyLabel}</button>`:''}</div></div></div>`;
+  return `<div style="padding:16px 16px 10px;"><button onclick="stockIQBackFromDetail()" style="background:none;border:none;color:${C.textSub};padding:0 0 9px;cursor:pointer;">← Back</button><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;"><div style="min-width:0;"><div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;"><span style="color:${C.text};font-size:24px;font-weight:950;">${s.ticker}</span>${badge(st.state)}</div><div style="color:${C.text};font-size:13px;font-weight:700;margin-top:5px;">${companyNameFor(s)}</div>${label?`<div style="color:${C.textSub};font-size:12px;margin-top:3px;">${label}</div>`:''}${executionLine}<div style="color:${C.textMuted};font-size:9px;margin-top:5px;">v2.9.81</div></div><div style="text-align:right;flex-shrink:0;"><div style="color:${C.text};font-size:20px;font-weight:900;margin-bottom:2px;">${money(displayPrice(s))}</div>${liveDayMoveHTML(s,'11px')} ${canBuy?`<button onclick="showV2BuyFlow('${s.id}','${buyLabel}')" style="border:none;border-radius:10px;background:${C.green};color:#000;font-size:13px;font-weight:950;padding:9px 18px;cursor:pointer;box-shadow:0 0 0 1px ${C.green}33;">${buyLabel}</button>`:''}</div></div></div>`;
 }
 function ownedResearchDetails(s,pb){
   const research = [
@@ -9957,9 +9997,20 @@ function ownedResearchDetails(s,pb){
     + `</details>`;
 }
 
+
+let stockIQDetailReturnScreen='home';
+function stockIQActiveScreen(){
+  const el=document.querySelector('.screen.active');
+  return el?.id?.replace(/^screen-/,'') || 'home';
+}
+function stockIQBackFromDetail(){
+  const target=(stockIQDetailReturnScreen && stockIQDetailReturnScreen!=='detail') ? stockIQDetailReturnScreen : 'home';
+  showScreen(target);
+  if(target==='home') renderHome();
+}
 function renderDetail(s){
   s=withRecentDailyHistory(s);
-  const el=document.getElementById('detail-content'); if(!el)return; const pb=pbFor(s); if(!pb){ const ev=evidenceFor(s), rp=researchPromotionLabel(s); el.innerHTML=`<div style="padding:16px;"><button onclick="showScreen('home')" style="background:none;border:none;color:${C.textSub};padding:0 0 12px;">← Back</button><h2 style="color:${C.text};margin:0;">${s.ticker}</h2>${companyNameFor(s)?`<div style="color:${C.textSub};font-size:13px;margin-top:4px;">${companyNameFor(s)}</div>`:''}<div style="margin-top:12px;color:${rp.color};font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;">${rp.label}${ev?.grade?` · ${ev.grade}`:''}</div>${ev?.family?`<div style="color:${C.text};font-size:13px;font-weight:800;margin-top:8px;">Candidate family: ${ev.family.replaceAll('_',' ')}</div>`:''}<p style="color:${C.textSub};font-size:13px;line-height:1.65;">${ev?.summary||'This ticker can show indicators, but StockIQ will not issue trading signals until it has a validated playbook.'}</p><div style="background:${C.card};border:1px solid ${C.border};border-radius:14px;padding:13px 14px;margin:12px 0;"><div style="color:${C.yellow};font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;margin-bottom:7px;">Promotion gate</div><div style="color:${C.textSub};font-size:12px;line-height:1.6;">Current readiness is not enough. Promotion requires useful trade frequency, positive friction-adjusted expectancy, older/newer or OOS survival, parameter-neighborhood robustness, and tolerable downside. Until that evidence is explicitly approved, this stock stays research-only.</div></div>${indicatorPanel(s,{})}</div>`; return; }
+  const el=document.getElementById('detail-content'); if(!el)return; const pb=pbFor(s); if(!pb){ const ev=evidenceFor(s), rp=researchPromotionLabel(s); el.innerHTML=`<div style="padding:16px;"><button onclick="stockIQBackFromDetail()" style="background:none;border:none;color:${C.textSub};padding:0 0 12px;">← Back</button><h2 style="color:${C.text};margin:0;">${s.ticker}</h2>${companyNameFor(s)?`<div style="color:${C.textSub};font-size:13px;margin-top:4px;">${companyNameFor(s)}</div>`:''}<div style="margin-top:12px;color:${rp.color};font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;">${rp.label}${ev?.grade?` · ${ev.grade}`:''}</div>${ev?.family?`<div style="color:${C.text};font-size:13px;font-weight:800;margin-top:8px;">Candidate family: ${ev.family.replaceAll('_',' ')}</div>`:''}<p style="color:${C.textSub};font-size:13px;line-height:1.65;">${ev?.summary||'This ticker can show indicators, but StockIQ will not issue trading signals until it has a validated playbook.'}</p><div style="background:${C.card};border:1px solid ${C.border};border-radius:14px;padding:13px 14px;margin:12px 0;"><div style="color:${C.yellow};font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;margin-bottom:7px;">Promotion gate</div><div style="color:${C.textSub};font-size:12px;line-height:1.6;">Current readiness is not enough. Promotion requires useful trade frequency, positive friction-adjusted expectancy, older/newer or OOS survival, parameter-neighborhood robustness, and tolerable downside. Until that evidence is explicitly approved, this stock stays research-only.</div></div>${indicatorPanel(s,{})}</div>`; return; }
   const st=stockState(s),checks=(Array.isArray(st?.checks)&&st.checks.length)?st.checks:setupChecks(s),conflict=portfolioConflict(s);
   let html=s.position?positionTop(s,pb,st):preTop(s,pb,st); if(!s.position)html+=detailMetaStrip(s,pb,st); html+=topCallout(s,pb,st);
   if(s.position){
@@ -9974,7 +10025,13 @@ function renderDetail(s){
   else { html+=setupEducationPanel(s,pb,st); html+=panel('Setup Requirements',checklistHTML(checks)); if(['BUY','A+ BUY','TRIGGERED / VERIFY','ENTRY MISSED','ENTRY SIGNAL PASSED'].includes(st.state) || st?.intraday?.arm)html+=entryPanel(s,pb,st); html+=riskPanel(s,pb); html+=regressionPanel(s,pb); html+=earningsPanel(s,pb); html+=marketPanel(s,pb); if(conflict)html+=panel('Portfolio Conflict',`<div style="color:${C.yellow};font-size:12.5px;line-height:1.55;font-weight:700;">${conflict}</div>`); html+=historyPanel(s,pb); html+=yourTradeProofPanel(s,pb); html+=sweetSpotPanel(s,pb); html+=indicatorPanel(s,pb); }
   el.innerHTML=html;
 }
-function openDetail(id){ const s=stocks.find(x=>String(x.id)===String(id)); if(!s)return; showScreen('detail'); renderDetail(s); }
+function openDetail(id){
+  const s=stocks.find(x=>String(x.id)===String(id)); if(!s)return;
+  const from=stockIQActiveScreen();
+  if(from && from!=='detail') stockIQDetailReturnScreen=from;
+  showScreen('detail');
+  renderDetail(s);
+}
 
 // ── Position actions ────────────────────────────────────────────────────────
 function updateV2BuyCalc(changed){
@@ -10072,15 +10129,23 @@ function parseDailyMultiCSV(text){
   text=text.replace(/^\uFEFF/,''); const lines=text.split(/\r?\n/); if(lines.length<2)return {groups:new Map(),headers:[]}; const delim=lines[0].includes('\t')?'\t':','; const headers=splitCSVLine(lines[0],delim); const norm=h=>String(h).toLowerCase().replace(/[^a-z0-9]/g,''); const find=(...alts)=>headers.findIndex(h=>alts.some(a=>norm(h)===norm(a)||norm(h).includes(norm(a))));
   const I={date:find('Date'),ticker:find('Symbol','Ticker'),close:find('Day Close','Close'),livePrice:find('LivePrice'),liveDayPct:find('LiveDayPct'),liveSessionDate:find('LiveSessionDate'),liveAsOfET:find('LiveAsOfET'),open:find('Open'),high:find('High'),low:find('Low'),vol:find('Volume'),rsi:find('RSI14','RSI'),macd:find('MACD'),sig:find('MACDSignal'),atr:find('ATR14','ATR'),atrPct:find('ATRPercentage'),ema20:find('EMA20'),ma50:find('SMA50'),ma200:find('SMA200'),avgvol:find('AvgVol20'),hi52:find('High52W'),lo52:find('Low52W'),regZ126:find('RegZ126'),regSlope126:find('RegSlope126'),regCenter126:find('RegCenter126'),regResidualSD126:find('RegResidualSD126'),sector:find('Sector'),industry:find('Industry'),earn:find('DaysToEarnings','Days To Earnings'),earnDate:find('NextEarningsDate','EarningsDate'),lastEarnDate:find('LastEarningsDate'),earnTime:find('EarningsTime'),earnVerified:find('EarningsVerified'),earnSource:find('EarningsSource'),nearHighSamples:find('NearHigh5PctSamples'),nearHighAvg10:find('NearHighAvgReturn10D'),nearHighWin10:find('NearHighWinRate10D'),nearHighBreakout10:find('NearHighBreakoutRate10D'),nearHighFailure10:find('NearHighFailureRate10D'),nearHighBehavior:find('NearHighBehavior')}; if(I.date<0||I.ticker<0||I.close<0)return {groups:new Map(),headers};
   const groups=new Map(), num=(cols,i)=>{ if(i<0)return null; const v=parseFloat(String(cols[i]??'').replace(/,/g,'')); return Number.isNaN(v)?null:v; }, str=(cols,i)=>{ if(i<0)return null; const v=String(cols[i]??'').trim(); return v===''?null:v; };
-  for(let j=1;j<lines.length;j++){ if(!lines[j].trim())continue; const c=splitCSVLine(lines[j],delim),t=String(c[I.ticker]||'').trim().toUpperCase(); if(!t)continue; const date=parseCSVDate(String(c[I.date]||'').trim()),price=num(c,I.close),atrp=num(c,I.atrPct); const ev=str(c,I.earnVerified); const row={date,price,livePrice:num(c,I.livePrice),liveDayPct:num(c,I.liveDayPct),liveSessionDate:str(c,I.liveSessionDate),liveAsOfET:str(c,I.liveAsOfET),open:num(c,I.open),high:num(c,I.high),low:num(c,I.low),vol:num(c,I.vol),rsi:num(c,I.rsi),macdLine:num(c,I.macd),signalLine:num(c,I.sig),atr:atrp!=null&&price?price*atrp/100:num(c,I.atr),ma20:num(c,I.ema20),ema20:num(c,I.ema20),ma50:num(c,I.ma50),ma200:num(c,I.ma200),avgvol:num(c,I.avgvol),hi52:num(c,I.hi52),lo52:num(c,I.lo52),regZ126:num(c,I.regZ126),regSlope126:num(c,I.regSlope126),regCenter126:num(c,I.regCenter126),regResidualSD126:num(c,I.regResidualSD126),sector:str(c,I.sector),industry:str(c,I.industry),earnOffset:parseEarnOffset(str(c,I.earn)),earnDate:normalizeEarningsDate(str(c,I.earnDate)),lastEarnDate:normalizeEarningsDate(str(c,I.lastEarnDate)),earnTime:str(c,I.earnTime),earnVerified:ev==null?null:/^(yes|true|1|verified)$/i.test(ev),earnSource:str(c,I.earnSource),nearHighSamples:num(c,I.nearHighSamples),nearHighAvg10:num(c,I.nearHighAvg10),nearHighWin10:num(c,I.nearHighWin10),nearHighBreakout10:num(c,I.nearHighBreakout10),nearHighFailure10:num(c,I.nearHighFailure10),nearHighBehavior:str(c,I.nearHighBehavior)}; if(!groups.has(t))groups.set(t,[]); groups.get(t).push(row); }
+  for(let j=1;j<lines.length;j++){ if(!lines[j].trim())continue; const c=splitCSVLine(lines[j],delim),t=String(c[I.ticker]||'').trim().toUpperCase(); if(!t)continue; const rawDate=String(c[I.date]||'').trim(),date=parseCSVDateISO(rawDate),price=num(c,I.close),atrp=num(c,I.atrPct);
+    if(!date) throw new Error(`Invalid Date in daily CSV row ${j+1}: "${rawDate}". Expected YYYY-MM-DD or M/D/YYYY.`); const ev=str(c,I.earnVerified); const row={date,price,livePrice:num(c,I.livePrice),liveDayPct:num(c,I.liveDayPct),liveSessionDate:parseCSVDateISO(str(c,I.liveSessionDate))||date,liveAsOfET:str(c,I.liveAsOfET),open:num(c,I.open),high:num(c,I.high),low:num(c,I.low),vol:num(c,I.vol),rsi:num(c,I.rsi),macdLine:num(c,I.macd),signalLine:num(c,I.sig),atr:atrp!=null&&price?price*atrp/100:num(c,I.atr),ma20:num(c,I.ema20),ema20:num(c,I.ema20),ma50:num(c,I.ma50),ma200:num(c,I.ma200),avgvol:num(c,I.avgvol),hi52:num(c,I.hi52),lo52:num(c,I.lo52),regZ126:num(c,I.regZ126),regSlope126:num(c,I.regSlope126),regCenter126:num(c,I.regCenter126),regResidualSD126:num(c,I.regResidualSD126),sector:str(c,I.sector),industry:str(c,I.industry),earnOffset:parseEarnOffset(str(c,I.earn)),earnDate:normalizeEarningsDate(str(c,I.earnDate)),lastEarnDate:normalizeEarningsDate(str(c,I.lastEarnDate)),earnTime:str(c,I.earnTime),earnVerified:ev==null?null:/^(yes|true|1|verified)$/i.test(ev),earnSource:str(c,I.earnSource),nearHighSamples:num(c,I.nearHighSamples),nearHighAvg10:num(c,I.nearHighAvg10),nearHighWin10:num(c,I.nearHighWin10),nearHighBreakout10:num(c,I.nearHighBreakout10),nearHighFailure10:num(c,I.nearHighFailure10),nearHighBehavior:str(c,I.nearHighBehavior)}; if(!groups.has(t))groups.set(t,[]); groups.get(t).push(row); }
   for(const rows of groups.values())rows.sort((a,b)=>new Date(a.date)-new Date(b.date)); return {groups,headers};
 }
 function showDailyDataFlow(){ showModal(`<div style="background:${C.card};border-radius:20px;padding:24px;border:1px solid ${C.teal}44;"><div style="color:${C.text};font-size:20px;font-weight:900;margin-bottom:6px;">Upload Daily Data</div><div style="color:${C.textSub};font-size:13px;line-height:1.6;margin-bottom:18px;">Use the dynamic multi-ticker daily CSV. StockIQ now imports every ticker in the file — validated names, market ETFs, and newly discovered research candidates. New research names are added automatically but cannot reach the live BUY/PREPARING screen until they have a validated StockIQ playbook. Your trade entries and stops stay untouched.</div><input id="v2-daily-file" type="file" accept=".csv,.txt" multiple style="display:none" onchange="previewV2Daily(this)"><button onclick="document.getElementById('v2-daily-file').click()" style="width:100%;padding:14px;border:none;border-radius:12px;background:${C.teal};color:#000;font-weight:900;cursor:pointer;">Select Daily CSV</button></div>`); }
 async function previewV2Daily(input){
   const files=[...(input.files||[])]; if(!files.length)return;
+  try{
   const merged=new Map(); let headers=[];
   for(const f of files){
     const text=await f.text(); const parsed=parseDailyMultiCSV(text); headers=headers.length?headers:parsed.headers;
+    const fileDate=dailyDateFromFilename(f.name);
+    const csvDates=new Set();
+    parsed.groups.forEach(rows=>rows.forEach(r=>{ if(r?.date) csvDates.add(r.date); }));
+    if(fileDate && csvDates.size && !csvDates.has(fileDate)){
+      throw new Error(`Daily file date mismatch: "${f.name}" says ${fileDate}, but the CSV contains ${[...csvDates].sort().join(', ')}.`);
+    }
     parsed.groups.forEach((rows,t)=>{ if(!merged.has(t)) merged.set(t,[]); merged.get(t).push(...rows); });
   }
   merged.forEach(rows=>{ const byDate=new Map(); rows.forEach(r=>byDate.set(r.date,r)); rows.splice(0,rows.length,...[...byDate.values()].sort((a,b)=>new Date(a.date)-new Date(b.date))); });
@@ -10088,6 +10153,11 @@ async function previewV2Daily(input){
   const corePresent=CORE_TICKERS.filter(t=>merged.has(t)); const benchPresent=BENCH_TICKERS.filter(t=>merged.has(t)); const marketPresent=MARKET_TICKERS.filter(t=>merged.has(t));
   const dynamicResearch=[...merged.keys()].filter(t=>!CORE_TICKERS.includes(t)&&!BENCH_TICKERS.includes(t)&&!MARKET_TICKERS.includes(t)); window._v2PendingDaily=parsed;
   showModal(`<div style="background:${C.card};border-radius:20px;padding:24px;border:1px solid ${C.border};"><div style="color:${C.text};font-size:19px;font-weight:900;margin-bottom:14px;">Ready to Update</div><div style="color:${C.textSub};font-size:12px;line-height:1.7;margin-bottom:14px;">${files.length} file${files.length===1?'':'s'} · ${merged.size} tickers · ${corePresent.length}/${CORE_TICKERS.length} legacy validated · ${benchPresent.length}/${BENCH_TICKERS.length} bench/reserve · ${dynamicResearch.length} dynamic research · ${marketPresent.length} market ETFs · latest date ${dates.sort().slice(-1)[0]||'—'}</div><div style="color:${C.yellow};font-size:11.5px;line-height:1.55;margin-bottom:14px;">Dynamic research names are loaded into the local daily-data layer for review, but they stay off the live trading screen until their playbook is validated.</div><button onclick="applyV2Daily()" style="width:100%;padding:13px;border:none;border-radius:11px;background:${C.green};color:#000;font-weight:900;">Update StockIQ</button></div>`);
+  }catch(e){
+    console.error('Daily CSV preview failed',e);
+    const msg=e?.message||String(e);
+    showModal(`<div style="background:${C.card};border-radius:20px;padding:24px;border:1px solid ${C.red}55;"><div style="color:${C.red};font-size:19px;font-weight:900;margin-bottom:10px;">Daily Upload Stopped</div><div style="color:${C.textSub};font-size:13px;line-height:1.6;margin-bottom:16px;">${msg}</div><button onclick="showDailyDataFlow()" style="width:100%;padding:12px;border:none;border-radius:10px;background:${C.text};color:${C.bg};font-weight:900;">Choose File Again</button></div>`);
+  }
 }
 function dailyPersistenceCopy(stock){
   // Keep the rich in-memory object for analysis, but do NOT rewrite hundreds
@@ -11052,7 +11122,7 @@ async function applyV2IntradayFile(input){
 // ── v2 initialization ────────────────────────────────────────────────────────
 (function initStockIQV2(){
   const style=document.createElement('style'); style.textContent=`.v2lbl{color:${C.textSub};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}.v2val{color:${C.text};font-size:14px;font-weight:900}.v2big{color:${C.text};font-size:18px;font-weight:950}`; document.head.appendChild(style);
-  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.81 · Persist Verified Entry Signal';
+  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.82 · Daily Date + Back Navigation Fix';
   const topButtons=[...document.querySelectorAll('button')]; const add=topButtons.find(b=>b.textContent.includes('Add Stock')); if(add){ add.style.display='none'; add.setAttribute('aria-hidden','true'); add.tabIndex=-1; } const scan=topButtons.find(b=>b.textContent.includes('Import Scan')); if(scan){scan.textContent='Daily Data';scan.onclick=showDailyDataFlow;scan.setAttribute('aria-label','Upload daily multi-ticker data');}
   if(scan && !document.getElementById('intraday-data-btn')){ const b=document.createElement('button'); b.id='intraday-data-btn'; b.textContent='Intraday Data'; b.onclick=showIntradayDataFlow; b.setAttribute('aria-label','Upload current 30-minute execution data'); b.style.cssText=scan.style.cssText; b.style.borderColor=C.yellow; b.style.color=C.yellow; scan.parentNode.insertBefore(b,scan.nextSibling); }
   if(scan && !document.getElementById('sunday-discovery-btn')){ const b=document.createElement('button'); b.id='sunday-discovery-btn'; b.textContent='Sunday Discovery'; b.onclick=showSundayDiscoveryFlow; b.setAttribute('aria-label','Upload Sunday scanner discovery report'); b.style.cssText=scan.style.cssText; b.style.borderColor=C.purple; b.style.color=C.purple; const anchor=document.getElementById('intraday-data-btn')||scan; anchor.parentNode.insertBefore(b,anchor.nextSibling); }
@@ -11235,7 +11305,7 @@ function showSundayDiscoveryFlow(){
     </div>
   </div>`);
 }
-(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.81 · Persist Verified Entry Signal';})();
+(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.82 · Daily Date + Back Navigation Fix';})();
 
 // ── v2.9.54 HISTORY LIFECYCLE ──────────────────────────────────────
 // Research is no longer a catch-all. The visible Research tab contains only:
@@ -11477,7 +11547,7 @@ function renderStockList(){
 }
 
 (function v2953Init(){
-  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.81 · Persist Verified Entry Signal';
+  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.82 · Daily Date + Back Navigation Fix';
   // Safe cleanup on load: de-duplicate queue and remove only records that already
   // have evidence. Genuine pending Sunday names are never deleted automatically.
   try{ applyResearchReconciliation(true); }catch(e){ console.warn('Research reconciliation init failed',e); }
@@ -11710,8 +11780,8 @@ saveV2Close=async function(id){
 auth.onAuthStateChanged(user=>{ if(user){ loadSignalLedger(); syncSignalLedgerFromCloud(); } else { SIGNAL_LEDGER=[]; } });
 loadSignalLedger();
 setTimeout(()=>{ try{ updateAndCaptureSignals(); renderFilterBar(); }catch(e){ console.warn('Signal ledger init failed',e); } },800);
-const _v2965Version=document.getElementById('stockiq-version'); if(_v2965Version)_v2965Version.textContent='StockIQ v2.9.81 · Persist Verified Entry Signal';
-// v2.9.81: preserves verified intraday BUY signals across later-session uploads. A valid 8/17 MTSI signal can no longer disappear or revert to PREPARING when 8/18 data is uploaded; if no position was recorded it becomes ENTRY SIGNAL PASSED.
+const _v2965Version=document.getElementById('stockiq-version'); if(_v2965Version)_v2965Version.textContent='StockIQ v2.9.82 · Daily Date + Back Navigation Fix';
+// v2.9.82: preserves the v2.9.81 verified-entry persistence logic; fixes canonical daily CSV dates, filename/date validation, and Detail Back navigation.
 [...document.querySelectorAll('button')].filter(b=>/^(\+\s*)?(Add Stock|Research)$/i.test((b.textContent||'').trim())).forEach(b=>{ if(!b.closest('#tag-bar')){ b.style.display='none'; b.setAttribute('aria-hidden','true'); b.tabIndex=-1; } });
 </script>
 
