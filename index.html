@@ -95,7 +95,7 @@ input[type=number]{-moz-appearance:textfield;}
   <div id="portfolio-box"></div>
   <div id="position-watch"></div>
   <!-- Tonight's Best Opportunities — the ranking engine -->
-  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">v2.9.89 · Sold Position Reconciliation Fix</div>
+  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">v2.9.90 · Sold Position Reconciliation Fix</div>
   <div id="tonights-opportunities"></div>
   <!-- Filter tags + sort -->
   <div id="filter-bar" style="background:#11141C;border-bottom:1px solid #1E2230;padding:9px 20px;"></div>
@@ -997,7 +997,7 @@ function renderFilterBar() {
     <div style="display:flex;gap:7px;overflow-x:auto;margin-bottom:9px;">${tags}</div>
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
       <div style="display:flex;align-items:center;gap:6px;">
-        <span style="color:${C.textMuted};font-size:11px;">Family:</span>
+        <span style="color:${C.textMuted};font-size:11px;font-weight:800;">Filter by Family Trend:</span>
         <select onchange="setFamilyFilter(this.value)" style="background:${C.cardHigh};border:1px solid ${C.borderLight};border-radius:8px;color:${C.textSub};font-size:11px;font-weight:700;padding:5px 8px;outline:none;max-width:180px;">
           ${families.map(f=>`<option value="${f}" ${familyFilter===f?'selected':''}>${f}</option>`).join('')}
         </select>
@@ -1303,7 +1303,7 @@ function computeSimpleAction(s) {
 const SIMPLE_ACTION_META = {BUY:{color:C.green}, WATCH:{color:'#3B82F6'}, WAIT:{color:C.yellow}, HOLD:{color:C.teal}, EXIT:{color:C.red}};
 
 
-// v2.9.89: Reconcile stale open-position records against a completed full SELL.
+// v2.9.90: Reconcile stale open-position records against a completed full SELL.
 // This prevents a ticker from reappearing in BOUGHT after the sell history shows
 // the entire position was closed. New SELL records carry an explicit fullExit flag;
 // older records use a conservative same-entry/same-shares fallback.
@@ -7930,10 +7930,10 @@ const ACTIVE_BENCH_MAX = 8;
 const RESERVE_BENCH_MAX = 10;
 const PROFIT_CHECKPOINT_PCT = 6;
 const MARKET_TICKERS = ['SPY','QQQ','SOXX','XLE','XLK','XLI','XLY','XLF','XLV','VIX','^VIX'];
-const PRIMARY_POSITION_TARGET = 3; // v2.9.89: three normal positions may be funded when risk capacity is available
+const PRIMARY_POSITION_TARGET = 3; // v2.9.90: three normal positions may be funded when risk capacity is available
 const DEFAULT_MAX_POSITIONS = 3; // hard normal position cap from portfolio stress testing
 const DEFAULT_MAX_RISK_DOLLARS = 100;
-const MAX_PORTFOLIO_RISK_PCT = 2.25; // v2.9.89: maximum planned stop risk across all open + newly selected trades
+const MAX_PORTFOLIO_RISK_PCT = 2.25; // v2.9.90: maximum planned stop risk across all open + newly selected trades
 
 // ── PROMOTION GATE · v2.9.18 ────────────────────────────────────────────────
 // Discovery is allowed to be broad. Trading permission is not.
@@ -8306,7 +8306,7 @@ function liveDayMoveHTML(s,fontSize='11px'){
   const cmpColor=cmp.delta==null?C.textMuted:(cmp.delta>=0?C.green:C.red);
   return `<div style="font-size:${fontSize};font-weight:900;white-space:nowrap;line-height:1.45;">`+
     `<div><span style="color:${C.textMuted};font-size:.88em;font-weight:800;">Today</span> <span style="color:${todayColor};">${todayPct==null?'—':pctFmt(todayPct,2)}</span></div>`+
-    `<div title="${cmp.label}"><span style="color:${C.textMuted};font-size:.88em;font-weight:800;">Vs Previous Day</span> <span style="color:${cmpColor};">${cmp.delta==null?'—':`${cmp.delta>=0?'+':''}${cmp.delta.toFixed(2)} pts`}</span> <span style="color:${cmp.color};font-size:1.12em;">${cmp.arrow}</span></div>`+
+    `<div title="${cmp.label}"><span style="color:${C.textMuted};font-size:.88em;font-weight:800;">Vs Previous Day</span> <span style="color:${cmpColor};">${cmp.delta==null?'—':`${cmp.delta>=0?'+':''}${cmp.delta.toFixed(2)}%`}</span> <span style="color:${cmp.color};font-size:1.12em;">${cmp.arrow}</span></div>`+
   `</div>`;
 }
 function pctFmt(v,d=1){ return v==null?'—':`${v>=0?'+':''}${Number(v).toFixed(d)}%`; }
@@ -9170,7 +9170,7 @@ function liveCandidateItems(){
 // rank first, fund only the best few, and keep a portfolio-level risk ceiling.
 // A+ never receives larger risk simply for being A+ — evidence/downside set size.
 function evidenceRiskPct(s){
-  // v2.9.89 risk lock: setup quality changes priority, not the normal risk percentage.
+  // v2.9.90 risk lock: setup quality changes priority, not the normal risk percentage.
   // Every normal StockIQ trade starts at 0.75% planned account risk.
   return 0.75;
 }
@@ -10081,7 +10081,7 @@ function positionTop(s,pb,st){
         <div style="text-align:right;min-width:170px;">
           <div style="font-size:23px;font-weight:950;color:${C.text};">${money(curVal(s,'price'))}</div>
           <div style="font-size:12px;font-weight:900;margin-top:5px;color:${todayPct==null?C.textMuted:(todayPct>=0?C.green:C.red)};">Today ${todayPct==null?'—':pctFmt(todayPct)}</div>
-          <div title="${dayCmp.label||''}" style="font-size:12px;font-weight:900;margin-top:3px;color:${dayCmp.delta==null?C.textMuted:(dayCmp.delta>=0?C.green:C.red)};">Vs Previous Day ${dayCmp.delta==null?'—':`${dayCmp.delta>=0?'+':''}${dayCmp.delta.toFixed(1)} pts`} <span style="color:${dayCmp.color};">${dayCmp.arrow||''}</span></div>
+          <div title="${dayCmp.label||''}" style="font-size:12px;font-weight:900;margin-top:3px;color:${dayCmp.delta==null?C.textMuted:(dayCmp.delta>=0?C.green:C.red)};">Vs Previous Day ${dayCmp.delta==null?'—':`${dayCmp.delta>=0?'+':''}${dayCmp.delta.toFixed(1)}%`} <span style="color:${dayCmp.color};">${dayCmp.arrow||''}</span></div>
         </div>
       </div>
 
@@ -10100,17 +10100,22 @@ function positionTop(s,pb,st){
     </div>
 
     <div style="background:${C.card};border:2px solid ${action.color}66;border-radius:16px;padding:16px;margin-bottom:12px;">
-      <div class="v2lbl">WHAT TO DO NOW</div>
-      <div style="font-size:23px;font-weight:950;color:${action.color};margin-top:3px;">${action.label}</div>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:18px;">
+        <div style="min-width:0;flex:1;">
+          <div class="v2lbl">WHAT TO DO NOW</div>
+          <div style="font-size:23px;font-weight:950;color:${action.color};margin-top:3px;">${action.label}</div>
+        </div>
+        <div style="text-align:right;min-width:125px;padding-left:12px;border-left:1px solid ${C.border};">
+          <div class="v2lbl">TRADE RESULT</div>
+          <div style="font-size:24px;font-weight:950;color:${gain==null?C.text:(gain>=0?C.green:C.red)};margin-top:3px;line-height:1.05;">${gain==null?'—':pctFmt(gain)}</div>
+          ${s.position?.entry&&curVal(s,'price')!=null&&s.position?.shares?`<div style="font-size:11.5px;font-weight:850;color:${((curVal(s,'price')-s.position.entry)*s.position.shares)>=0?C.green:C.red};margin-top:5px;">${((curVal(s,'price')-s.position.entry)*s.position.shares)>=0?'+':''}${money((curVal(s,'price')-s.position.entry)*s.position.shares)}</div>`:''}
+        </div>
+      </div>
       <div style="font-size:14px;font-weight:900;color:${C.text};line-height:1.5;margin-top:8px;">${action.action}</div>
       <div style="margin-top:12px;padding-top:11px;border-top:1px solid ${C.border};display:grid;grid-template-columns:1fr;gap:8px;">
         <div><div class="v2lbl">WHY</div><div style="font-size:12.5px;line-height:1.5;color:${C.text};font-weight:800;margin-top:3px;">${action.why}</div></div>
         <div><div class="v2lbl">WHEN TO GET OUT</div><div style="font-size:12.5px;line-height:1.5;color:${C.text};font-weight:850;margin-top:3px;">${action.sellIf}</div></div>
         <div><div class="v2lbl">NEXT DECISION</div><div style="font-size:12.5px;line-height:1.5;color:${C.textSub};font-weight:800;margin-top:3px;">${action.next}</div></div>
-      </div>
-      <div style="margin-top:11px;padding-top:10px;border-top:1px solid ${C.border};display:flex;justify-content:space-between;gap:12px;align-items:center;">
-        <div><div class="v2lbl">TRADE RESULT</div><div style="font-size:17px;font-weight:950;color:${gain==null?C.text:(gain>=0?C.green:C.red)};margin-top:2px;">${gain==null?'—':pctFmt(gain)}</div></div>
-        <div style="text-align:right;"><div class="v2lbl">CURRENT FAMILY</div><div style="font-size:11.5px;font-weight:900;color:${C.text};margin-top:2px;">${trend}</div></div>
       </div>
     </div>`;
 }
@@ -10120,7 +10125,7 @@ function preTop(s,pb,st){
   const executionLine=ix?.arm
     ? `<div style="color:${C.textMuted};font-size:10.5px;margin-top:5px;font-weight:800;">Qualified ${ix.arm.dailyDate} · RSI ${ix.arm.priorRSI==null?'—':Number(ix.arm.priorRSI).toFixed(1)} · SMA50 trigger ${money(ix.arm.trigger)}</div>`
     : '';
-  return `<div style="padding:16px 16px 10px;"><button onclick="stockIQBackFromDetail()" style="background:none;border:none;color:${C.textSub};padding:0 0 9px;cursor:pointer;">← Back</button><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;"><div style="min-width:0;"><div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;"><span style="color:${C.text};font-size:24px;font-weight:950;">${s.ticker}</span>${badge(st.state)}</div><div style="color:${C.text};font-size:13px;font-weight:700;margin-top:5px;">${companyNameFor(s)}</div>${label?`<div style="color:${C.textSub};font-size:12px;margin-top:3px;">${label}</div>`:''}${executionLine}<div style="color:${C.textMuted};font-size:9px;margin-top:5px;">v2.9.89</div></div><div style="text-align:right;flex-shrink:0;"><div style="color:${C.text};font-size:20px;font-weight:900;margin-bottom:2px;">${money(displayPrice(s))}</div>${liveDayMoveHTML(s,'11px')} ${canBuy?`<button onclick="showV2BuyFlow('${s.id}','${buyLabel}')" style="border:none;border-radius:10px;background:${C.green};color:#000;font-size:13px;font-weight:950;padding:9px 18px;cursor:pointer;box-shadow:0 0 0 1px ${C.green}33;">${buyLabel}</button>`:''}</div></div></div>`;
+  return `<div style="padding:16px 16px 10px;"><button onclick="stockIQBackFromDetail()" style="background:none;border:none;color:${C.textSub};padding:0 0 9px;cursor:pointer;">← Back</button><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;"><div style="min-width:0;"><div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;"><span style="color:${C.text};font-size:24px;font-weight:950;">${s.ticker}</span>${badge(st.state)}</div><div style="color:${C.text};font-size:13px;font-weight:700;margin-top:5px;">${companyNameFor(s)}</div>${label?`<div style="color:${C.textSub};font-size:12px;margin-top:3px;">${label}</div>`:''}${executionLine}<div style="color:${C.textMuted};font-size:9px;margin-top:5px;">v2.9.90</div></div><div style="text-align:right;flex-shrink:0;"><div style="color:${C.text};font-size:20px;font-weight:900;margin-bottom:2px;">${money(displayPrice(s))}</div>${liveDayMoveHTML(s,'11px')} ${canBuy?`<button onclick="showV2BuyFlow('${s.id}','${buyLabel}')" style="border:none;border-radius:10px;background:${C.green};color:#000;font-size:13px;font-weight:950;padding:9px 18px;cursor:pointer;box-shadow:0 0 0 1px ${C.green}33;">${buyLabel}</button>`:''}</div></div></div>`;
 }
 function ownedResearchDetails(s,pb){
   const research = [
@@ -11331,7 +11336,7 @@ async function applyV2IntradayFile(input){
 // ── v2 initialization ────────────────────────────────────────────────────────
 (function initStockIQV2(){
   const style=document.createElement('style'); style.textContent=`.v2lbl{color:${C.textSub};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}.v2val{color:${C.text};font-size:14px;font-weight:900}.v2big{color:${C.text};font-size:18px;font-weight:950}`; document.head.appendChild(style);
-  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.89 · Sold Position Reconciliation Fix';
+  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.90 · Sold Position Reconciliation Fix';
   const topButtons=[...document.querySelectorAll('button')]; const add=topButtons.find(b=>b.textContent.includes('Add Stock')); if(add){ add.style.display='none'; add.setAttribute('aria-hidden','true'); add.tabIndex=-1; } const scan=topButtons.find(b=>b.textContent.includes('Import Scan')); if(scan){scan.textContent='Daily Data';scan.onclick=showDailyDataFlow;scan.setAttribute('aria-label','Upload daily multi-ticker data');}
   if(scan && !document.getElementById('intraday-data-btn')){ const b=document.createElement('button'); b.id='intraday-data-btn'; b.textContent='Intraday Data'; b.onclick=showIntradayDataFlow; b.setAttribute('aria-label','Upload current 30-minute execution data'); b.style.cssText=scan.style.cssText; b.style.borderColor=C.yellow; b.style.color=C.yellow; scan.parentNode.insertBefore(b,scan.nextSibling); }
   if(scan && !document.getElementById('sunday-discovery-btn')){ const b=document.createElement('button'); b.id='sunday-discovery-btn'; b.textContent='Sunday Discovery'; b.onclick=showSundayDiscoveryFlow; b.setAttribute('aria-label','Upload Sunday scanner discovery report'); b.style.cssText=scan.style.cssText; b.style.borderColor=C.purple; b.style.color=C.purple; const anchor=document.getElementById('intraday-data-btn')||scan; anchor.parentNode.insertBefore(b,anchor.nextSibling); }
@@ -11514,7 +11519,7 @@ function showSundayDiscoveryFlow(){
     </div>
   </div>`);
 }
-(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.89 · Sold Position Reconciliation Fix';})();
+(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.90 · Sold Position Reconciliation Fix';})();
 
 // ── v2.9.54 HISTORY LIFECYCLE ──────────────────────────────────────
 // Research is no longer a catch-all. The visible Research tab contains only:
@@ -11756,7 +11761,7 @@ function renderStockList(){
 }
 
 (function v2953Init(){
-  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.89 · Sold Position Reconciliation Fix';
+  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.90 · Sold Position Reconciliation Fix';
   // Safe cleanup on load: de-duplicate queue and remove only records that already
   // have evidence. Genuine pending Sunday names are never deleted automatically.
   try{ applyResearchReconciliation(true); }catch(e){ console.warn('Research reconciliation init failed',e); }
@@ -11989,7 +11994,7 @@ saveV2Close=async function(id){
 auth.onAuthStateChanged(user=>{ if(user){ loadSignalLedger(); syncSignalLedgerFromCloud(); } else { SIGNAL_LEDGER=[]; } });
 loadSignalLedger();
 setTimeout(()=>{ try{ updateAndCaptureSignals(); renderFilterBar(); }catch(e){ console.warn('Signal ledger init failed',e); } },800);
-const _v2965Version=document.getElementById('stockiq-version'); if(_v2965Version)_v2965Version.textContent='StockIQ v2.9.89 · Sold Position Reconciliation Fix';
+const _v2965Version=document.getElementById('stockiq-version'); if(_v2965Version)_v2965Version.textContent='StockIQ v2.9.90 · Sold Position Reconciliation Fix';
 // v2.9.82: preserves the v2.9.81 verified-entry persistence logic; fixes canonical daily CSV dates, filename/date validation, and Detail Back navigation.
 [...document.querySelectorAll('button')].filter(b=>/^(\+\s*)?(Add Stock|Research)$/i.test((b.textContent||'').trim())).forEach(b=>{ if(!b.closest('#tag-bar')){ b.style.display='none'; b.setAttribute('aria-hidden','true'); b.tabIndex=-1; } });
 </script>
