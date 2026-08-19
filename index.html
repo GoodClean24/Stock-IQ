@@ -9275,7 +9275,7 @@ function capitalPlanBox(){
   if(!plan.ready) return `<div style="background:${C.card};border-radius:16px;border:1px solid ${C.blue}55;padding:15px 16px;margin:0 16px 12px;"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px;"><div><div style="color:${C.blue};font-size:10px;text-transform:uppercase;letter-spacing:.09em;font-weight:950;">Capital Plan</div><div style="color:${C.textSub};font-size:12px;line-height:1.5;margin-top:5px;">There are ${plan.buys.length} valid BUY${plan.buys.length===1?'':'s'}, but StockIQ will not pretend they all deserve money. Set your trading capital so it can fund only the highest-ranked few.</div></div><button onclick="setAccountSize()" style="border:none;border-radius:9px;background:${C.green};color:#000;padding:9px 11px;font-size:11px;font-weight:900;cursor:pointer;white-space:nowrap;">Set capital</button></div></div>`;
   const funded=plan.rows.filter(r=>r.status==='FUND');
   const backups=plan.rows.filter(r=>r.status!=='FUND');
-  const row=r=>{const pct=r.status==='FUND'&&accountSize>0?(r.amount/accountSize*100):null; const sh=r.status==='FUND'&&r.shares>0?r.shares:null; return `<div style="display:grid;grid-template-columns:62px 1fr auto;gap:8px;align-items:center;padding:9px 0;border-bottom:1px solid ${C.border};"><span style="color:${r.status==='FUND'?C.green:C.textMuted};font-size:10px;font-weight:950;">${r.status}</span><div><div style="color:${C.text};font-size:13px;font-weight:900;">${r.s.ticker} <span style="color:${C.textMuted};font-size:9px;">${evidenceFor(r.s)?.grade||pbFor(r.s)?.confidence||''}</span></div><div style="color:${C.textSub};font-size:10.5px;line-height:1.4;margin-top:2px;">${r.why}</div></div><div style="text-align:right;"><div style="color:${r.status==='FUND'?C.text:C.textMuted};font-size:12px;font-weight:900;white-space:nowrap;">${r.status==='FUND'?`Invest up to ${money(r.amount)}`:'—'}</div>${r.status==='FUND'?`<div style="color:${C.textMuted};font-size:9px;white-space:nowrap;">~${sh.toFixed(2)} shares · ${pct.toFixed(1)}% capital · risk ${money(r.risk)}</div>`:''}</div></div>`;};
+  const row=r=>{const pct=r.status==='FUND'&&accountSize>0?(r.amount/accountSize*100):null; const sh=r.status==='FUND'&&r.shares>0?r.shares:null; return `<div style="display:grid;grid-template-columns:62px 1fr auto;gap:8px;align-items:center;padding:9px 0;border-bottom:1px solid ${C.border};"><span style="color:${r.status==='FUND'?C.green:C.textMuted};font-size:10px;font-weight:950;">${r.status}</span><div><div style="color:${C.text};font-size:13px;font-weight:900;">${r.s.ticker} <span style="color:${C.textMuted};font-size:9px;">${evidenceTagForDisplay(r.s)}</span></div><div style="color:${C.textSub};font-size:10.5px;line-height:1.4;margin-top:2px;">${r.why}</div></div><div style="text-align:right;"><div style="color:${r.status==='FUND'?C.text:C.textMuted};font-size:12px;font-weight:900;white-space:nowrap;">${r.status==='FUND'?`Invest up to ${money(r.amount)}`:'—'}</div>${r.status==='FUND'?`<div style="color:${C.textMuted};font-size:9px;white-space:nowrap;">~${sh.toFixed(2)} shares · ${pct.toFixed(1)}% capital · risk ${money(r.risk)}</div>`:''}</div></div>`;};
   const committedRisk=Math.max(0,plan.maxRisk-plan.remainingRisk), committedCash=Math.max(0,accountSize-plan.remainingCash);
   return `<div style="background:${C.card};border-radius:16px;border:1px solid ${C.blue}55;padding:15px 16px;margin:0 16px 12px;"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:6px;"><div><div style="color:${C.blue};font-size:10px;text-transform:uppercase;letter-spacing:.09em;font-weight:950;">Capital Plan · Fund the best, not all</div><div style="color:${C.textSub};font-size:11px;line-height:1.45;margin-top:4px;">Up to ${DEFAULT_MAX_POSITIONS} normal positions · ${MAX_PORTFOLIO_RISK_PCT.toFixed(2)}% maximum total planned risk · each normal trade starts at 0.75% planned risk.</div></div><button onclick="setAccountSize()" style="background:none;border:1px solid ${C.border};border-radius:8px;color:${C.textSub};padding:6px 8px;font-size:10px;font-weight:800;cursor:pointer;">${money(accountSize)}</button></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0 4px;"><div style="background:${C.cardHigh};border-radius:9px;padding:8px 9px;"><div class="v2lbl">Capital committed</div><div style="color:${C.text};font-size:12px;font-weight:900;">${money(committedCash)} / ${money(accountSize)}</div></div><div style="background:${C.cardHigh};border-radius:9px;padding:8px 9px;"><div class="v2lbl">Stop risk committed</div><div style="color:${C.text};font-size:12px;font-weight:900;">${money(committedRisk)} / ${money(plan.maxRisk)}</div></div></div>${plan.rows.map(row).join('')}<div style="color:${C.textMuted};font-size:10px;line-height:1.45;margin-top:8px;">Wide validated stops can intentionally leave cash unused. Do not increase size just to deploy cash. Planned stop risk uses the position's active stop, but gaps can still execute below it and create a larger loss.</div></div>`;
 }
@@ -9295,9 +9295,9 @@ function renderTonightsOpportunities(){
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;"><div style="color:${C.teal};font-size:10px;text-transform:uppercase;letter-spacing:.09em;font-weight:950;">Bought Positions</div><div style="color:${C.textMuted};font-size:10px;">Always shown · ${owned.length} open</div></div>
     ${owned.map(x=>{const s=x.s,st=x.state?.state||'BOUGHT',pb=pbFor(s),p=curVal(s,'price'),entry=Number(s.position?.entry||0),shares=Number(s.position?.shares||0),pl=(p!=null&&entry&&shares)?(p-entry)*shares:null,plPct=(p!=null&&entry)?((p/entry)-1)*100:null,tier=s.position?.signalTier||'BUY';return `<div onclick="openDetail('${s.id}')" style="padding:11px 0;border-bottom:1px solid ${C.border};cursor:pointer;"><div style="display:flex;align-items:center;justify-content:space-between;gap:8px;"><div style="display:flex;align-items:center;gap:8px;min-width:0;"><span style="color:${C.text};font-size:15px;font-weight:950;">${s.ticker}</span>${badge(st)}<span style="color:${tier==='A+ BUY'?C.green:C.textMuted};font-size:9px;font-weight:900;">${tier}</span></div><div style="text-align:right;flex-shrink:0;"><div style="color:${pl==null?C.textSub:(pl>=0?C.green:C.red)};font-size:13px;font-weight:950;">${pl==null?'—':`${pl>=0?'+':''}${fmtP(pl)}`}</div><div style="color:${C.textMuted};font-size:10px;">${plPct==null?'':`${plPct>=0?'+':''}${plPct.toFixed(1)}%`} · Day ${x.state?.day||1}/${pb?.hold||'—'}</div></div></div><div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:6px;color:${C.textSub};font-size:10.5px;"><span>Entry ${money(entry)}</span><span>${shares} shares</span><span>Now ${money(p)}</span></div><div style="color:${C.textSub};font-size:11.5px;line-height:1.45;margin-top:5px;">${x.state?.reason||'Position is open.'}</div></div>`;}).join('')}</div>`:'';
 
-  const row=x=>{const st=x.state.state,conf=portfolioConflict(x.s),pb=pbFor(x.s);return `<div onclick="openDetail('${x.s.id}')" style="padding:10px 0;border-bottom:1px solid ${C.border};cursor:pointer;"><div style="display:flex;align-items:center;justify-content:space-between;gap:8px;"><div style="display:flex;align-items:center;gap:8px;"><span style="color:${C.text};font-size:14px;font-weight:900;">${x.s.ticker}</span>${badge(st)}<span style="color:${C.textMuted};font-size:9px;font-weight:850;">${pb?.name||'Validated playbook'}</span></div><span style="color:${C.textSub};font-size:11px;">${['BUY','A+ BUY'].includes(st)?`Buy up to ${money(buyUpTo(x.s))}`:''}</span></div><div style="color:${C.textSub};font-size:11.5px;line-height:1.45;margin-top:4px;">${conf||x.state.reason}</div></div>`;};
+  const row=x=>{const st=x.state.state,conf=portfolioConflict(x.s),pb=pbFor(x.s);return `<div onclick="openDetail('${x.s.id}')" style="padding:10px 0;border-bottom:1px solid ${C.border};cursor:pointer;"><div style="display:flex;align-items:center;justify-content:space-between;gap:8px;"><div style="display:flex;align-items:center;gap:8px;"><span style="color:${C.text};font-size:14px;font-weight:900;">${x.s.ticker}</span>${badge(st)}<span style="color:${C.textMuted};font-size:9px;font-weight:850;">${evidenceTagForDisplay(x.s)?`${evidenceTagForDisplay(x.s)} · `:''}${trendTypeLabel(x.s,pb)}</span></div><span style="color:${C.textSub};font-size:11px;">${['BUY','A+ BUY'].includes(st)?`Buy up to ${money(buyUpTo(x.s))}`:''}</span></div><div style="color:${C.textSub};font-size:11.5px;line-height:1.45;margin-top:4px;">${conf||x.state.reason}</div></div>`;};
 
-  const buyBox=buys.length?`<div style="background:${C.card};border-radius:16px;border:1px solid ${C.green}66;padding:16px;margin:0 16px 12px;"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;"><div style="color:${C.green};font-size:10px;text-transform:uppercase;letter-spacing:.09em;font-weight:950;">Buy / A+ Buy</div><div style="color:${C.textMuted};font-size:10px;">Actionable now · ${buys.length} · max ${LIVE_CANDIDATE_CAP}</div></div>${buys.map(row).join('')}</div>`:'';
+  const buyBox=buys.length?`<div style="background:${C.card};border-radius:16px;border:1px solid ${C.green}66;padding:16px;margin:0 16px 12px;"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;"><div style="color:${C.green};font-size:10px;text-transform:uppercase;letter-spacing:.09em;font-weight:950;">Buy / A+ Buy</div><div style="color:${C.textMuted};font-size:10px;">Actionable now · ${buys.length} · max ${LIVE_CANDIDATE_CAP}</div></div>${buys.map(row).join('')}${evidenceLegendHTML(buys)}</div>`:'';
   // PREPARING names are intentionally not rendered here. They already appear in the
   // Ready Now list below, so a second yellow Getting Ready panel only duplicates
   // the same information and adds vertical clutter.
@@ -9376,10 +9376,10 @@ function renderStockList(){
   }
 }
 function renderStockCard(s){
-  const st=safeStockState(s), pb=pbFor(s), price=displayPrice(s), reg=regressionStats(s), conflict=portfolioConflict(s); if(!pb){ const ev=evidenceFor(s), rp=researchPromotionLabel(s); return `<div onclick="openDetail('${s.id}')" style="background:${C.card};border:1px solid ${ev?rp.color+'55':C.border};border-radius:15px;padding:14px 16px;cursor:pointer;"><div style="display:flex;justify-content:space-between;gap:10px;"><div><div style="display:flex;align-items:center;gap:8px;"><span style="color:${C.text};font-weight:900;">${s.ticker}</span><span style="color:${rp.color};font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:.05em;">${rp.label}</span></div>${ev?`<div style="color:${C.textMuted};font-size:10px;margin-top:4px;">${ev.family?ev.family.replaceAll('_',' '):'Research'} · ${ev.grade||'UNRATED'}</div>`:''}</div><span style="color:${C.text};font-weight:800;">${money(price)}</span></div><div style="color:${C.textSub};font-size:11px;line-height:1.45;margin-top:7px;">${ev?.summary||'No validated StockIQ playbook yet. Current technical readiness cannot promote this ticker by itself.'}</div></div>`;}
+  const st=safeStockState(s), pb=pbFor(s), price=displayPrice(s), reg=regressionStats(s), conflict=portfolioConflict(s); if(!pb){ const ev=evidenceFor(s), rp=researchPromotionLabel(s); return `<div onclick="openDetail('${s.id}')" style="background:${C.card};border:1px solid ${ev?rp.color+'55':C.border};border-radius:15px;padding:14px 16px;cursor:pointer;"><div style="display:flex;justify-content:space-between;gap:10px;"><div><div style="display:flex;align-items:center;gap:8px;"><span style="color:${C.text};font-weight:900;">${s.ticker}</span><span style="color:${rp.color};font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:.05em;">${rp.label}</span></div>${ev?`<div style="color:${C.textMuted};font-size:10px;margin-top:4px;">${ev.family?trendTypeLabel(s,{family:ev.family,name:ev.family}):'Research'} · ${displayEvidenceTag(ev.grade||'Unrated')}</div>`:''}</div><span style="color:${C.text};font-weight:800;">${money(price)}</span></div><div style="color:${C.textSub};font-size:11px;line-height:1.45;margin-top:7px;">${ev?.summary||'No validated StockIQ playbook yet. Current technical readiness cannot promote this ticker by itself.'}</div></div>`;}
   const pos=s.position; const plPct=pos&&price&&pos.entry?((price/pos.entry)-1)*100:null; const stop=pos?suggestedStop(s):null;
   return `<div onclick="openDetail('${s.id}')" style="background:${C.card};border:1px solid ${C.border};border-radius:15px;padding:14px 16px;cursor:pointer;">
-    <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;"><div><div style="display:flex;align-items:center;gap:8px;"><span style="color:${C.text};font-size:16px;font-weight:900;">${s.ticker}</span>${badge(st.state)}</div><div style="color:${C.textSub};font-size:11px;margin-top:4px;">${cleanPlaybookName(pb)}${evidenceFor(s)?.grade?` · <span style="color:${evidenceFor(s).grade==='PROVEN'?C.green:(evidenceFor(s).grade==='REGIME-STRONG'?C.teal:C.yellow)};font-weight:850;">${evidenceFor(s).grade}</span>`:''}</div></div><div style="text-align:right;"><div style="color:${C.text};font-size:14px;font-weight:900;">${money(price)}</div>${plPct!=null?`<div style="color:${plPct>=0?C.green:C.red};font-size:11px;font-weight:800;">${pctFmt(plPct)}</div>`:''}${liveDayMoveHTML(s,'10.5px')}</div></div>
+    <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;"><div><div style="display:flex;align-items:center;gap:8px;"><span style="color:${C.text};font-size:16px;font-weight:900;">${s.ticker}</span>${badge(st.state)}</div><div style="color:${C.textSub};font-size:11px;margin-top:4px;">${cleanPlaybookName(pb)}${evidenceFor(s)?.grade?` · <span style="color:${evidenceFor(s).grade==='PROVEN'?C.green:(evidenceFor(s).grade==='REGIME-STRONG'?C.teal:C.yellow)};font-weight:850;">${displayEvidenceTag(evidenceFor(s).grade)}</span>`:''}</div></div><div style="text-align:right;"><div style="color:${C.text};font-size:14px;font-weight:900;">${money(price)}</div>${plPct!=null?`<div style="color:${plPct>=0?C.green:C.red};font-size:11px;font-weight:800;">${pctFmt(plPct)}</div>`:''}${liveDayMoveHTML(s,'10.5px')}</div></div>
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:11px;padding-top:10px;border-top:1px solid ${C.border};">
       ${pos?`<div><div class="v2lbl">Day</div><div class="v2val">${positionDays(s)}/${pb.hold}</div></div><div><div class="v2lbl">${stop.type}</div><div class="v2val">${money(stop.price)}</div></div><div><div class="v2lbl">Entry</div><div class="v2val">${money(pos.entry)}</div></div>`:`<div><div class="v2lbl">Regression</div><div class="v2val">${reg.z==null?'—':reg.z.toFixed(2)}</div></div><div><div class="v2lbl">Evidence</div><div class="v2val">${modernEvidenceLabel(s,pb)}</div></div><div><div class="v2lbl">${['BUY','A+ BUY'].includes(st.state)?'Buy Up To':'Key Detail'}</div><div class="v2val">${['BUY','A+ BUY'].includes(st.state)?money(buyUpTo(s)):st.state}</div></div>`}
     </div>${conflict?`<div style="color:${C.yellow};font-size:11px;margin-top:9px;font-weight:700;">Portfolio conflict: ${conflict}</div>`:''}
@@ -9987,6 +9987,50 @@ function trendTypeLabel(s,pb){
   if(/Breakout/i.test(n)) return 'Breakout';
   return n||'Validated Setup';
 }
+
+function displayEvidenceTag(raw){
+  const v=String(raw||'').trim().toUpperCase();
+  if(!v) return '';
+  const exact={
+    'PROVEN':'Proven',
+    'REGIME-STRONG':'Regime Strong',
+    'REGIME STRONG':'Regime Strong',
+    'VALIDATED RESEARCH':'Validated Research',
+    'VALIDATED':'Validated',
+    'PROMISING':'Promising',
+    'AGGRESSIVE':'Aggressive',
+    'RESEARCH':'Research',
+    'REJECTED':'Rejected',
+    'VALIDATED · LEGACY':'Validated Legacy',
+    'VALIDATED LEGACY':'Validated Legacy',
+    'RESEARCH · REGIME-WEAK':'Research — Regime Weak',
+    'REGIME-WEAK':'Regime Weak'
+  };
+  if(exact[v]) return exact[v];
+  return String(raw||'').trim().toLowerCase().replace(/\b\w/g,c=>c.toUpperCase()).replace(/-/g,' ');
+}
+function evidenceTagForDisplay(s){
+  const ev=evidenceFor(s)||{};
+  const pb=pbFor(s)||{};
+  return displayEvidenceTag(ev.grade||modernEvidenceLabel?.(s,pb)||pb.confidence||'');
+}
+function evidenceLegendHTML(items){
+  const tags=[...new Set((items||[]).map(x=>evidenceTagForDisplay(x.s||x)).filter(Boolean))];
+  if(!tags.length) return '';
+  const defs={
+    'Proven':'This ticker and setup have the strongest historical evidence in StockIQ.',
+    'Regime Strong':'This setup has historically worked especially well in the current type of market environment.',
+    'Validated Research':'The setup passed historical testing, but the evidence is not yet as strong as Proven.',
+    'Validated':'The setup passed StockIQ’s historical testing and is approved for live forward testing.',
+    'Promising':'The early evidence is encouraging, but StockIQ wants more proof before treating it like a top-tier setup.',
+    'Research':'This ticker is still being studied and has not earned the strongest evidence tier.',
+    'Regime Weak':'This setup has been weaker in the current type of market environment.',
+    'Validated Legacy':'This is an older validated setup being kept for continuity while newer evidence is collected.'
+  };
+  const rows=tags.map(t=>`<div style="margin-top:5px;"><b style="color:${C.text};">${t}:</b> ${defs[t]||'This label describes how strong the historical evidence is for this ticker and setup.'}</div>`).join('');
+  return `<div style="border-top:1px solid ${C.border};margin-top:10px;padding-top:9px;color:${C.textMuted};font-size:10.5px;line-height:1.45;"><b style="color:${C.textSub};">What the evidence labels mean</b>${rows}</div>`;
+}
+
 function familyDefinitionText(s,pb){
   const trend=trendTypeLabel(s,pb);
   const defs={
@@ -10200,7 +10244,7 @@ function stockIQBackFromDetail(){
 }
 function renderDetail(s){
   s=withRecentDailyHistory(s);
-  const el=document.getElementById('detail-content'); if(!el)return; const pb=pbFor(s); if(!pb){ const ev=evidenceFor(s), rp=researchPromotionLabel(s); el.innerHTML=`<div style="padding:16px;"><button onclick="stockIQBackFromDetail()" style="background:none;border:none;color:${C.textSub};padding:0 0 12px;">← Back</button><h2 style="color:${C.text};margin:0;">${s.ticker}</h2>${companyNameFor(s)?`<div style="color:${C.textSub};font-size:13px;margin-top:4px;">${companyNameFor(s)}</div>`:''}<div style="margin-top:12px;color:${rp.color};font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;">${rp.label}${ev?.grade?` · ${ev.grade}`:''}</div>${ev?.family?`<div style="color:${C.text};font-size:13px;font-weight:800;margin-top:8px;">Candidate family: ${ev.family.replaceAll('_',' ')}</div>`:''}<p style="color:${C.textSub};font-size:13px;line-height:1.65;">${ev?.summary||'This ticker can show indicators, but StockIQ will not issue trading signals until it has a validated playbook.'}</p><div style="background:${C.card};border:1px solid ${C.border};border-radius:14px;padding:13px 14px;margin:12px 0;"><div style="color:${C.yellow};font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;margin-bottom:7px;">Promotion gate</div><div style="color:${C.textSub};font-size:12px;line-height:1.6;">Current readiness is not enough. Promotion requires useful trade frequency, positive friction-adjusted expectancy, older/newer or OOS survival, parameter-neighborhood robustness, and tolerable downside. Until that evidence is explicitly approved, this stock stays research-only.</div></div>${indicatorPanel(s,{})}</div>`; return; }
+  const el=document.getElementById('detail-content'); if(!el)return; const pb=pbFor(s); if(!pb){ const ev=evidenceFor(s), rp=researchPromotionLabel(s); el.innerHTML=`<div style="padding:16px;"><button onclick="stockIQBackFromDetail()" style="background:none;border:none;color:${C.textSub};padding:0 0 12px;">← Back</button><h2 style="color:${C.text};margin:0;">${s.ticker}</h2>${companyNameFor(s)?`<div style="color:${C.textSub};font-size:13px;margin-top:4px;">${companyNameFor(s)}</div>`:''}<div style="margin-top:12px;color:${rp.color};font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;">${displayEvidenceTag(rp.label)}${ev?.grade?` · ${displayEvidenceTag(ev.grade)}`:''}</div>${ev?.family?`<div style="color:${C.text};font-size:13px;font-weight:800;margin-top:8px;">Candidate family: ${trendTypeLabel(s,{family:ev.family,name:ev.family})}</div>`:''}<p style="color:${C.textSub};font-size:13px;line-height:1.65;">${ev?.summary||'This ticker can show indicators, but StockIQ will not issue trading signals until it has a validated playbook.'}</p><div style="background:${C.card};border:1px solid ${C.border};border-radius:14px;padding:13px 14px;margin:12px 0;"><div style="color:${C.yellow};font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;margin-bottom:7px;">Promotion gate</div><div style="color:${C.textSub};font-size:12px;line-height:1.6;">Current readiness is not enough. Promotion requires useful trade frequency, positive friction-adjusted expectancy, older/newer or OOS survival, parameter-neighborhood robustness, and tolerable downside. Until that evidence is explicitly approved, this stock stays research-only.</div></div>${indicatorPanel(s,{})}</div>`; return; }
   const st=stockState(s),checks=(Array.isArray(st?.checks)&&st.checks.length)?st.checks:setupChecks(s),conflict=portfolioConflict(s);
   let html=s.position?positionTop(s,pb,st):preTop(s,pb,st); if(!s.position){ html+=detailMetaStrip(s,pb,st); const pa=plainEntryAction(s,pb,st); html+=panel('What To Do Now',`<div style="font-size:21px;font-weight:950;color:${pa.color};margin-bottom:7px;">${pa.label}</div><div style="color:${C.text};font-size:14px;font-weight:850;line-height:1.5;">${pa.action}</div><div style="color:${C.textSub};font-size:12px;line-height:1.55;margin-top:8px;">Why: ${pa.why}</div><div style="color:${C.textSub};font-size:12px;line-height:1.55;margin-top:4px;">Next: ${pa.next}</div>`); } html+=topCallout(s,pb,st);
   if(hasOpenPosition(s)){
@@ -12326,7 +12370,7 @@ renderDetail=function(s){
   const pb=pbFor(s);
   if(!pb){
     const ev=evidenceFor(s), rp=researchPromotionLabel(s);
-    el.innerHTML=`<div style="padding:16px;"><button onclick="stockIQBackFromDetail()" style="background:none;border:none;color:${C.textSub};padding:0 0 12px;">← Back</button><h2 style="color:${C.text};margin:0;">${s.ticker}</h2>${companyNameFor(s)?`<div style="color:${C.textSub};font-size:13px;margin-top:4px;">${companyNameFor(s)}</div>`:''}${s.sector?`<div style="color:${C.textMuted};font-size:10.5px;margin-top:4px;">Sector: ${s.sector}</div>`:''}<div style="margin-top:12px;color:${rp.color};font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;">${rp.label}${ev?.grade?` · ${ev.grade}`:''}</div><p style="color:${C.textSub};font-size:13px;line-height:1.65;">${ev?.summary||'This ticker can show indicators, but StockIQ will not issue trading signals until it has a validated playbook.'}</p>${indicatorPanel(s,{})}</div>`;
+    el.innerHTML=`<div style="padding:16px;"><button onclick="stockIQBackFromDetail()" style="background:none;border:none;color:${C.textSub};padding:0 0 12px;">← Back</button><h2 style="color:${C.text};margin:0;">${s.ticker}</h2>${companyNameFor(s)?`<div style="color:${C.textSub};font-size:13px;margin-top:4px;">${companyNameFor(s)}</div>`:''}${s.sector?`<div style="color:${C.textMuted};font-size:10.5px;margin-top:4px;">Sector: ${s.sector}</div>`:''}<div style="margin-top:12px;color:${rp.color};font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;">${displayEvidenceTag(rp.label)}${ev?.grade?` · ${displayEvidenceTag(ev.grade)}`:''}</div><p style="color:${C.textSub};font-size:13px;line-height:1.65;">${ev?.summary||'This ticker can show indicators, but StockIQ will not issue trading signals until it has a validated playbook.'}</p>${indicatorPanel(s,{})}</div>`;
     return;
   }
   const st=stockState(s), checks=(Array.isArray(st?.checks)&&st.checks.length)?st.checks:setupChecks(s), conflict=portfolioConflict(s);
@@ -12372,13 +12416,13 @@ renderDetail=function(s){
 
 // Re-render home and update version after all overrides are active.
 const _v2995Version=document.getElementById('stockiq-version');
-if(_v2995Version)_v2995Version.textContent='StockIQ v2.9.96 · Persistent Portfolio State';
+if(_v2995Version)_v2995Version.textContent='StockIQ v2.9.97 · Casing + Evidence Legend Audit';
 setTimeout(()=>{ try{ renderHome(); }catch(e){ console.warn('v2.9.95 refresh failed',e); } },250);
 </script>
 
 
 <script>
-// ── v2.9.96 VERSION-INDEPENDENT PORTFOLIO STATE ────────────────────────────
+// ── v2.9.97 VERSION-INDEPENDENT PORTFOLIO STATE ────────────────────────────
 // Start Fresh must survive app upgrades, reloads, and cross-device cloud sync.
 // A portfolio generation is stored independently of stock documents. Positions
 // from an older generation are never allowed back into BOUGHT, even if an old
@@ -12527,7 +12571,7 @@ auth.onAuthStateChanged(user=>{
 });
 
 const _v2996Version=document.getElementById('stockiq-version');
-if(_v2996Version)_v2996Version.textContent='StockIQ v2.9.96 · Persistent Portfolio State';
+if(_v2996Version)_v2996Version.textContent='StockIQ v2.9.97 · Casing + Evidence Legend Audit';
 </script>
 </body>
 </html>
