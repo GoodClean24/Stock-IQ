@@ -12857,5 +12857,179 @@ setTimeout(()=>{
 const _v2999Version=document.getElementById('stockiq-version');
 if(_v2999Version)_v2999Version.textContent='StockIQ v2.9.99 · Cloud Fail-Safe Startup';
 </script>
+
+<script>
+// ── v2.9.100 AUTHORITATIVE ACTIVE-POSITION STATE ──────────────────────────
+// Fixes a race where the base BUY stock write could succeed but the later
+// portfolio-generation stamp could fail. A valid new BUY could then be hidden
+// by the next app version as if it belonged to an older cleared portfolio.
+// Active positions now have their own version-independent local/cloud mirror.
+
+const ACTIVE_POSITIONS_STORAGE_KEY='stockiq_active_positions_v1';
+const ACTIVE_POSITIONS_DOC_ID='activePositionsV1';
+let activePositionsSyncBusy=false;
+
+function activePositionsRef(uid){
+  return db.collection('users').doc(uid).collection('settings').doc(ACTIVE_POSITIONS_DOC_ID);
+}
+function activePositionSnapshot(){
+  const rows={};
+  (stocks||[]).forEach(s=>{
+    if(!s || isMarketStock(s) || !s.position || Number(s.position.shares||0)<=0) return;
+    rows[String(s.id)]={
+      id:s.id,ticker:s.ticker,
+      position:cleanForFirestore({...s.position,portfolioGeneration:portfolioGeneration}),
+      updatedAtMs:Date.now()
+    };
+  });
+  return rows;
+}
+function saveActivePositionsLocal(rows){
+  try{ localStorage.setItem(ACTIVE_POSITIONS_STORAGE_KEY,JSON.stringify(rows||activePositionSnapshot())); }catch(e){}
+}
+function loadActivePositionsLocal(){
+  try{ const d=JSON.parse(localStorage.getItem(ACTIVE_POSITIONS_STORAGE_KEY)||'{}'); return d&&typeof d==='object'?d:{}; }catch(e){ return {}; }
+}
+function mergeActivePositions(rows){
+  if(!rows || typeof rows!=='object') return false;
+  let changed=false;
+  stocks=(stocks||[]).map(s=>{
+    const r=rows[String(s.id)];
+    if(!r?.position || Number(r.position.shares||0)<=0) return s;
+    const rg=Number(r.position.portfolioGeneration||0);
+    if(portfolioGeneration>0 && rg>0 && rg!==portfolioGeneration) return s;
+    if(s?.position && Number(s.position.shares||0)>0 && Number(s.position.portfolioGeneration||0)===portfolioGeneration) return s;
+    changed=true;
+    return {...s,position:{...r.position,portfolioGeneration:portfolioGeneration}};
+  });
+  return changed;
+}
+async function saveActivePositionsCloud(){
+  if(!currentUser) return;
+  const rows=activePositionSnapshot();
+  saveActivePositionsLocal(rows);
+  await activePositionsRef(currentUser.uid).set({
+    schemaVersion:1,
+    portfolioGeneration,
+    rows,
+    updatedAt:firebase.firestore.FieldValue.serverTimestamp()
+  },{merge:false});
+}
+async function syncActivePositionsFromCloud(){
+  if(!currentUser || activePositionsSyncBusy) return;
+  activePositionsSyncBusy=true;
+  try{
+    // Local mirror first, so version changes remain instant.
+    const local=loadActivePositionsLocal();
+    if(mergeActivePositions(local)) renderHome();
+    const snap=await activePositionsRef(currentUser.uid).get();
+    if(snap.exists){
+      const d=snap.data()||{};
+      const g=Number(d.portfolioGeneration||0);
+      if(portfolioGeneration<=0 || g===portfolioGeneration){
+        if(mergeActivePositions(d.rows||{})) renderHome();
+        saveActivePositionsLocal(d.rows||{});
+      }
+    }else{
+      await saveActivePositionsCloud();
+    }
+  }catch(e){ console.warn('Active-position sync failed',e); }
+  finally{ activePositionsSyncBusy=false; }
+}
+
+// Recovery for the exact pre-v2.9.100 race: if a stock has an open position from
+// today's/latest Daily session but no generation stamp, treat it as a current
+// post-reset BUY and stamp it rather than hiding it. Older legacy positions stay
+// excluded by the portfolio reset generation.
+const _v29100PositionMatches=positionMatchesPortfolioGeneration;
+positionMatchesPortfolioGeneration=function(s){
+  if(!s?.position || Number(s.position.shares||0)<=0) return false;
+  if(portfolioGeneration<=0) return true;
+  const pg=s.position.portfolioGeneration;
+  if(pg!==undefined && pg!==null && Number(pg)>0) return Number(pg)===portfolioGeneration;
+  const pd=String(s.position.date||'').slice(0,10);
+  let latest='';
+  try{ latest=String(latestSnap(s)?.date||'').slice(0,10); }catch(e){}
+  // Only recover an unstamped BUY if it belongs to the latest loaded Daily
+  // session. This prevents older pre-reset positions from being resurrected.
+  if(pd && latest && pd===latest){
+    s.position.portfolioGeneration=portfolioGeneration;
+    setTimeout(()=>{
+      try{ saveActivePositionsLocal(); }catch(e){}
+      if(currentUser){
+        fbSaveStock(s).catch(e=>console.warn('Recovered BUY generation stamp save failed',e));
+        saveActivePositionsCloud().catch(e=>console.warn('Recovered BUY mirror save failed',e));
+      }
+    },0);
+    return true;
+  }
+  return false;
+};
+
+// Re-wrap hasOpenPosition so the new recovery-aware generation check is used.
+hasOpenPosition=function(s){
+  try{ return _v2996BaseHasOpenPosition(s) && positionMatchesPortfolioGeneration(s); }catch(e){ return false; }
+};
+
+// BUY: stamp the generation BEFORE the authoritative stock save and mirror it
+// locally immediately. This eliminates the old two-write visibility race.
+const _v29100PreviousSaveV2Buy=saveV2Buy;
+saveV2Buy=async function(id,signalTier){
+  const before=stocks.find(x=>String(x.id)===String(id));
+  // Let the existing flow collect/validate the form and create the position.
+  const result=await _v29100PreviousSaveV2Buy(id,signalTier);
+  const s=stocks.find(x=>String(x.id)===String(id));
+  if(s?.position && Number(s.position.shares||0)>0){
+    s.position.portfolioGeneration=portfolioGeneration;
+    saveActivePositionsLocal();
+    try{
+      // One complete authoritative stock write with the generation already on it.
+      await fbSaveStock(s);
+      await saveActivePositionsCloud();
+    }catch(e){ console.warn('BUY active-position persistence retry failed',e); }
+    renderHome();
+    if(detailStockId && String(detailStockId)===String(id)) renderDetail(s);
+  }
+  return result;
+};
+
+// SELL and Start Fresh immediately update the independent active-position mirror.
+const _v29100PreviousSaveV2Close=saveV2Close;
+saveV2Close=async function(...args){
+  const r=await _v29100PreviousSaveV2Close.apply(this,args);
+  saveActivePositionsLocal();
+  try{ await saveActivePositionsCloud(); }catch(e){ console.warn('SELL active-position mirror save failed',e); }
+  return r;
+};
+const _v29100PreviousClearOpenPaperPositions=clearOpenPaperPositions;
+clearOpenPaperPositions=async function(...args){
+  const r=await _v29100PreviousClearOpenPaperPositions.apply(this,args);
+  saveActivePositionsLocal({});
+  try{ await saveActivePositionsCloud(); }catch(e){ console.warn('Fresh-start active-position mirror save failed',e); }
+  return r;
+};
+
+// Merge local active positions before first render, then cloud mirror shortly after.
+try{ mergeActivePositions(loadActivePositionsLocal()); }catch(e){}
+auth.onAuthStateChanged(user=>{
+  if(user){
+    setTimeout(()=>syncActivePositionsFromCloud(),250);
+  }
+});
+
+// Whenever the stock collection listener eventually restores a valid position,
+// refresh the mirror so the next version has it immediately.
+setTimeout(()=>{
+  try{
+    const hasOpen=(stocks||[]).some(s=>hasOpenPosition(s));
+    if(hasOpen){ saveActivePositionsLocal(); if(currentUser) saveActivePositionsCloud().catch(()=>{}); }
+    renderHome();
+  }catch(e){}
+},1800);
+
+const _v29100Version=document.getElementById('stockiq-version');
+if(_v29100Version)_v29100Version.textContent='StockIQ v2.9.100 · Position State Persistence Fix';
+</script>
+
 </body>
 </html>
