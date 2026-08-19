@@ -12372,8 +12372,162 @@ renderDetail=function(s){
 
 // Re-render home and update version after all overrides are active.
 const _v2995Version=document.getElementById('stockiq-version');
-if(_v2995Version)_v2995Version.textContent='StockIQ v2.9.95 · Decision Flow + Dedupe + Header Cleanup';
+if(_v2995Version)_v2995Version.textContent='StockIQ v2.9.96 · Persistent Portfolio State';
 setTimeout(()=>{ try{ renderHome(); }catch(e){ console.warn('v2.9.95 refresh failed',e); } },250);
+</script>
+
+
+<script>
+// ── v2.9.96 VERSION-INDEPENDENT PORTFOLIO STATE ────────────────────────────
+// Start Fresh must survive app upgrades, reloads, and cross-device cloud sync.
+// A portfolio generation is stored independently of stock documents. Positions
+// from an older generation are never allowed back into BOUGHT, even if an old
+// Firestore stock document arrives later. New buys are stamped with the current
+// generation.
+const PORTFOLIO_STATE_STORAGE_KEY='stockiq_portfolio_state_v1';
+const PORTFOLIO_STATE_DOC_ID='portfolioStateV1';
+let portfolioGeneration=0;
+let portfolioStateSyncBusy=false;
+
+function loadPortfolioStateLocal(){
+  try{
+    const d=JSON.parse(localStorage.getItem(PORTFOLIO_STATE_STORAGE_KEY)||'{}')||{};
+    const g=Number(d.generation||0);
+    portfolioGeneration=Number.isFinite(g)&&g>=0?g:0;
+  }catch(e){ portfolioGeneration=0; }
+}
+function savePortfolioStateLocal(){
+  try{ localStorage.setItem(PORTFOLIO_STATE_STORAGE_KEY,JSON.stringify({generation:portfolioGeneration})); }catch(e){}
+}
+function portfolioStateRef(uid){ return db.collection('users').doc(uid).collection('settings').doc(PORTFOLIO_STATE_DOC_ID); }
+function positionMatchesPortfolioGeneration(s){
+  if(!s?.position || Number(s.position.shares||0)<=0) return false;
+  // Before the first Start Fresh, preserve legacy positions normally.
+  if(portfolioGeneration<=0) return true;
+  return Number(s.position.portfolioGeneration||0)===portfolioGeneration;
+}
+
+loadPortfolioStateLocal();
+
+// Make all normal open-position tests honor the version-independent generation.
+const _v2996BaseHasOpenPosition=hasOpenPosition;
+hasOpenPosition=function(s){
+  try{ return _v2996BaseHasOpenPosition(s) && positionMatchesPortfolioGeneration(s); }
+  catch(e){ return false; }
+};
+
+function reconcilePortfolioGenerationLocal(){
+  if(portfolioGeneration<=0) return [];
+  const changed=[];
+  stocks=(stocks||[]).map(s=>{
+    if(!s?.position) return s;
+    if(Number(s.position.portfolioGeneration||0)===portfolioGeneration) return s;
+    const u={...s};
+    delete u.position;
+    changed.push(u);
+    return u;
+  });
+  return changed;
+}
+
+async function savePortfolioStateCloud(){
+  if(!currentUser) return;
+  await portfolioStateRef(currentUser.uid).set({
+    schemaVersion:1,
+    generation:portfolioGeneration,
+    updatedAt:firebase.firestore.FieldValue.serverTimestamp()
+  },{merge:false});
+}
+
+async function syncPortfolioStateFromCloud(){
+  if(!currentUser || portfolioStateSyncBusy) return;
+  portfolioStateSyncBusy=true;
+  try{
+    const snap=await portfolioStateRef(currentUser.uid).get();
+    if(snap.exists){
+      const cloudGen=Number(snap.data()?.generation||0);
+      if(Number.isFinite(cloudGen) && cloudGen>portfolioGeneration){
+        portfolioGeneration=cloudGen;
+        savePortfolioStateLocal();
+      }else if(portfolioGeneration>cloudGen){
+        await savePortfolioStateCloud();
+      }
+    }else if(portfolioGeneration>0){
+      await savePortfolioStateCloud();
+    }
+    const stale=reconcilePortfolioGenerationLocal();
+    renderHome();
+    // Clean stale stock documents in the background. The generation marker is
+    // already authoritative, so a failed cleanup cannot resurrect positions.
+    if(stale.length){
+      try{ await fbBatchSaveStocks(stale); }
+      catch(e){ console.warn('Portfolio stale-position cleanup could not fully save',e); }
+    }
+  }catch(e){ console.warn('Portfolio-state sync failed',e); }
+  finally{ portfolioStateSyncBusy=false; }
+}
+
+// Replace Start Fresh with an authoritative generation reset.
+clearOpenPaperPositions=async function(){
+  const open=(stocks||[]).filter(s=>s?.position && Number(s.position.shares||0)>0 && !isMarketStock(s));
+  if(!open.length){ alert('There are no open paper positions to clear.'); return; }
+  const ok=confirm(`Start fresh with StockIQ?\n\nThis will remove ${open.length} current paper position${open.length===1?'':'s'} from BOUGHT.\n\nCompleted trade history and the Forward Signal Log will NOT be erased.\n\nThis reset will carry forward into future StockIQ versions.`);
+  if(!ok) return;
+
+  portfolioGeneration=Math.max(1,Number(portfolioGeneration||0)+1);
+  savePortfolioStateLocal();
+
+  // Save the generation marker first. Once this succeeds, older position
+  // records are permanently obsolete even if individual stock writes lag.
+  try{ await savePortfolioStateCloud(); }
+  catch(e){
+    alert('StockIQ could not save the fresh-start status to the cloud. Nothing was cleared. Please check your connection and try again.');
+    portfolioGeneration=Math.max(0,portfolioGeneration-1);
+    savePortfolioStateLocal();
+    return;
+  }
+
+  const changed=[];
+  stocks=(stocks||[]).map(s=>{
+    if(!s?.position || isMarketStock(s)) return s;
+    const u={...s}; delete u.position; changed.push(u); return u;
+  });
+  detailStockId=null;
+  showScreen('home'); renderHome(); window.scrollTo(0,0);
+
+  try{
+    await fbBatchSaveStocks(changed);
+    renderHome();
+    alert('Start Fresh saved. Your old paper positions are cleared and future StockIQ versions will keep this portfolio state.');
+  }catch(e){
+    console.warn('Some cleared stock documents did not save, but portfolio generation prevents resurrection',e);
+    renderHome();
+    alert('Your fresh-start status was saved. Some old stock records are still cleaning up in the background, but they will not return to BOUGHT.');
+  }
+};
+
+// Stamp every new manual/test BUY into the current portfolio generation so it
+// remains visible after reloads and future app versions.
+const _v2996BaseSaveV2Buy=saveV2Buy;
+saveV2Buy=async function(id,signalTier){
+  await _v2996BaseSaveV2Buy(id,signalTier);
+  const s=stocks.find(x=>String(x.id)===String(id));
+  if(s?.position){
+    s.position.portfolioGeneration=portfolioGeneration;
+    try{ await fbSaveStock(s); }
+    catch(e){ console.warn('Could not stamp portfolio generation on new BUY',e); }
+    renderHome();
+    if(detailStockId && String(detailStockId)===String(id)) renderDetail(s);
+  }
+};
+
+// Cloud portfolio state is independent of the HTML/app version.
+auth.onAuthStateChanged(user=>{
+  if(user) syncPortfolioStateFromCloud();
+});
+
+const _v2996Version=document.getElementById('stockiq-version');
+if(_v2996Version)_v2996Version.textContent='StockIQ v2.9.96 · Persistent Portfolio State';
 </script>
 </body>
 </html>
