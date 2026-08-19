@@ -12981,6 +12981,140 @@ auth.onAuthStateChanged(user=>{ if(user) setTimeout(()=>canonSync(),250); });
 
 const _v29104Version=document.getElementById('stockiq-version');
 if(_v29104Version)_v29104Version.textContent='StockIQ v2.9.104 · Stable Base + Canonical Portfolio';
+
+// ── v2.9.105 CANONICAL POSITION IDENTITY / DUPLICATE-TICKER FIX ───────────
+// A canonical portfolio row belongs to ONE underlying stock record. Multiple
+// research/library records may share a ticker, but they must never all become
+// BOUGHT just because Current Portfolio is keyed by ticker.
+
+function canonFindRepresentativeForRow(ticker,row){
+  const k=String(ticker||'').trim().toUpperCase();
+  const same=(stocks||[]).filter(s=>canonKey(s)===k && !isMarketStock(s));
+  if(!same.length) return null;
+  // First choice: the exact record originally bought.
+  if(row?.id!=null){
+    const exact=same.find(s=>String(s.id)===String(row.id));
+    if(exact) return exact;
+  }
+  // Stable fallback for older rows: prefer a validated/live record, then the
+  // strongest evidence row, then the first deterministic id.
+  const rank=s=>{
+    let n=0;
+    try{ if(typeof isLiveValidatedCandidate==='function' && isLiveValidatedCandidate(s)) n+=1000; }catch(e){}
+    try{ if(typeof evidenceTier==='function') n+=Number(evidenceTier(s)||0)*100; }catch(e){}
+    try{ const st=typeof safeStockState==='function'?safeStockState(s):null; if(st?.state==='A+ BUY') n+=30; else if(st?.state==='BUY') n+=20; else if(st?.state==='PREPARING') n+=10; }catch(e){}
+    return n;
+  };
+  same.sort((a,b)=>rank(b)-rank(a) || String(a.id||'').localeCompare(String(b.id||'')));
+  return same[0];
+}
+
+// Re-define canonical application so only ONE record per ticker receives the
+// open-position overlay. All sibling duplicate records have position removed.
+canonApply=function(){
+  if(!canonPortfolioReady || !Array.isArray(stocks)) return false;
+  const rows=canonPortfolio.positions||{};
+  const repIdByTicker=new Map();
+  for(const [k,row] of Object.entries(rows)){
+    if(!row?.position || Number(row.position.shares||0)<=0) continue;
+    const rep=canonFindRepresentativeForRow(k,row);
+    if(rep){
+      repIdByTicker.set(k,String(rep.id));
+      // Repair older canonical rows that were missing/storing the wrong id.
+      if(String(row.id??'')!==String(rep.id)){
+        row.id=rep.id; row.name=rep.name||row.name||k; row.sector=rep.sector||row.sector||''; row.industry=rep.industry||row.industry||'';
+        canonPortfolio.pendingSync=true; canonPortfolio.updatedAtMs=Date.now(); canonSaveLocal();
+      }
+    }
+  }
+
+  const seenTicker=new Set();
+  let changed=false;
+  stocks=stocks.map(s=>{
+    if(!s || isMarketStock(s)) return s;
+    const k=canonKey(s); seenTicker.add(k);
+    const row=rows[k];
+    const repId=repIdByTicker.get(k);
+    const isRep=!!(row?.position && repId!=null && String(s.id)===String(repId));
+    if(isRep){
+      if(JSON.stringify(s.position||null)!==JSON.stringify(row.position)) changed=true;
+      return {...s,position:{...row.position}};
+    }
+    if(s.position){ const u={...s}; delete u.position; changed=true; return u; }
+    return s;
+  });
+
+  // If the owned ticker truly is absent from today's Daily universe, append
+  // exactly ONE placeholder so the open position remains manageable.
+  for(const [k,row] of Object.entries(rows)){
+    if(!row?.position || Number(row.position.shares||0)<=0) continue;
+    const repId=repIdByTicker.get(k);
+    if(repId!=null) continue;
+    stocks.push({id:row.id||`canon_${k}`,ticker:k,name:row.name||k,sector:row.sector||'',industry:row.industry||'',type:'Swing Trade',starred:false,notes:'',realized:[],scannerSources:[],snapshots:[],position:{...row.position},_v2Placeholder:true});
+    changed=true;
+  }
+  return changed;
+};
+
+// Ownership query must match the exact canonical record, not merely the ticker.
+hasOpenPosition=function(s){
+  if(!canonPortfolioReady || !s) return false;
+  const k=canonKey(s), row=canonPortfolio.positions?.[k];
+  if(!row?.position || Number(row.position.shares||0)<=0) return false;
+  const rep=canonFindRepresentativeForRow(k,row);
+  return !!(rep && String(rep.id)===String(s.id));
+};
+
+// Defensive display helper: any BOUGHT list should still be unique by ticker
+// even if duplicate library records exist elsewhere in the universe.
+function uniqueOpenPositionStocks(){
+  const seen=new Set(), out=[];
+  for(const s of (stocks||[])){
+    if(!hasOpenPosition(s)) continue;
+    const k=canonKey(s); if(!k || seen.has(k)) continue;
+    seen.add(k); out.push(s);
+  }
+  return out;
+}
+
+// Keep portfolio summary from double-counting duplicate records.
+const _v29105RenderPortfolioBox=renderPortfolioBox;
+renderPortfolioBox=function(){
+  // hasOpenPosition is now identity-safe, so the original renderer can run.
+  canonApply();
+  return _v29105RenderPortfolioBox();
+};
+
+// If a legacy duplicate document still has a stale position field, clean it in
+// the background after canonical ownership is established. This is hygiene only;
+// those documents never control ownership.
+async function canonCleanDuplicatePositionFields(){
+  if(!currentUser || !canonPortfolioReady) return;
+  const dirty=[];
+  for(const s of (stocks||[])){
+    if(!s?.position || isMarketStock(s)) continue;
+    if(hasOpenPosition(s)) continue;
+    const u={...s}; delete u.position; dirty.push(u);
+  }
+  if(!dirty.length) return;
+  try{
+    if(typeof fbBatchSaveStocks==='function') await fbBatchSaveStocks(dirty);
+    else for(const u of dirty) await fbSaveStock(u);
+  }catch(e){ console.warn('Duplicate-position hygiene cleanup incomplete',e); }
+}
+
+const _v29105CanonSync=canonSync;
+canonSync=async function(...args){
+  const r=await _v29105CanonSync.apply(this,args);
+  canonApply();
+  setTimeout(()=>canonCleanDuplicatePositionFields(),500);
+  try{renderHome();}catch(e){}
+  return r;
+};
+
+const _v29105Version=document.getElementById('stockiq-version');
+if(_v29105Version)_v29105Version.textContent='StockIQ v2.9.105 · Canonical Position Identity Fix';
+
 </script>
 </body>
 </html>
