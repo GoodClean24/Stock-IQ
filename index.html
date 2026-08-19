@@ -805,6 +805,105 @@ auth.getRedirectResult().then(result => {
   if(btn) btn.textContent = 'Sign in failed: ' + e.message;
 });
 
+
+// v2.9.106 — REALTIME STOCK LISTENER MERGE FIX
+// The Firestore /stocks collection stores historical/user metadata, but it must
+// NEVER replace the Daily universe. Collapse duplicate ticker documents first,
+// then merge their useful metadata into the one Daily record for that ticker.
+function stockTickerKey(s){ return String(s?.ticker||s?.symbol||'').trim().toUpperCase(); }
+function stockRecordRichness(s){
+  if(!s) return -1;
+  let n=0;
+  try{ if(typeof isValidatedStock==='function' && isValidatedStock(s)) n+=10000; }catch(e){}
+  if(String(s.id||'').startsWith('v2_')) n+=1000;
+  n+=Array.isArray(s.snapshots)?Math.min(s.snapshots.length,500):0;
+  n+=Array.isArray(s.realized)?Math.min(s.realized.length,100)*20:0;
+  if(s.notes) n+=10;
+  if(Array.isArray(s.scannerSources)&&s.scannerSources.length) n+=20;
+  return n;
+}
+function mergeDuplicateStockGroup(group, preferredId=null){
+  const rows=(group||[]).filter(Boolean);
+  if(!rows.length) return null;
+  let primary=null;
+  if(preferredId!=null) primary=rows.find(x=>String(x.id)===String(preferredId))||null;
+  if(!primary) primary=[...rows].sort((a,b)=>stockRecordRichness(b)-stockRecordRichness(a)||String(a.id||'').localeCompare(String(b.id||'')))[0];
+  let merged={...primary};
+  for(const r of rows){
+    if(r===primary) continue;
+    // Fill only missing metadata from sibling records; do not let stale market
+    // values or stale ownership override the chosen representative.
+    for(const [k,v] of Object.entries(r)){
+      if(k==='position') continue;
+      if(merged[k]===undefined || merged[k]===null || merged[k]==='') merged[k]=v;
+    }
+    try{ merged.snapshots=mergeSnapshotHistory(merged.snapshots||[],r.snapshots||[]); }catch(e){}
+    if(Array.isArray(r.realized)){
+      const all=[...(merged.realized||[]),...r.realized];
+      const seen=new Set();
+      merged.realized=all.filter(x=>{const k=JSON.stringify([x?.dateOut,x?.dateIn,x?.entry,x?.exit,x?.shares]); if(seen.has(k))return false; seen.add(k); return true;});
+    }
+    if(Array.isArray(r.scannerSources)) merged.scannerSources=[...new Set([...(merged.scannerSources||[]),...r.scannerSources])];
+  }
+  delete merged.position; // Current Portfolio is the only ownership authority.
+  return merged;
+}
+function dedupeStocksByTicker(list, preferredIds=new Map()){
+  const order=[]; const groups=new Map(); const passthrough=[];
+  for(const s of (list||[])){
+    const k=stockTickerKey(s);
+    if(!k){passthrough.push(s);continue;}
+    if(!groups.has(k)){groups.set(k,[]);order.push(k);}
+    groups.get(k).push(s);
+  }
+  const out=[];
+  for(const k of order){
+    const m=mergeDuplicateStockGroup(groups.get(k),preferredIds.get(k));
+    if(m) out.push(m);
+  }
+  return [...out,...passthrough];
+}
+function mergePersistedStocksIntoDailyUniverse(persisted){
+  // Build the universe from the current in-memory Daily set plus the local/cloud
+  // Daily overlay. If this is first load, the overlay itself seeds the universe.
+  let base=applyDailyOverlayToStocks(Array.isArray(stocks)?stocks:[]);
+  const dailyPreferred=new Map();
+  for(const [t,ov] of (dailyOverlayByTicker||new Map()).entries()) if(ov?.id!=null) dailyPreferred.set(String(t).toUpperCase(),ov.id);
+  base=dedupeStocksByTicker(base,dailyPreferred);
+
+  // Collapse legacy/duplicate Firestore stock docs. Prefer the id already used
+  // by today's Daily record when possible.
+  const baseByTicker=new Map(base.map(s=>[stockTickerKey(s),s]));
+  const preferred=new Map([...baseByTicker.entries()].map(([k,s])=>[k,s?.id]));
+  const cloud=dedupeStocksByTicker((persisted||[]).map(s=>{const u={...s};delete u.position;return u;}),preferred);
+  const cloudByTicker=new Map(cloud.map(s=>[stockTickerKey(s),s]));
+
+  const merged=[]; const used=new Set();
+  for(const b of base){
+    const k=stockTickerKey(b), p=cloudByTicker.get(k);
+    if(!p){ merged.push(b); continue; }
+    used.add(k);
+    // Historical/user metadata first; today's Daily/base fields win afterward.
+    let u={...p,...b};
+    delete u.position;
+    try{u.snapshots=mergeSnapshotHistory(p.snapshots||[],b.snapshots||[]);}catch(e){}
+    if(Array.isArray(p.realized)||Array.isArray(b.realized)){
+      const all=[...(p.realized||[]),...(b.realized||[])], seen=new Set();
+      u.realized=all.filter(x=>{const kk=JSON.stringify([x?.dateOut,x?.dateIn,x?.entry,x?.exit,x?.shares]);if(seen.has(kk))return false;seen.add(kk);return true;});
+    }
+    u.scannerSources=[...new Set([...(p.scannerSources||[]),...(b.scannerSources||[])])];
+    merged.push(u);
+  }
+  // Only use cloud-only records when there is no Daily overlay at all for that
+  // ticker. This preserves research/library names without allowing duplicates.
+  for(const p of cloud){
+    const k=stockTickerKey(p); if(used.has(k)||baseByTicker.has(k)) continue;
+    merged.push(p);
+  }
+  const finalList=dedupeStocksByTicker(applyDailyOverlayToStocks(merged),dailyPreferred);
+  return finalList;
+}
+
 auth.onAuthStateChanged(user => {
   currentUser = user;
   if (user) {
@@ -821,7 +920,10 @@ auth.onAuthStateChanged(user => {
       if (bulkDailySaveInProgress) return;
       const persisted = [];
       snap.forEach(doc => { const d = doc.data(); d.type = migrateStockType(d); persisted.push(d); });
-      stocks = applyDailyOverlayToStocks(persisted);
+      // v2.9.106: Firestore stock documents are metadata/history only. Never
+      // replace the Daily universe with them. Merge + dedupe by ticker instead.
+      stocks = mergePersistedStocksIntoDailyUniverse(persisted);
+      if(typeof canonPortfolioReady!=='undefined' && canonPortfolioReady && typeof canonApply==='function') canonApply();
       showSaveStatus('ready');
       renderHome();
     }, err => {
@@ -13113,7 +13215,7 @@ canonSync=async function(...args){
 };
 
 const _v29105Version=document.getElementById('stockiq-version');
-if(_v29105Version)_v29105Version.textContent='StockIQ v2.9.105 · Canonical Position Identity Fix';
+if(_v29105Version)_v29105Version.textContent='StockIQ v2.9.106 · Realtime Stock Merge Fix';
 
 </script>
 </body>
