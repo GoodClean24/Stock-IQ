@@ -95,7 +95,7 @@ input[type=number]{-moz-appearance:textfield;}
   <div id="portfolio-box"></div>
   <div id="position-watch"></div>
   <!-- Tonight's Best Opportunities — the ranking engine -->
-  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">v2.9.88 · Lifecycle Clarity + Family Filter + Risk Lock</div>
+  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">v2.9.89 · Sold Position Reconciliation Fix</div>
   <div id="tonights-opportunities"></div>
   <!-- Filter tags + sort -->
   <div id="filter-bar" style="background:#11141C;border-bottom:1px solid #1E2230;padding:9px 20px;"></div>
@@ -950,7 +950,7 @@ function renderMarket() {
 
 function renderPortfolioBox() {
   const el = document.getElementById('portfolio-box');
-  const open = stocks.filter(s=>s.position).map(s=>({...s.position, price:s.price}));
+  const open = stocks.filter(hasOpenPosition).map(s=>({...s.position, price:s.price}));
   const realized = stocks.flatMap(s=>(s.realized||[]));
   if(open.length===0 && realized.length===0){ el.innerHTML=''; return; }
   const totalVal  = open.reduce((a,t)=>a+t.price*(t.shares||0),0);
@@ -1302,6 +1302,44 @@ function computeSimpleAction(s) {
 }
 const SIMPLE_ACTION_META = {BUY:{color:C.green}, WATCH:{color:'#3B82F6'}, WAIT:{color:C.yellow}, HOLD:{color:C.teal}, EXIT:{color:C.red}};
 
+
+// v2.9.89: Reconcile stale open-position records against a completed full SELL.
+// This prevents a ticker from reappearing in BOUGHT after the sell history shows
+// the entire position was closed. New SELL records carry an explicit fullExit flag;
+// older records use a conservative same-entry/same-shares fallback.
+function positionWasFullySold(s){
+  if(!s||!s.position) return false;
+  const held=Number(s.position.shares||0);
+  if(!(held>0)) return true;
+  const entry=Number(s.position.entry||0);
+  const inDate=String(s.position.date||'');
+  const sells=(Array.isArray(s.realized)?s.realized:[]).filter(r=>String(r?.action||'').toUpperCase()==='SELL');
+  if(!sells.length) return false;
+  const latest=sells[sells.length-1]||{};
+  if(latest.fullExit===true) return true;
+  if(Object.prototype.hasOwnProperty.call(latest,'fullExit')) return false;
+  const soldShares=Number(latest.shares||0);
+  const soldEntry=Number(latest.entry||0);
+  const sameEntry=entry>0&&soldEntry>0&&Math.abs(soldEntry-entry)<=Math.max(0.01,entry*0.0001);
+  const sameInDate=!inDate||!latest.dateIn||String(latest.dateIn)===inDate;
+  const tol=Math.max(0.000001,held*0.001);
+  const sameShares=soldShares>0&&Math.abs(soldShares-held)<=tol;
+  return sameEntry&&sameInDate&&sameShares;
+}
+function hasOpenPosition(s){
+  return !!(s&&s.position&&Number(s.position.shares||0)>0&&!positionWasFullySold(s));
+}
+function reconcileClosedPositionsInMemory(){
+  let changed=false;
+  stocks=(stocks||[]).map(s=>{
+    if(!s||!s.position||!positionWasFullySold(s)) return s;
+    const u={...s};
+    delete u.position;
+    changed=true;
+    return u;
+  });
+  return changed;
+}
 function renderCleanCard(s){
   const simple = computeSimpleAction(s);
   const word = simple.word || (s.type==='Long-Term Hold' ? (simple.longTermWord||'—') : '—');
@@ -1311,7 +1349,7 @@ function renderCleanCard(s){
   const initials = (s.ticker||'??').slice(0,2);
   const hue = Array.from(s.ticker||'XX').reduce((a,c)=>a+c.charCodeAt(0),0)%360;
   const reason = (simple.reason||'').replace(/\s+/g,' ').trim();
-  const owned = !!(s.position&&Number(s.position.shares||0)>0);
+  const owned = hasOpenPosition(s);
   const ownPL = owned ? (s.price-s.position.entry)*s.position.shares : 0;
   return `
    <div class="fade-in" style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:14px 16px;margin-bottom:12px;cursor:pointer;position:relative;overflow:hidden;opacity:${s.archived?'0.6':'1'};" onclick="openDetail('${s.id}')">
@@ -1398,7 +1436,7 @@ function setupScore(s){
 function groupedListHTML(list){
   const wordOf=s=>{const a=computeSimpleAction(s);return a.word||(s.type==='Long-Term Hold'?'HOLD':'—');};
   const b={BOUGHT:[],BUY:[],WATCH:[],WAIT:[],HOLD:[]};
-  list.forEach(s=>{ if(s.position&&Number(s.position.shares||0)>0){ b.BOUGHT.push(s); return; } const w=wordOf(s); (b[w]||b.HOLD).push(s); });
+  list.forEach(s=>{ if(hasOpenPosition(s)){ b.BOUGHT.push(s); return; } const w=wordOf(s); (b[w]||b.HOLD).push(s); });
   const byPct=(x,y)=>{if(x.starred&&!y.starred)return -1;if(!x.starred&&y.starred)return 1;return (y.pct||0)-(x.pct||0);};
   const byScore=(x,y)=>{if(x.starred&&!y.starred)return -1;if(!x.starred&&y.starred)return 1;return setupScore(y)-setupScore(x);};
   const byPL=(x,y)=>{const px=(x.price-x.position.entry)*x.position.shares, py=(y.price-y.position.entry)*y.position.shares; return py-px;};
@@ -1698,7 +1736,7 @@ function setPlannedInvest(id, val){
   renderDetail(updated);
 }
 function resetPaperPortfolio(){
-  const openN = stocks.filter(s=>s.position).length;
+  const openN = stocks.filter(hasOpenPosition).length;
   const realN = stocks.reduce((a,s)=>a+((s.realized||[]).length),0);
   showModal(`
     <div style="background:${C.card};border-radius:20px;padding:24px;border:1px solid ${C.border};">
@@ -2114,7 +2152,7 @@ function positionAlert(s){
 }
 function renderPositionWatch(){
   const el = document.getElementById('position-watch'); if(!el) return;
-  const held = (stocks||[]).filter(s=>s.position);
+  const held = (stocks||[]).filter(hasOpenPosition);
   const alerts = held.map(s=>({s, a:positionAlert(s)})).filter(x=>x.a);
   if(!alerts.length){ el.innerHTML=''; return; }
   const order = {'⚠️':0,'🔥':1,'📈':2};
@@ -7892,10 +7930,10 @@ const ACTIVE_BENCH_MAX = 8;
 const RESERVE_BENCH_MAX = 10;
 const PROFIT_CHECKPOINT_PCT = 6;
 const MARKET_TICKERS = ['SPY','QQQ','SOXX','XLE','XLK','XLI','XLY','XLF','XLV','VIX','^VIX'];
-const PRIMARY_POSITION_TARGET = 3; // v2.9.88: three normal positions may be funded when risk capacity is available
+const PRIMARY_POSITION_TARGET = 3; // v2.9.89: three normal positions may be funded when risk capacity is available
 const DEFAULT_MAX_POSITIONS = 3; // hard normal position cap from portfolio stress testing
 const DEFAULT_MAX_RISK_DOLLARS = 100;
-const MAX_PORTFOLIO_RISK_PCT = 2.25; // v2.9.88: maximum planned stop risk across all open + newly selected trades
+const MAX_PORTFOLIO_RISK_PCT = 2.25; // v2.9.89: maximum planned stop risk across all open + newly selected trades
 
 // ── PROMOTION GATE · v2.9.18 ────────────────────────────────────────────────
 // Discovery is allowed to be broad. Trading permission is not.
@@ -9014,7 +9052,7 @@ function positionState(s){
 }
 function stockState(s){
   s=withRecentDailyHistory(s);
-  if(s.position)return positionState(s);
+  if(hasOpenPosition(s))return positionState(s);
   const base=preEntryState(s);
   return applyIntradayEntryLayer(s,base);
 }
@@ -9046,7 +9084,7 @@ function renderMarket(){
   el.innerHTML=items.map(it=>`<div style="display:flex;align-items:center;gap:5px;"><span style="color:${it.ok?C.green:C.textSub};font-size:11px;font-weight:800;">${it.l}</span><span style="color:${C.text};font-size:11px;font-weight:700;">${it.v}</span></div>`).join('');
 }
 function renderPortfolioBox(){
-  const el=document.getElementById('portfolio-box'); if(!el)return; const open=stocks.filter(s=>s.position&&isValidatedStock(s)); if(!open.length){el.innerHTML='';return;}
+  const el=document.getElementById('portfolio-box'); if(!el)return; const open=stocks.filter(s=>hasOpenPosition(s)&&isValidatedStock(s)); if(!open.length){el.innerHTML='';return;}
   const val=open.reduce((a,s)=>a+(displayPrice(s)||0)*(s.position.shares||0),0), cost=open.reduce((a,s)=>a+(s.position.entry||0)*(s.position.shares||0),0), pl=val-cost, risk=open.reduce((a,s)=>a+(plannedRisk(s)||0),0), exp=clusterExposure();
   el.innerHTML=`<div style="margin:14px 16px;"><div style="background:${C.card};border:1.5px solid ${C.border};border-radius:20px;padding:16px 18px;">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;"><span style="color:${C.textMuted};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.1em;">Portfolio</span><span style="color:${open.length>=DEFAULT_MAX_POSITIONS?C.yellow:C.textSub};font-size:12px;font-weight:800;">${open.length} / ${DEFAULT_MAX_POSITIONS} positions</span></div>
@@ -9132,7 +9170,7 @@ function liveCandidateItems(){
 // rank first, fund only the best few, and keep a portfolio-level risk ceiling.
 // A+ never receives larger risk simply for being A+ — evidence/downside set size.
 function evidenceRiskPct(s){
-  // v2.9.88 risk lock: setup quality changes priority, not the normal risk percentage.
+  // v2.9.89 risk lock: setup quality changes priority, not the normal risk percentage.
   // Every normal StockIQ trade starts at 0.75% planned account risk.
   return 0.75;
 }
@@ -9140,7 +9178,7 @@ function capitalOpenPositions(){
   // Capital is real whether a position came from a current validated playbook,
   // an older managed trade, or a manual/test entry. Never pretend occupied cash
   // and stop risk disappear simply because a ticker is not currently qualified.
-  return stocks.filter(s=>s.position&&!isMarketStock(s));
+  return stocks.filter(s=>hasOpenPosition(s)&&!isMarketStock(s));
 }
 function activeCapitalRisk(s){
   const entry=Number(s?.position?.entry||0), shares=Number(s?.position?.shares||0);
@@ -9283,7 +9321,7 @@ function renderStockList(){
 
   if(activeTag==='Buy') list=liveCandidateItems().filter(x=>['BUY','A+ BUY'].includes(x.state?.state)).map(x=>x.s);
   else if(activeTag==='Preparing') list=liveCandidateItems().filter(x=>x.state?.state==='PREPARING').map(x=>x.s);
-  else if(activeTag==='Positions') list=list.filter(s=>s.position&&isValidatedStock(s));
+  else if(activeTag==='Positions') list=list.filter(s=>hasOpenPosition(s)&&isValidatedStock(s));
   else if(activeTag==='Validated Library') list=list.filter(s=>isValidatedStock(s)&&String(s.ticker||'').toUpperCase()!=='PBF');
   else if(activeTag==='Research') list=list.filter(isResearchStock);
   else list=liveCandidateItems().map(x=>x.s);
@@ -9311,12 +9349,13 @@ function renderStockCard(s){
     </div>${conflict?`<div style="color:${C.yellow};font-size:11px;margin-top:9px;font-weight:700;">Portfolio conflict: ${conflict}</div>`:''}
   </div>`;
 }
-function renderHome(){ ensureCorePlaceholders(); renderMarket(); renderPortfolioBox(); const pw=document.getElementById('position-watch'); if(pw)pw.innerHTML=''; renderTonightsOpportunities(); renderFilterBar(); renderListHeader(); renderStockList(); }
+function renderHome(){
+  reconcileClosedPositionsInMemory(); ensureCorePlaceholders(); renderMarket(); renderPortfolioBox(); const pw=document.getElementById('position-watch'); if(pw)pw.innerHTML=''; renderTonightsOpportunities(); renderFilterBar(); renderListHeader(); renderStockList(); }
 
 // ── v2 DETAIL ───────────────────────────────────────────────────────────────
 function calloutBox(kind,title,text){ const cfg={green:{bg:C.greenDim,border:C.green+'66',title:C.green},yellow:{bg:C.yellowDim,border:C.yellow+'66',title:C.yellow},red:{bg:C.redDim,border:C.red+'66',title:C.red},blue:{bg:C.blueDim,border:C.blue+'66',title:C.blue},purple:{bg:C.purpleDim,border:C.purple+'66',title:C.purple},teal:{bg:C.tealDim,border:C.teal+'66',title:C.teal}}[kind]||{bg:C.cardHigh,border:C.border,title:C.text}; return `<div style="background:${cfg.bg};border:1px solid ${cfg.border};border-radius:14px;padding:14px 15px;margin:0 16px 12px;"><div style="color:${cfg.title};font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;">${title}</div><div style="color:${C.text};font-size:14px;font-weight:800;line-height:1.45;">${text}</div></div>`; }
 function topCallout(s,pb,st){
-  if(s.position) return ''; if(!st||!st.state) return ''; if(s.position){ if(st.state==='EXIT') return calloutBox('red','Action Needed',st.reason||'Exit the position.'); if(st.state==='PROTECT / CONSIDER ROTATION') return calloutBox('green','Protect / Consider Rotation',st.reason||'Protect the gain and compare this position with the best waiting setup.'); if(st.state==='DECISION DAY') return calloutBox('purple','Decision Day',st.reason||'This trade has reached a real capital-allocation checkpoint.'); if(st.state==='PROTECT & RUN') return calloutBox('purple','Protect & Run',st.reason||'Protect the gain and let the healthy winner continue.'); if(st.state==='WATCH EXIT') return calloutBox('yellow','Pay Attention',st.reason||'The trade is weakening but not broken.'); return calloutBox('teal','Current Plan',st.reason||'Hold the position unless the stop is hit.'); } if(st.state==='A+ BUY') return calloutBox('green','Best Opportunity',st.reason||'The setup is valid and the environment is supportive.'); if(st.state==='BUY') return calloutBox('green','Ready To Buy',st.reason||'The setup is valid.'); if(st.state==='ENTRY SIGNAL PASSED') return calloutBox('gray','Prior Buy Signal Preserved',st.reason||'A prior verified entry signal occurred; this is not a fresh entry.'); if(st.state==='PREPARING') return st?.intraday?.arm
+  if(hasOpenPosition(s)) return ''; if(!st||!st.state) return ''; if(hasOpenPosition(s)){ if(st.state==='EXIT') return calloutBox('red','Action Needed',st.reason||'Exit the position.'); if(st.state==='PROTECT / CONSIDER ROTATION') return calloutBox('green','Protect / Consider Rotation',st.reason||'Protect the gain and compare this position with the best waiting setup.'); if(st.state==='DECISION DAY') return calloutBox('purple','Decision Day',st.reason||'This trade has reached a real capital-allocation checkpoint.'); if(st.state==='PROTECT & RUN') return calloutBox('purple','Protect & Run',st.reason||'Protect the gain and let the healthy winner continue.'); if(st.state==='WATCH EXIT') return calloutBox('yellow','Pay Attention',st.reason||'The trade is weakening but not broken.'); return calloutBox('teal','Current Plan',st.reason||'Hold the position unless the stop is hit.'); } if(st.state==='A+ BUY') return calloutBox('green','Best Opportunity',st.reason||'The setup is valid and the environment is supportive.'); if(st.state==='BUY') return calloutBox('green','Ready To Buy',st.reason||'The setup is valid.'); if(st.state==='ENTRY SIGNAL PASSED') return calloutBox('gray','Prior Buy Signal Preserved',st.reason||'A prior verified entry signal occurred; this is not a fresh entry.'); if(st.state==='PREPARING') return st?.intraday?.arm
     ? calloutBox('yellow','Entry Armed',st.reason||'The prior daily setup is qualified and waiting for its execution trigger.')
     : calloutBox('yellow','What Needs To Happen',st.reason||'The setup is close but is not armed yet.'); if(st.state==='TRIGGERED / VERIFY') return calloutBox('purple','Reclaim Triggered — Verify Entry',st.reason||'The prior setup qualified and the reclaim occurred; verify the intraday execution window.'); if(st.state==='ENTRY MISSED') return calloutBox('orange','Entry Missed — Do Not Chase',st.reason||'The valid setup has already moved beyond the allowed entry band.'); return calloutBox('blue','Why It Is Waiting',st.reason||'The setup is not ready yet.'); }
 function checklistHTML(checks){
@@ -9437,7 +9476,7 @@ function yourTradeProofPanel(s,pb){
     <div><div class="v2lbl">Your Win Rate</div><div class="v2big">${completed?Math.round(wins/completed*100)+'%':'—'}</div></div>
     <div><div class="v2lbl">Avg Return</div><div class="v2big">${avg!=null?(avg>=0?'+':'')+avg.toFixed(1)+'%':'—'}</div></div>
   </div>`;
-  if(s.position) body+=`<div style="background:${C.green}10;border:1px solid ${C.green}44;border-radius:12px;padding:11px 12px;margin-bottom:12px;"><div style="color:${C.green};font-size:11px;font-weight:900;text-transform:uppercase;margin-bottom:6px;">Current Trade</div><div style="color:${C.text};font-size:12.5px;line-height:1.7;">Entry ${money(s.position.entry)} · ${s.position.shares} shares · ${s.position.signalTier||'BUY'}<br>Current ${livePct!=null?(livePct>=0?'+':'')+livePct.toFixed(1)+'%':'—'} · Max gain while held ${live&&live.mfe!=null?'+'+live.mfe.toFixed(1)+'%':'—'} · Worst drawdown ${live&&live.mae!=null?live.mae.toFixed(1)+'%':'—'}</div></div>`;
+  if(hasOpenPosition(s)) body+=`<div style="background:${C.green}10;border:1px solid ${C.green}44;border-radius:12px;padding:11px 12px;margin-bottom:12px;"><div style="color:${C.green};font-size:11px;font-weight:900;text-transform:uppercase;margin-bottom:6px;">Current Trade</div><div style="color:${C.text};font-size:12.5px;line-height:1.7;">Entry ${money(s.position.entry)} · ${s.position.shares} shares · ${s.position.signalTier||'BUY'}<br>Current ${livePct!=null?(livePct>=0?'+':'')+livePct.toFixed(1)+'%':'—'} · Max gain while held ${live&&live.mfe!=null?'+'+live.mfe.toFixed(1)+'%':'—'} · Worst drawdown ${live&&live.mae!=null?live.mae.toFixed(1)+'%':'—'}</div></div>`;
   if(realized.length){
     body+=`<div style="color:${C.text};font-size:12px;font-weight:900;margin-bottom:6px;">Buy / Sell History</div>`;
     body+=realized.slice().reverse().slice(0,6).map(r=>{
@@ -9723,7 +9762,7 @@ function setupEducationPanel(s,pb,st=null){
   // Keep the live screen visual. Detailed strategy family stays in the backend.
   // For an armed intraday reclaim, show the frozen qualifying bar — not today's
   // post-move RSI — so every card on the page tells the same story.
-  if(s.position) return '';
+  if(hasOpenPosition(s)) return '';
   const sourceChecks=(Array.isArray(st?.checks)&&st.checks.length)?st.checks:setupChecks(s);
   const checks=sourceChecks.filter(x=>x.required);
   const passed=checks.filter(x=>x.ok).slice(0,3);
@@ -9867,7 +9906,7 @@ function entryPanel(s,pb,st){
   return panel('Entry Plan',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;"><div><div class="v2lbl">Signal Price</div><div class="v2big">${money(sig)}</div></div><div><div class="v2lbl">Buy Up To</div><div class="v2big" style="color:${C.green};">${money(max)}</div></div></div><div style="color:${C.textSub};font-size:12.5px;line-height:1.55;margin-top:10px;">At or below ${money(max)}: OK to buy. Above it: don’t chase. A sharp gap down should be reviewed before entering.</div>`);
 }
 function riskPanel(s,pb){
-  if(s.position){
+  if(hasOpenPosition(s)){
     const st=suggestedStop(s),p=curVal(s,'price'),dist=p&&st.price?((p/st.price)-1)*100:null,risk=plannedRisk(s);
     return panel('Risk Plan',`<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;"><div><div class="v2lbl">Bought At</div><div class="v2val">${money(s.position.entry)}</div></div><div><div class="v2lbl">Sell Protection</div><div class="v2val" style="color:${st.active?C.purple:C.red};">${money(st.price)}</div></div><div><div class="v2lbl">Room Left</div><div class="v2val">${dist==null?'—':dist.toFixed(1)+'%'}</div></div></div><div style="color:${C.textSub};font-size:12.5px;line-height:1.55;margin-top:10px;">Planned loss if the protection price works as expected: ${risk==null?'—':fmtP(risk)}. A fast overnight gap can still create a larger loss.</div>`);
   }
@@ -10081,7 +10120,7 @@ function preTop(s,pb,st){
   const executionLine=ix?.arm
     ? `<div style="color:${C.textMuted};font-size:10.5px;margin-top:5px;font-weight:800;">Qualified ${ix.arm.dailyDate} · RSI ${ix.arm.priorRSI==null?'—':Number(ix.arm.priorRSI).toFixed(1)} · SMA50 trigger ${money(ix.arm.trigger)}</div>`
     : '';
-  return `<div style="padding:16px 16px 10px;"><button onclick="stockIQBackFromDetail()" style="background:none;border:none;color:${C.textSub};padding:0 0 9px;cursor:pointer;">← Back</button><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;"><div style="min-width:0;"><div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;"><span style="color:${C.text};font-size:24px;font-weight:950;">${s.ticker}</span>${badge(st.state)}</div><div style="color:${C.text};font-size:13px;font-weight:700;margin-top:5px;">${companyNameFor(s)}</div>${label?`<div style="color:${C.textSub};font-size:12px;margin-top:3px;">${label}</div>`:''}${executionLine}<div style="color:${C.textMuted};font-size:9px;margin-top:5px;">v2.9.88</div></div><div style="text-align:right;flex-shrink:0;"><div style="color:${C.text};font-size:20px;font-weight:900;margin-bottom:2px;">${money(displayPrice(s))}</div>${liveDayMoveHTML(s,'11px')} ${canBuy?`<button onclick="showV2BuyFlow('${s.id}','${buyLabel}')" style="border:none;border-radius:10px;background:${C.green};color:#000;font-size:13px;font-weight:950;padding:9px 18px;cursor:pointer;box-shadow:0 0 0 1px ${C.green}33;">${buyLabel}</button>`:''}</div></div></div>`;
+  return `<div style="padding:16px 16px 10px;"><button onclick="stockIQBackFromDetail()" style="background:none;border:none;color:${C.textSub};padding:0 0 9px;cursor:pointer;">← Back</button><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;"><div style="min-width:0;"><div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;"><span style="color:${C.text};font-size:24px;font-weight:950;">${s.ticker}</span>${badge(st.state)}</div><div style="color:${C.text};font-size:13px;font-weight:700;margin-top:5px;">${companyNameFor(s)}</div>${label?`<div style="color:${C.textSub};font-size:12px;margin-top:3px;">${label}</div>`:''}${executionLine}<div style="color:${C.textMuted};font-size:9px;margin-top:5px;">v2.9.89</div></div><div style="text-align:right;flex-shrink:0;"><div style="color:${C.text};font-size:20px;font-weight:900;margin-bottom:2px;">${money(displayPrice(s))}</div>${liveDayMoveHTML(s,'11px')} ${canBuy?`<button onclick="showV2BuyFlow('${s.id}','${buyLabel}')" style="border:none;border-radius:10px;background:${C.green};color:#000;font-size:13px;font-weight:950;padding:9px 18px;cursor:pointer;box-shadow:0 0 0 1px ${C.green}33;">${buyLabel}</button>`:''}</div></div></div>`;
 }
 function ownedResearchDetails(s,pb){
   const research = [
@@ -10122,7 +10161,7 @@ function renderDetail(s){
   const el=document.getElementById('detail-content'); if(!el)return; const pb=pbFor(s); if(!pb){ const ev=evidenceFor(s), rp=researchPromotionLabel(s); el.innerHTML=`<div style="padding:16px;"><button onclick="stockIQBackFromDetail()" style="background:none;border:none;color:${C.textSub};padding:0 0 12px;">← Back</button><h2 style="color:${C.text};margin:0;">${s.ticker}</h2>${companyNameFor(s)?`<div style="color:${C.textSub};font-size:13px;margin-top:4px;">${companyNameFor(s)}</div>`:''}<div style="margin-top:12px;color:${rp.color};font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;">${rp.label}${ev?.grade?` · ${ev.grade}`:''}</div>${ev?.family?`<div style="color:${C.text};font-size:13px;font-weight:800;margin-top:8px;">Candidate family: ${ev.family.replaceAll('_',' ')}</div>`:''}<p style="color:${C.textSub};font-size:13px;line-height:1.65;">${ev?.summary||'This ticker can show indicators, but StockIQ will not issue trading signals until it has a validated playbook.'}</p><div style="background:${C.card};border:1px solid ${C.border};border-radius:14px;padding:13px 14px;margin:12px 0;"><div style="color:${C.yellow};font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;margin-bottom:7px;">Promotion gate</div><div style="color:${C.textSub};font-size:12px;line-height:1.6;">Current readiness is not enough. Promotion requires useful trade frequency, positive friction-adjusted expectancy, older/newer or OOS survival, parameter-neighborhood robustness, and tolerable downside. Until that evidence is explicitly approved, this stock stays research-only.</div></div>${indicatorPanel(s,{})}</div>`; return; }
   const st=stockState(s),checks=(Array.isArray(st?.checks)&&st.checks.length)?st.checks:setupChecks(s),conflict=portfolioConflict(s);
   let html=s.position?positionTop(s,pb,st):preTop(s,pb,st); if(!s.position){ html+=detailMetaStrip(s,pb,st); const pa=plainEntryAction(s,pb,st); html+=panel('What To Do Now',`<div style="font-size:21px;font-weight:950;color:${pa.color};margin-bottom:7px;">${pa.label}</div><div style="color:${C.text};font-size:14px;font-weight:850;line-height:1.5;">${pa.action}</div><div style="color:${C.textSub};font-size:12px;line-height:1.55;margin-top:8px;">Why: ${pa.why}</div><div style="color:${C.textSub};font-size:12px;line-height:1.55;margin-top:4px;">Next: ${pa.next}</div>`); } html+=topCallout(s,pb,st);
-  if(s.position){
+  if(hasOpenPosition(s)){
     html+=panel('Trade Health',positionHealthHTML(s));
     html+=riskPanel(s,pb);
     html+=exitPersonalityPanel(s,pb,st);
@@ -10272,7 +10311,8 @@ async function saveV2Close(id){
     action:'SELL',
     signalTier:s.position.signalTier||'BUY',
     mfePct:path.mfe,
-    maePct:path.mae
+    maePct:path.mae,
+    fullExit:isFullSell
   };
 
   const u={...s,realized:[...(s.realized||[]),rec]};
@@ -11291,7 +11331,7 @@ async function applyV2IntradayFile(input){
 // ── v2 initialization ────────────────────────────────────────────────────────
 (function initStockIQV2(){
   const style=document.createElement('style'); style.textContent=`.v2lbl{color:${C.textSub};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}.v2val{color:${C.text};font-size:14px;font-weight:900}.v2big{color:${C.text};font-size:18px;font-weight:950}`; document.head.appendChild(style);
-  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.88 · Lifecycle Clarity + Family Filter + Risk Lock';
+  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.89 · Sold Position Reconciliation Fix';
   const topButtons=[...document.querySelectorAll('button')]; const add=topButtons.find(b=>b.textContent.includes('Add Stock')); if(add){ add.style.display='none'; add.setAttribute('aria-hidden','true'); add.tabIndex=-1; } const scan=topButtons.find(b=>b.textContent.includes('Import Scan')); if(scan){scan.textContent='Daily Data';scan.onclick=showDailyDataFlow;scan.setAttribute('aria-label','Upload daily multi-ticker data');}
   if(scan && !document.getElementById('intraday-data-btn')){ const b=document.createElement('button'); b.id='intraday-data-btn'; b.textContent='Intraday Data'; b.onclick=showIntradayDataFlow; b.setAttribute('aria-label','Upload current 30-minute execution data'); b.style.cssText=scan.style.cssText; b.style.borderColor=C.yellow; b.style.color=C.yellow; scan.parentNode.insertBefore(b,scan.nextSibling); }
   if(scan && !document.getElementById('sunday-discovery-btn')){ const b=document.createElement('button'); b.id='sunday-discovery-btn'; b.textContent='Sunday Discovery'; b.onclick=showSundayDiscoveryFlow; b.setAttribute('aria-label','Upload Sunday scanner discovery report'); b.style.cssText=scan.style.cssText; b.style.borderColor=C.purple; b.style.color=C.purple; const anchor=document.getElementById('intraday-data-btn')||scan; anchor.parentNode.insertBefore(b,anchor.nextSibling); }
@@ -11474,7 +11514,7 @@ function showSundayDiscoveryFlow(){
     </div>
   </div>`);
 }
-(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.88 · Lifecycle Clarity + Family Filter + Risk Lock';})();
+(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.89 · Sold Position Reconciliation Fix';})();
 
 // ── v2.9.54 HISTORY LIFECYCLE ──────────────────────────────────────
 // Research is no longer a catch-all. The visible Research tab contains only:
@@ -11696,7 +11736,7 @@ function renderStockList(){
 
   if(activeTag==='Buy') list=liveCandidateItems().filter(x=>['BUY','A+ BUY'].includes(x.state?.state)).map(x=>x.s);
   else if(activeTag==='Preparing') list=liveCandidateItems().filter(x=>x.state?.state==='PREPARING').map(x=>x.s);
-  else if(activeTag==='Positions') list=list.filter(s=>s.position&&isValidatedStock(s));
+  else if(activeTag==='Positions') list=list.filter(s=>hasOpenPosition(s)&&isValidatedStock(s));
   else if(activeTag==='Validated Library') list=list.filter(s=>isValidatedStock(s)&&String(s.ticker||'').toUpperCase()!=='PBF');
   else if(activeTag==='Research') list=list.filter(researchVisibleStock);
   else list=liveCandidateItems().map(x=>x.s);
@@ -11716,7 +11756,7 @@ function renderStockList(){
 }
 
 (function v2953Init(){
-  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.88 · Lifecycle Clarity + Family Filter + Risk Lock';
+  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.89 · Sold Position Reconciliation Fix';
   // Safe cleanup on load: de-duplicate queue and remove only records that already
   // have evidence. Genuine pending Sunday names are never deleted automatically.
   try{ applyResearchReconciliation(true); }catch(e){ console.warn('Research reconciliation init failed',e); }
@@ -11949,7 +11989,7 @@ saveV2Close=async function(id){
 auth.onAuthStateChanged(user=>{ if(user){ loadSignalLedger(); syncSignalLedgerFromCloud(); } else { SIGNAL_LEDGER=[]; } });
 loadSignalLedger();
 setTimeout(()=>{ try{ updateAndCaptureSignals(); renderFilterBar(); }catch(e){ console.warn('Signal ledger init failed',e); } },800);
-const _v2965Version=document.getElementById('stockiq-version'); if(_v2965Version)_v2965Version.textContent='StockIQ v2.9.88 · Lifecycle Clarity + Family Filter + Risk Lock';
+const _v2965Version=document.getElementById('stockiq-version'); if(_v2965Version)_v2965Version.textContent='StockIQ v2.9.89 · Sold Position Reconciliation Fix';
 // v2.9.82: preserves the v2.9.81 verified-entry persistence logic; fixes canonical daily CSV dates, filename/date validation, and Detail Back navigation.
 [...document.querySelectorAll('button')].filter(b=>/^(\+\s*)?(Add Stock|Research)$/i.test((b.textContent||'').trim())).forEach(b=>{ if(!b.closest('#tag-bar')){ b.style.display='none'; b.setAttribute('aria-hidden','true'); b.tabIndex=-1; } });
 </script>
