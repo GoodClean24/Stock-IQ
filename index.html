@@ -12416,7 +12416,7 @@ renderDetail=function(s){
 
 // Re-render home and update version after all overrides are active.
 const _v2995Version=document.getElementById('stockiq-version');
-if(_v2995Version)_v2995Version.textContent='StockIQ v2.9.97 · Casing + Evidence Legend Audit';
+if(_v2995Version)_v2995Version.textContent='StockIQ v2.9.98 · Owned Flow + Home Sector Navigation';
 setTimeout(()=>{ try{ renderHome(); }catch(e){ console.warn('v2.9.95 refresh failed',e); } },250);
 </script>
 
@@ -12571,7 +12571,158 @@ auth.onAuthStateChanged(user=>{
 });
 
 const _v2996Version=document.getElementById('stockiq-version');
-if(_v2996Version)_v2996Version.textContent='StockIQ v2.9.97 · Casing + Evidence Legend Audit';
+if(_v2996Version)_v2996Version.textContent='StockIQ v2.9.98 · Owned Flow + Home Sector Navigation';
 </script>
+
+
+<script>
+// ── v2.9.98 OWNED FLOW + HOME NAVIGATION / SECTOR CLARITY ────────────────
+// UX-only release. Trading qualification, risk, entry, and exit rules are not changed.
+// Portfolio generation/state from v2.9.97 remains authoritative and version-independent.
+
+function v2998HomeMeta(s,pb){
+  const parts=[];
+  if(s?.sector) parts.push(s.sector);
+  const ev=evidenceTagForDisplay(s);
+  if(ev) parts.push(ev);
+  const fam=pb?trendTypeLabel(s,pb):'';
+  if(fam) parts.push(fam);
+  return parts.join(' · ');
+}
+
+// Capital Plan: rows are direct navigation links, and metadata is consistent:
+// Ticker · Sector · Evidence · Family.
+capitalPlanBox=function(){
+  const plan=capitalPlan();
+  if(!plan.buys.length) return '';
+  if(!plan.ready) return `<div style="background:${C.card};border-radius:16px;border:1px solid ${C.blue}55;padding:15px 16px;margin:0 16px 12px;"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px;"><div><div style="color:${C.blue};font-size:10px;text-transform:uppercase;letter-spacing:.09em;font-weight:950;">Capital Plan</div><div style="color:${C.textSub};font-size:12px;line-height:1.5;margin-top:5px;">There are ${plan.buys.length} valid BUY${plan.buys.length===1?'':'s'}, but StockIQ will not pretend they all deserve money. Set your trading capital so it can fund only the highest-ranked few.</div></div><button onclick="setAccountSize()" style="border:none;border-radius:9px;background:${C.green};color:#000;padding:9px 11px;font-size:11px;font-weight:900;cursor:pointer;white-space:nowrap;">Set capital</button></div></div>`;
+  const row=r=>{
+    const pct=r.status==='FUND'&&accountSize>0?(r.amount/accountSize*100):null;
+    const sh=r.status==='FUND'&&r.shares>0?r.shares:null;
+    const pb=pbFor(r.s);
+    const meta=v2998HomeMeta(r.s,pb);
+    return `<div onclick="openDetail('${r.s.id}')" title="Open ${r.s.ticker}" style="display:grid;grid-template-columns:62px 1fr auto;gap:8px;align-items:center;padding:9px 0;border-bottom:1px solid ${C.border};cursor:pointer;">
+      <span style="color:${r.status==='FUND'?C.green:C.textMuted};font-size:10px;font-weight:950;">${r.status}</span>
+      <div><div style="color:${C.text};font-size:13px;font-weight:900;">${r.s.ticker}${meta?` <span style="color:${C.textMuted};font-size:9.5px;font-weight:800;">· ${meta}</span>`:''}</div><div style="color:${C.textSub};font-size:10.5px;line-height:1.4;margin-top:2px;">${r.why}</div></div>
+      <div style="text-align:right;"><div style="color:${r.status==='FUND'?C.text:C.textMuted};font-size:12px;font-weight:900;white-space:nowrap;">${r.status==='FUND'?`Invest up to ${money(r.amount)}`:'—'}</div>${r.status==='FUND'?`<div style="color:${C.textMuted};font-size:9px;white-space:nowrap;">~${sh.toFixed(2)} shares · ${pct.toFixed(1)}% capital · risk ${money(r.risk)}</div>`:''}</div>
+    </div>`;
+  };
+  const committedRisk=Math.max(0,plan.maxRisk-plan.remainingRisk), committedCash=Math.max(0,accountSize-plan.remainingCash);
+  return `<div style="background:${C.card};border-radius:16px;border:1px solid ${C.blue}55;padding:15px 16px;margin:0 16px 12px;"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:6px;"><div><div style="color:${C.blue};font-size:10px;text-transform:uppercase;letter-spacing:.09em;font-weight:950;">Capital Plan · Fund the best, not all</div><div style="color:${C.textSub};font-size:11px;line-height:1.45;margin-top:4px;">Up to ${DEFAULT_MAX_POSITIONS} normal positions · ${MAX_PORTFOLIO_RISK_PCT.toFixed(2)}% maximum total planned risk · each normal trade starts at 0.75% planned risk.</div></div><button onclick="setAccountSize(); event.stopPropagation();" style="background:none;border:1px solid ${C.border};border-radius:8px;color:${C.textSub};padding:6px 8px;font-size:10px;font-weight:800;cursor:pointer;">${money(accountSize)}</button></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0 4px;"><div style="background:${C.cardHigh};border-radius:9px;padding:8px 9px;"><div class="v2lbl">Capital committed</div><div style="color:${C.text};font-size:12px;font-weight:900;">${money(committedCash)} / ${money(accountSize)}</div></div><div style="background:${C.cardHigh};border-radius:9px;padding:8px 9px;"><div class="v2lbl">Stop risk committed</div><div style="color:${C.text};font-size:12px;font-weight:900;">${money(committedRisk)} / ${money(plan.maxRisk)}</div></div></div>${plan.rows.map(row).join('')}<div style="color:${C.textMuted};font-size:10px;line-height:1.45;margin-top:8px;">Wide validated stops can intentionally leave cash unused. Do not increase size just to deploy cash. Planned stop risk uses the position's active stop, but gaps can still execute below it and create a larger loss.</div></div>`;
+};
+
+// Home priority sections: show Sector + Evidence + Family consistently.
+renderTonightsOpportunities=function(){
+  const el=document.getElementById('tonights-opportunities'); if(!el)return;
+  const owned=stocks.filter(s=>isValidatedStock(s)&&hasOpenPosition(s)).map(s=>({s,state:safeStockState(s)}))
+    .sort((a,b)=>statePriority(a.state?.state)-statePriority(b.state?.state));
+  const live=liveCandidateItems();
+  const buys=live.filter(x=>['A+ BUY','BUY'].includes(x.state?.state));
+  const preparing=live.filter(x=>x.state?.state==='PREPARING');
+
+  const ownedBox=owned.length?`<div style="background:${C.card};border-radius:16px;border:1.5px solid ${C.teal}77;padding:16px;margin:0 16px 12px;box-shadow:0 0 0 1px ${C.teal}11;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;"><div style="color:${C.teal};font-size:10px;text-transform:uppercase;letter-spacing:.09em;font-weight:950;">Bought Positions</div><div style="color:${C.textMuted};font-size:10px;">Always shown · ${owned.length} open</div></div>
+    ${owned.map(x=>{const s=x.s,st=x.state?.state||'BOUGHT',pb=pbFor(s),p=curVal(s,'price'),entry=Number(s.position?.entry||0),shares=Number(s.position?.shares||0),pl=(p!=null&&entry&&shares)?(p-entry)*shares:null,plPct=(p!=null&&entry)?((p/entry)-1)*100:null,tier=s.position?.signalTier||'BUY',meta=v2998HomeMeta(s,pb);return `<div onclick="openDetail('${s.id}')" style="padding:11px 0;border-bottom:1px solid ${C.border};cursor:pointer;"><div style="display:flex;align-items:center;justify-content:space-between;gap:8px;"><div style="min-width:0;"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><span style="color:${C.text};font-size:15px;font-weight:950;">${s.ticker}</span>${badge(st)}<span style="color:${tier==='A+ BUY'?C.green:C.textMuted};font-size:9px;font-weight:900;">${tier}</span></div>${meta?`<div style="color:${C.textMuted};font-size:9.8px;font-weight:800;margin-top:4px;">${meta}</div>`:''}</div><div style="text-align:right;flex-shrink:0;"><div style="color:${pl==null?C.textSub:(pl>=0?C.green:C.red)};font-size:13px;font-weight:950;">${pl==null?'—':`${pl>=0?'+':''}${fmtP(pl)}`}</div><div style="color:${C.textMuted};font-size:10px;">${plPct==null?'':`${plPct>=0?'+':''}${plPct.toFixed(1)}%`} · Day ${x.state?.day||1}/${pb?.hold||'—'}</div></div></div><div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:6px;color:${C.textSub};font-size:10.5px;"><span>Entry ${money(entry)}</span><span>${shares} shares</span><span>Now ${money(p)}</span></div><div style="color:${C.textSub};font-size:11.5px;line-height:1.45;margin-top:5px;">${x.state?.reason||'Position is open.'}</div></div>`;}).join('')}</div>`:'';
+
+  const row=x=>{const st=x.state.state,conf=portfolioConflict(x.s),pb=pbFor(x.s),meta=v2998HomeMeta(x.s,pb);return `<div onclick="openDetail('${x.s.id}')" style="padding:10px 0;border-bottom:1px solid ${C.border};cursor:pointer;"><div style="display:flex;align-items:center;justify-content:space-between;gap:8px;"><div style="min-width:0;"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><span style="color:${C.text};font-size:14px;font-weight:900;">${x.s.ticker}</span>${badge(st)}</div>${meta?`<div style="color:${C.textMuted};font-size:9.8px;font-weight:800;margin-top:4px;">${meta}</div>`:''}</div><span style="color:${C.textSub};font-size:11px;white-space:nowrap;">${['BUY','A+ BUY'].includes(st)?`Buy up to ${money(buyUpTo(x.s))}`:''}</span></div><div style="color:${C.textSub};font-size:11.5px;line-height:1.45;margin-top:4px;">${conf||x.state.reason}</div></div>`;};
+
+  const buyBox=buys.length?`<div style="background:${C.card};border-radius:16px;border:1px solid ${C.green}66;padding:16px;margin:0 16px 12px;"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;"><div style="color:${C.green};font-size:10px;text-transform:uppercase;letter-spacing:.09em;font-weight:950;">Buy / A+ Buy</div><div style="color:${C.textMuted};font-size:10px;">Actionable now · ${buys.length} · max ${LIVE_CANDIDATE_CAP}</div></div>${buys.map(row).join('')}${evidenceLegendHTML(buys)}</div>`:'';
+  const quiet=(!buys.length&&!preparing.length)?`<div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:16px;margin:0 16px 14px;color:${C.textSub};font-size:13px;">NO NEW QUALIFIED STOCKS. Nothing is close enough to act on right now; WAIT names remain monitored in the validated library.</div>`:'';
+  el.innerHTML=ownedBox+capitalPlanBox()+buyBox+quiet;
+};
+
+// Lower sorted/filter list: same metadata order.
+const _v2998BaseRenderStockCard=renderStockCard;
+renderStockCard=function(s){
+  const pb=pbFor(s);
+  if(!pb) return _v2998BaseRenderStockCard(s);
+  const st=safeStockState(s), price=displayPrice(s), reg=regressionStats(s), conflict=portfolioConflict(s), pos=hasOpenPosition(s)?s.position:null;
+  const plPct=pos&&price&&pos.entry?((price/pos.entry)-1)*100:null, stop=pos?suggestedStop(s):null, meta=v2998HomeMeta(s,pb);
+  return `<div onclick="openDetail('${s.id}')" style="background:${C.card};border:1px solid ${C.border};border-radius:15px;padding:14px 16px;cursor:pointer;">
+    <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;"><div><div style="display:flex;align-items:center;gap:8px;"><span style="color:${C.text};font-size:16px;font-weight:900;">${s.ticker}</span>${badge(st.state)}</div>${meta?`<div style="color:${C.textMuted};font-size:10px;margin-top:4px;font-weight:800;">${meta}</div>`:''}</div><div style="text-align:right;"><div style="color:${C.text};font-size:14px;font-weight:900;">${money(price)}</div>${plPct!=null?`<div style="color:${plPct>=0?C.green:C.red};font-size:11px;font-weight:800;">${pctFmt(plPct)}</div>`:''}${liveDayMoveHTML(s,'10.5px')}</div></div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:11px;padding-top:10px;border-top:1px solid ${C.border};">
+      ${pos?`<div><div class="v2lbl">Day</div><div class="v2val">${positionDays(s)}/${pb.hold}</div></div><div><div class="v2lbl">${stop.type}</div><div class="v2val">${money(stop.price)}</div></div><div><div class="v2lbl">Entry</div><div class="v2val">${money(pos.entry)}</div></div>`:`<div><div class="v2lbl">Regression</div><div class="v2val">${reg.z==null?'—':reg.z.toFixed(2)}</div></div><div><div class="v2lbl">Evidence</div><div class="v2val">${modernEvidenceLabel(s,pb)}</div></div><div><div class="v2lbl">${['BUY','A+ BUY'].includes(st.state)?'Buy Up To':'Key Detail'}</div><div class="v2val">${['BUY','A+ BUY'].includes(st.state)?money(buyUpTo(s)):st.state}</div></div>`}
+    </div>${conflict?`<div style="color:${C.yellow};font-size:11px;margin-top:9px;font-weight:700;">Portfolio conflict: ${conflict}</div>`:''}
+  </div>`;
+};
+
+// Owned-stock header: family definition stays near ticker; no duplicate Trend Type card.
+positionTop=function(s,pb,st){
+  const gain=st?.gainPct, day=positionDays(s)||1, chart=chartWatchMeta(s,pb,st);
+  const todayPct=Number.isFinite(Number(s?.liveDayPct))?Number(s.liveDayPct):null;
+  const dayCmp=todayVsPreviousDayContext(s), family=trendTypeLabel(s,pb), action=plainOwnedAction(s,pb,st);
+  return `<div style="margin:0 16px 14px;">
+    <button type="button" onclick="stockIQBackFromDetail(); return false;" style="background:none;border:none;padding:0;margin:0 0 10px 0;color:${C.textSub};font-size:12px;font-weight:850;cursor:pointer;">← Back</button>
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;"><div style="min-width:0;"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><div style="font-size:25px;font-weight:950;color:${C.text};">${s.ticker||''}</div><div style="font-size:11px;font-weight:950;color:${C.teal};border:1px solid ${C.teal}66;border-radius:7px;padding:4px 7px;">BOUGHT</div></div><div style="font-size:13px;color:${C.text};font-weight:800;margin-top:3px;">${companyNameFor(s)||''}</div>${s.sector?`<div style="font-size:10.5px;color:${C.textMuted};font-weight:750;margin-top:3px;">Sector: ${s.sector}</div>`:''}<div style="font-size:11.5px;color:${C.textSub};font-weight:850;margin-top:3px;">${family}</div><div style="font-size:10.3px;line-height:1.4;color:${C.textMuted};margin-top:3px;max-width:560px;">${familyDefinitionText(s,pb)}</div></div>
+      <div style="text-align:right;min-width:170px;"><div style="font-size:23px;font-weight:950;color:${C.text};">${money(curVal(s,'price'))}</div><div style="font-size:12px;font-weight:900;margin-top:5px;color:${todayPct==null?C.textMuted:(todayPct>=0?C.green:C.red)};">Today ${todayPct==null?'—':pctFmt(todayPct)}</div><div title="${dayCmp.label||''}" style="font-size:12px;font-weight:900;margin-top:3px;color:${dayCmp.delta==null?C.textMuted:(dayCmp.delta>=0?C.green:C.red)};">Vs Previous Day ${dayCmp.delta==null?'—':`${dayCmp.delta>=0?'+':''}${dayCmp.delta.toFixed(1)}%`} <span style="color:${dayCmp.color};">${dayCmp.arrow||''}</span></div></div></div>
+    <div style="margin-top:11px;padding-top:10px;border-top:1px solid ${C.border};display:grid;grid-template-columns:1fr 1fr;gap:8px;"><div style="background:${C.card};border:1px solid ${C.border};border-radius:12px;padding:10px 11px;"><div class="v2lbl">Trade Age</div><div style="font-size:13px;font-weight:950;color:${C.text};margin-top:3px;">Day ${day}/${pb.hold}</div></div><div title="${chart.reason}" style="background:${C.card};border:1px solid ${chart.color}55;border-radius:12px;padding:10px 11px;"><div class="v2lbl">Chart To Watch</div><div style="font-size:12.5px;font-weight:950;color:${chart.color};margin-top:3px;">${chart.chart}</div><div style="color:${C.textMuted};font-size:10px;line-height:1.4;margin-top:4px;">${chart.chart==='30-Min'?'Use the 30-minute report for this required check.':'Use the Daily chart. No 30-minute report is needed right now.'}</div></div></div>
+  </div>
+  <div style="background:${C.card};border:2px solid ${action.color}66;border-radius:16px;padding:16px;margin:0 16px 12px;"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:18px;"><div style="min-width:0;flex:1;"><div class="v2lbl">WHAT TO DO NOW</div><div style="font-size:23px;font-weight:950;color:${action.color};margin-top:3px;">${action.label}</div></div><div style="text-align:right;min-width:125px;padding-left:12px;border-left:1px solid ${C.border};"><div class="v2lbl">TRADE RESULT</div><div style="font-size:24px;font-weight:950;color:${gain==null?C.text:(gain>=0?C.green:C.red)};margin-top:3px;line-height:1.05;">${gain==null?'—':pctFmt(gain)}</div>${s.position?.entry&&curVal(s,'price')!=null&&s.position?.shares?`<div style="font-size:11.5px;font-weight:850;color:${((curVal(s,'price')-s.position.entry)*s.position.shares)>=0?C.green:C.red};margin-top:5px;">${((curVal(s,'price')-s.position.entry)*s.position.shares)>=0?'+':''}${money((curVal(s,'price')-s.position.entry)*s.position.shares)}</div>`:''}</div></div><div style="font-size:14px;font-weight:900;color:${C.text};line-height:1.5;margin-top:8px;">${action.action}</div><div style="margin-top:12px;padding-top:11px;border-top:1px solid ${C.border};display:grid;grid-template-columns:1fr;gap:8px;"><div><div class="v2lbl">WHY</div><div style="font-size:12.5px;line-height:1.5;color:${C.text};font-weight:800;margin-top:3px;">${action.why}</div></div><div><div class="v2lbl">WHEN TO GET OUT</div><div style="font-size:12.5px;line-height:1.5;color:${C.text};font-weight:850;margin-top:3px;">${action.sellIf}</div></div><div><div class="v2lbl">NEXT DECISION</div><div style="font-size:12.5px;line-height:1.5;color:${C.textSub};font-weight:800;margin-top:3px;">${action.next}</div></div></div></div>`;
+};
+
+function v2998OwnedRiskExitPanel(s,pb,st){
+  const stop=suggestedStop(s), p=curVal(s,'price'), dist=p&&stop?.price?((p/stop.price)-1)*100:null, risk=plannedRisk(s);
+  const ep=exitPersonality(s), gain=Number(st?.gainPct), day=positionDays(s)||1;
+  let exitText='';
+  if(ep.autoTrail){
+    const active=Number.isFinite(gain)&&gain>=ep.activationPct;
+    exitText=active
+      ? `Profit protection is active. Keep holding while the price stays above ${money(stop?.price)}. Sell if the price reaches that protection price.`
+      : `Keep holding under the normal protection price. If this trade reaches +${ep.activationPct}%, StockIQ will turn on the validated profit-protection rule.`;
+  }else{
+    exitText=`+6% is a checkpoint only — it is not a sell signal. Your main decision is Day ${pb.hold}${pb.maxHold>pb.hold?`, and a healthy trade may continue toward Day ${pb.maxHold}`:''}.`;
+  }
+  return panel('Risk & Exit Plan',`<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;"><div style="background:${C.cardHigh};border-radius:10px;padding:10px;"><div class="v2lbl">Bought At</div><div class="v2val">${money(s.position?.entry)}</div></div><div style="background:${C.cardHigh};border-radius:10px;padding:10px;"><div class="v2lbl">Sell Protection</div><div class="v2val" style="color:${C.red};">${money(stop?.price)}</div></div><div style="background:${C.cardHigh};border-radius:10px;padding:10px;"><div class="v2lbl">Room Left</div><div class="v2val">${dist==null?'—':dist.toFixed(1)+'%'}</div></div></div><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:8px;"><div style="background:${C.cardHigh};border-radius:10px;padding:10px;"><div class="v2lbl">Trade Day</div><div class="v2val">${day}/${pb.hold}</div></div><div style="background:${C.cardHigh};border-radius:10px;padding:10px;"><div class="v2lbl">Max If Healthy</div><div class="v2val">Day ${pb.maxHold||pb.hold}</div></div><div style="background:${C.cardHigh};border-radius:10px;padding:10px;"><div class="v2lbl">Trade Style</div><div class="v2val" style="font-size:11px;">${ep.label}</div></div></div><div style="color:${C.textSub};font-size:12px;line-height:1.5;margin-top:10px;">Planned loss if the protection price works as expected: ${risk==null?'—':fmtP(risk)}. A fast overnight gap can still create a larger loss.</div><div style="margin-top:10px;padding-top:10px;border-top:1px solid ${C.border};color:${C.text};font-size:12.5px;font-weight:850;line-height:1.55;">${exitText}</div>`);
+}
+
+function v2998OwnedEarningsPanel(s,pb){
+  const e=earningsState(s), rule=e?.rule||pb?.earnings||'WAIT FOR REACTION', days=e?.days, verified=e?.verified;
+  const nextDate=s.earningsDate?fmtEarnDate(s.earningsDate):'';
+  let title='NO ACTION NEEDED NOW', color=C.green, text='Keep following the normal trade plan.';
+  if(rule==='EXIT BEFORE EARNINGS'){
+    title='EXIT BEFORE EARNINGS', color=C.yellow;
+    text=days!=null&&days>=0?`This setup requires you to be out before the earnings report${days===0?' today':` in ${days} day${days===1?'':'s'}`}. Follow that rule before the event.`:'This setup requires you to be out before the next earnings report.';
+  }else if(rule==='HOLD THROUGH'){
+    title='FOLLOW THE NORMAL PLAN', color=C.teal;
+    text='This setup allows the position to be held through earnings. Keep following the normal sell protection and exit plan.';
+  }else if(!verified){
+    title='EARNINGS DATE NOT VERIFIED', color=C.yellow;
+    text='You already own this stock. Keep following the normal trade plan, but verify the earnings date so StockIQ can warn you as the event gets closer.';
+  }else if(days!=null && days<=14 && days>=0){
+    title='EARNINGS ARE GETTING CLOSE', color=C.yellow;
+    text=`Earnings are ${days===0?'today':`in ${days} day${days===1?'':'s'}`}. This does not create a new sell rule for this position; keep following the validated trade plan unless StockIQ specifically tells you otherwise.`;
+  }else if(days!=null&&days>=0){
+    text=`Earnings are ${days} days away. Nothing changes for this position right now; keep following the normal trade plan.`;
+  }
+  return panel('Earnings',`<div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;"><div><div style="color:${color};font-size:14px;font-weight:950;">${title}</div><div style="color:${C.text};font-size:12.5px;font-weight:800;line-height:1.55;margin-top:6px;">${text}</div></div>${nextDate?`<div style="color:${C.textSub};font-size:11px;font-weight:850;text-align:right;white-space:nowrap;">${nextDate}<div style="color:${C.textMuted};font-size:9.5px;margin-top:3px;">next earnings</div></div>`:''}</div>`);
+}
+
+function v2998ManagePositionPanel(s){
+  return panel('Manage Position',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;"><button onclick="showV2CloseFlow('${s.id}')" style="padding:12px;border-radius:10px;border:1px solid ${C.red}66;background:${C.redDim};color:${C.red};font-weight:900;cursor:pointer;">Sell</button><button onclick="showV2StopFlow('${s.id}')" style="padding:12px;border-radius:10px;border:1px solid ${C.border};background:${C.cardHigh};color:${C.text};font-weight:900;cursor:pointer;">Update Sell Protection</button></div>`);
+}
+
+// Final ticker-page order. Owned: Action -> Risk/Exit -> Manage -> Health -> Earnings -> Research.
+// Pre-buy flow remains the already-approved v2.9.95 decision order.
+const _v2998PreBuyRenderDetail=renderDetail;
+renderDetail=function(s){
+  s=withRecentDailyHistory(s);
+  if(!hasOpenPosition(s)) return _v2998PreBuyRenderDetail(s);
+  const el=document.getElementById('detail-content'); if(!el)return;
+  const pb=pbFor(s); if(!pb) return _v2998PreBuyRenderDetail(s);
+  const st=stockState(s);
+  let html=positionTop(s,pb,st);
+  html+=v2998OwnedRiskExitPanel(s,pb,st);
+  html+=v2998ManagePositionPanel(s);
+  html+=panel('Trade Health',positionHealthHTML(s));
+  html+=v2998OwnedEarningsPanel(s,pb);
+  html+=ownedResearchDetails(s,pb);
+  el.innerHTML=html;
+};
+
+const _v2998Version=document.getElementById('stockiq-version');
+if(_v2998Version)_v2998Version.textContent='StockIQ v2.9.98 · Owned Flow + Home Sector Navigation';
+setTimeout(()=>{ try{ renderHome(); }catch(e){ console.warn('v2.9.98 refresh failed',e); } },300);
+</script>
+
 </body>
 </html>
