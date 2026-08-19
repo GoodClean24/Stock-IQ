@@ -95,7 +95,7 @@ input[type=number]{-moz-appearance:textfield;}
   <div id="portfolio-box"></div>
   <div id="position-watch"></div>
   <!-- Tonight's Best Opportunities — the ranking engine -->
-  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">v2.9.84 · Top Back Button Fix</div>
+  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">v2.9.88 · Lifecycle Clarity + Family Filter + Risk Lock</div>
   <div id="tonights-opportunities"></div>
   <!-- Filter tags + sort -->
   <div id="filter-bar" style="background:#11141C;border-bottom:1px solid #1E2230;padding:9px 20px;"></div>
@@ -458,7 +458,8 @@ let mentorTabOrder = [];    // computed per-stock plan for 'analysis' mode
 let mentorHistoryTier = 'full';   // 'full' | 'limited' — how much saved history the stock has
 let mentorShowLimitedIntro = false; // whether step 0 is the Limited History intro screen
 let searchQuery = '';
-let sortMode = 'opportunity'; // 'opportunity' | 'price' | 'pct' | 'name'
+let sortMode = 'opportunity'; // 'opportunity' | 'family' | 'price' | 'pct' | 'name'
+let familyFilter = 'All Families';
 let portfolioHidden = false;
 const CAPITAL_SETTINGS_STORAGE_KEY='stockiq_account';
 const CAPITAL_SETTINGS_DOC_ID='capitalPlan';
@@ -991,20 +992,30 @@ function renderFilterBar() {
     const tc = TAG_COLORS[t]||null;
     return `<button onclick="setTag('${t}')" style="padding:7px 15px;border-radius:22px;font-size:12px;font-weight:700;border:1px solid ${active?(tc||C.green):C.border};background:${active?(tc?tc+'22':C.greenDim):'none'};color:${active?(tc||C.green):C.textSub};cursor:pointer;white-space:nowrap;flex-shrink:0;transition:all 0.15s;">${t}</button>`;
   }).join('');
+  const families=['All Families','SMA50 Reclaim','EMA20 Reclaim','Momentum','Deep Pullback','Regression Pullback','Breakout'];
   el.innerHTML = `
     <div style="display:flex;gap:7px;overflow-x:auto;margin-bottom:9px;">${tags}</div>
-    <div style="display:flex;justify-content:flex-end;align-items:center;">
-      <span style="color:${C.textMuted};font-size:11px;margin-right:6px;">Sort by:</span>
-      <select onchange="setSortMode(this.value)" style="background:${C.cardHigh};border:1px solid ${C.borderLight};border-radius:8px;color:${C.textSub};font-size:11px;font-weight:700;padding:5px 8px;outline:none;">
-        <option value="opportunity" ${sortMode==='opportunity'?'selected':''}>⭐ Opportunity</option>
-        <option value="price" ${sortMode==='price'?'selected':''}>Price</option>
-        <option value="pct" ${sortMode==='pct'?'selected':''}>% Change</option>
-        <option value="name" ${sortMode==='name'?'selected':''}>Name</option>
-      </select>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+      <div style="display:flex;align-items:center;gap:6px;">
+        <span style="color:${C.textMuted};font-size:11px;">Family:</span>
+        <select onchange="setFamilyFilter(this.value)" style="background:${C.cardHigh};border:1px solid ${C.borderLight};border-radius:8px;color:${C.textSub};font-size:11px;font-weight:700;padding:5px 8px;outline:none;max-width:180px;">
+          ${families.map(f=>`<option value="${f}" ${familyFilter===f?'selected':''}>${f}</option>`).join('')}
+        </select>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;">
+        <span style="color:${C.textMuted};font-size:11px;">Sort by:</span>
+        <select onchange="setSortMode(this.value)" style="background:${C.cardHigh};border:1px solid ${C.borderLight};border-radius:8px;color:${C.textSub};font-size:11px;font-weight:700;padding:5px 8px;outline:none;">
+          <option value="opportunity" ${sortMode==='opportunity'?'selected':''}>⭐ Opportunity</option>
+          <option value="family" ${sortMode==='family'?'selected':''}>Family Trend</option>
+          <option value="price" ${sortMode==='price'?'selected':''}>Price</option>
+          <option value="pct" ${sortMode==='pct'?'selected':''}>% Change</option>
+          <option value="name" ${sortMode==='name'?'selected':''}>Name</option>
+        </select>
+      </div>
     </div>`;
 }
-
 function setTag(t) { activeTag=t; renderFilterBar(); renderStockList(); }
+function setFamilyFilter(v) { familyFilter=v||'All Families'; renderFilterBar(); renderStockList(); }
 
 function renderListHeader() {
   const el = document.getElementById('list-header');
@@ -1080,11 +1091,16 @@ function renderStockList() {
   const filtered = ranked.filter(s => {
     if(activeTag==='Archived') return !!s.archived;
     if(s.archived) return false; // archived stocks never appear outside the Archived tag
-    if(activeTag==='All') return true;
-    if(activeTag==='♥ Favorites') return s.starred;
-    if(activeTag==='Buys') return computeSimpleAction(s).word==='BUY';
-    if(activeTag==='Watch') return computeSimpleAction(s).word==='WATCH';
-    if(activeTag==='Waits') return computeSimpleAction(s).word==='WAIT';
+    let tagPass=true;
+    if(activeTag==='♥ Favorites') tagPass=!!s.starred;
+    else if(activeTag==='Buys') tagPass=computeSimpleAction(s).word==='BUY';
+    else if(activeTag==='Watch') tagPass=computeSimpleAction(s).word==='WATCH';
+    else if(activeTag==='Waits') tagPass=computeSimpleAction(s).word==='WAIT';
+    if(!tagPass) return false;
+    if(familyFilter!=='All Families'){
+      const pb=pbFor(s);
+      if(!pb || trendTypeLabel(s,pb)!==familyFilter) return false;
+    }
     return true;
   });
 
@@ -1093,6 +1109,11 @@ function renderStockList() {
     filtered.sort((a,b) => {
       if(a.starred&&!b.starred) return -1;
       if(!a.starred&&b.starred) return 1;
+      if(sortMode==='family'){
+        const fa=trendTypeLabel(a,pbFor(a)), fb=trendTypeLabel(b,pbFor(b));
+        const fd=String(fa).localeCompare(String(fb));
+        return fd || String(a.ticker||'').localeCompare(String(b.ticker||''));
+      }
       if(sortMode==='price') return (b.price||0)-(a.price||0);
       if(sortMode==='pct') return (b.pct||0)-(a.pct||0);
       if(sortMode==='name') return (a.ticker||'').localeCompare(b.ticker||'');
@@ -1290,7 +1311,7 @@ function renderCleanCard(s){
   const initials = (s.ticker||'??').slice(0,2);
   const hue = Array.from(s.ticker||'XX').reduce((a,c)=>a+c.charCodeAt(0),0)%360;
   const reason = (simple.reason||'').replace(/\s+/g,' ').trim();
-  const owned = !!s.position;
+  const owned = !!(s.position&&Number(s.position.shares||0)>0);
   const ownPL = owned ? (s.price-s.position.entry)*s.position.shares : 0;
   return `
    <div class="fade-in" style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:14px 16px;margin-bottom:12px;cursor:pointer;position:relative;overflow:hidden;opacity:${s.archived?'0.6':'1'};" onclick="openDetail('${s.id}')">
@@ -1377,7 +1398,7 @@ function setupScore(s){
 function groupedListHTML(list){
   const wordOf=s=>{const a=computeSimpleAction(s);return a.word||(s.type==='Long-Term Hold'?'HOLD':'—');};
   const b={BOUGHT:[],BUY:[],WATCH:[],WAIT:[],HOLD:[]};
-  list.forEach(s=>{ if(s.position){ b.BOUGHT.push(s); return; } const w=wordOf(s); (b[w]||b.HOLD).push(s); });
+  list.forEach(s=>{ if(s.position&&Number(s.position.shares||0)>0){ b.BOUGHT.push(s); return; } const w=wordOf(s); (b[w]||b.HOLD).push(s); });
   const byPct=(x,y)=>{if(x.starred&&!y.starred)return -1;if(!x.starred&&y.starred)return 1;return (y.pct||0)-(x.pct||0);};
   const byScore=(x,y)=>{if(x.starred&&!y.starred)return -1;if(!x.starred&&y.starred)return 1;return setupScore(y)-setupScore(x);};
   const byPL=(x,y)=>{const px=(x.price-x.position.entry)*x.position.shares, py=(y.price-y.position.entry)*y.position.shares; return py-px;};
@@ -7871,10 +7892,10 @@ const ACTIVE_BENCH_MAX = 8;
 const RESERVE_BENCH_MAX = 10;
 const PROFIT_CHECKPOINT_PCT = 6;
 const MARKET_TICKERS = ['SPY','QQQ','SOXX','XLE','XLK','XLI','XLY','XLF','XLV','VIX','^VIX'];
-const PRIMARY_POSITION_TARGET = 2; // historical Core capacity test favored two concentrated primary slots
-const DEFAULT_MAX_POSITIONS = 3; // third slot is exceptional-only, not an automatic diversification slot
+const PRIMARY_POSITION_TARGET = 3; // v2.9.88: three normal positions may be funded when risk capacity is available
+const DEFAULT_MAX_POSITIONS = 3; // hard normal position cap from portfolio stress testing
 const DEFAULT_MAX_RISK_DOLLARS = 100;
-const MAX_PORTFOLIO_RISK_PCT = 3.0; // planned stop risk across all open + newly selected trades
+const MAX_PORTFOLIO_RISK_PCT = 2.25; // v2.9.88: maximum planned stop risk across all open + newly selected trades
 
 // ── PROMOTION GATE · v2.9.18 ────────────────────────────────────────────────
 // Discovery is allowed to be broad. Trading permission is not.
@@ -8195,20 +8216,18 @@ function completedDayMoveContext(s){
     if(d && Number.isFinite(p)) byDate.set(d,{...sn,date:d,price:p});
   }
   const a=[...byDate.values()].sort((x,y)=>x.date.localeCompare(y.date));
-  if(a.length<2) return {pct:null,arrow:'→',color:C.textMuted,label:'Not enough completed daily bars'};
+  if(a.length<2) return {pct:null,date:null,beforeDate:null,label:'Not enough completed daily bars'};
 
   const sessionDate=String(s?.liveSessionDate||s?.intradaySessionDate||s?.analyzed||'').slice(0,10);
-  if(!sessionDate) return {pct:null,arrow:'→',color:C.textMuted,label:'Current session date unavailable'};
+  if(!sessionDate) return {pct:null,date:null,beforeDate:null,label:'Current session date unavailable'};
 
-  // Expected prior trading weekday (weekend-aware). If that row is absent,
-  // show unavailable instead of mislabeling an older bar as "Previous Day".
   const d=new Date(sessionDate+'T12:00:00');
   do { d.setDate(d.getDate()-1); } while(d.getDay()===0 || d.getDay()===6);
   const expectedPrev=d.toISOString().slice(0,10);
 
   const prevDay=byDate.get(expectedPrev);
   if(!prevDay){
-    return {pct:null,arrow:'→',color:C.textMuted,label:`Previous Day unavailable — missing ${expectedPrev} completed bar`};
+    return {pct:null,date:expectedPrev,beforeDate:null,label:`Previous Day unavailable — missing ${expectedPrev} completed bar`};
   }
 
   const d2=new Date(expectedPrev+'T12:00:00');
@@ -8216,31 +8235,40 @@ function completedDayMoveContext(s){
   const expectedBefore=d2.toISOString().slice(0,10);
   const dayBefore=byDate.get(expectedBefore);
   if(!dayBefore){
-    return {pct:null,arrow:'→',color:C.textMuted,label:`Previous Day unavailable — missing ${expectedBefore} comparison bar`};
+    return {pct:null,date:expectedPrev,beforeDate:expectedBefore,label:`Previous Day unavailable — missing ${expectedBefore} comparison bar`};
   }
 
   const pct=dayBefore.price ? ((prevDay.price/dayBefore.price)-1)*100 : null;
+  return {pct,date:expectedPrev,beforeDate:expectedBefore,label:`${expectedPrev} move = ${expectedPrev} close vs ${expectedBefore} close`};
+}
 
-  const d3=new Date(expectedBefore+'T12:00:00');
-  do { d3.setDate(d3.getDate()-1); } while(d3.getDay()===0 || d3.getDay()===6);
-  const twoBack=byDate.get(d3.toISOString().slice(0,10));
-  let arrow='→', color=C.textMuted;
-  if(twoBack?.price && pct!=null){
-    const priorPct=((dayBefore.price/twoBack.price)-1)*100;
-    const delta=pct-priorPct;
-    if(delta>0.10){ arrow='↑'; color=C.green; }
-    else if(delta<-0.10){ arrow='↓'; color=C.red; }
+function todayVsPreviousDayContext(s){
+  const todayPct=displayDayPct(s);
+  const prev=completedDayMoveContext(s);
+  if(todayPct==null || prev.pct==null){
+    return {
+      delta:null, arrow:'→', color:C.textMuted,
+      label:prev.label || 'Today vs Previous Day unavailable',
+      todayPct, previousPct:prev.pct, previousDate:prev.date
+    };
   }
-  return {pct,arrow,color,label:`Previous Day = ${expectedPrev} vs ${expectedBefore}`};
+  const delta=todayPct-prev.pct;
+  let arrow='→', color=C.textMuted;
+  if(delta>0.05){ arrow='↑'; color=C.green; }
+  else if(delta<-0.05){ arrow='↓'; color=C.red; }
+  return {
+    delta,arrow,color,todayPct,previousPct:prev.pct,previousDate:prev.date,
+    label:`Today ${pctFmt(todayPct,2)} vs ${prev.date||'previous day'} ${pctFmt(prev.pct,2)} = ${delta>=0?'+':''}${delta.toFixed(2)} percentage points`
+  };
 }
 function liveDayMoveHTML(s,fontSize='11px'){
-  const todayPct=displayDayPct(s), prev=completedDayMoveContext(s);
-  if(todayPct==null && prev.pct==null) return '';
+  const todayPct=displayDayPct(s), cmp=todayVsPreviousDayContext(s);
+  if(todayPct==null && cmp.delta==null) return '';
   const todayColor=todayPct==null?C.textMuted:(todayPct>=0?C.green:C.red);
-  const prevColor=prev.pct==null?C.textMuted:(prev.pct>=0?C.green:C.red);
+  const cmpColor=cmp.delta==null?C.textMuted:(cmp.delta>=0?C.green:C.red);
   return `<div style="font-size:${fontSize};font-weight:900;white-space:nowrap;line-height:1.45;">`+
     `<div><span style="color:${C.textMuted};font-size:.88em;font-weight:800;">Today</span> <span style="color:${todayColor};">${todayPct==null?'—':pctFmt(todayPct,2)}</span></div>`+
-    `<div title="${prev.label}"><span style="color:${C.textMuted};font-size:.88em;font-weight:800;">Previous Day</span> <span style="color:${prevColor};">${prev.pct==null?'—':pctFmt(prev.pct,2)}</span> <span style="color:${prev.color};font-size:1.12em;">${prev.arrow}</span></div>`+
+    `<div title="${cmp.label}"><span style="color:${C.textMuted};font-size:.88em;font-weight:800;">Vs Previous Day</span> <span style="color:${cmpColor};">${cmp.delta==null?'—':`${cmp.delta>=0?'+':''}${cmp.delta.toFixed(2)} pts`}</span> <span style="color:${cmp.color};font-size:1.12em;">${cmp.arrow}</span></div>`+
   `</div>`;
 }
 function pctFmt(v,d=1){ return v==null?'—':`${v>=0?'+':''}${Number(v).toFixed(d)}%`; }
@@ -8938,7 +8966,7 @@ function exitPersonality(s){
     return {key:'BALANCED_HOLD',label:'Balanced Hold',families:'Regression Pullback',autoTrail:false,activationPct:null,atrMult:null,note:'Current research favors the natural 20-day framework. Automatic ATR protection did not improve expectancy.'};
   }
   if(fam.includes('BREAKOUT')){
-    return {key:'RESEARCH_HOLD',label:'Research Hold',families:'Breakout',autoTrail:false,activationPct:null,atrMult:null,note:'Breakout exit evidence is still too thin for a new automatic trail. Keep the validated hold/stop framework.'};
+    return {key:'BREAKOUT_HOLD',label:'Breakout Hold',families:'Breakout',autoTrail:false,activationPct:null,atrMult:null,note:'A retest of the breakout area is normal. +6% is a checkpoint only; keep the validated stop and hold window.'};
   }
   return {key:'BALANCED_HOLD',label:'Balanced Hold',families:pb.name||'Validated playbook',autoTrail:false,activationPct:null,atrMult:null,note:'Use the validated family hold window and emergency stop.'};
 }
@@ -9104,14 +9132,8 @@ function liveCandidateItems(){
 // rank first, fund only the best few, and keep a portfolio-level risk ceiling.
 // A+ never receives larger risk simply for being A+ — evidence/downside set size.
 function evidenceRiskPct(s){
-  const ev=evidenceFor(s), grade=String(ev?.grade||'').toUpperCase();
-  if(grade==='PROVEN') return 1.00;
-  if(grade==='REGIME-STRONG') return 0.75;
-  if(grade==='PROMISING') return 0.50;
-  if(grade==='AGGRESSIVE') return 0.50;
-  const pb=pbFor(s);
-  if(pb?.confidence==='HIGH') return 1.00;
-  if(pb?.confidence==='MODERATE') return 0.75;
+  // v2.9.88 risk lock: setup quality changes priority, not the normal risk percentage.
+  // Every normal StockIQ trade starts at 0.75% planned account risk.
   return 0.75;
 }
 function capitalOpenPositions(){
@@ -9145,29 +9167,24 @@ function capitalPlan(){
   let remainingCash=Math.max(0,accountSize-openCapitalCost());
   const openCount=capitalOpenPositions().length;
   let slots=Math.max(0,DEFAULT_MAX_POSITIONS-openCount);
-  let fundedCount=openCount;
   const rows=[];
   for(const x of buys){
     const s=x.s,pb=pbFor(s),conflict=portfolioConflict(s),stopPct=Number(pb?.stopPct||0),riskPct=evidenceRiskPct(s);
-    const grade=String(evidenceFor(s)?.grade||'').toUpperCase();
-    const exceptionalThird=(grade==='PROVEN' && x.state?.state==='A+ BUY');
-    let status='BACKUP', why='Higher-ranked valid trades get capital first.';
+    let status='BACKUP', why='A higher-priority valid trade is using the available capital.';
     let risk=0, amount=0, shares=0;
     if(conflict){ status='SKIP'; why=conflict; }
-    else if(slots<=0){ status='BACKUP'; why=`Portfolio cap is ${DEFAULT_MAX_POSITIONS} open positions. Wait for a slot.`; }
-    else if(fundedCount>=PRIMARY_POSITION_TARGET && !exceptionalThird){ status='BACKUP'; why=`Historical capacity testing favored ${PRIMARY_POSITION_TARGET} concentrated primary positions. A third slot is reserved for a PROVEN A+ setup.`; }
-    else if(remainingRisk<=0){ status='BACKUP'; why=`The ${MAX_PORTFOLIO_RISK_PCT.toFixed(1)}% portfolio risk budget is already committed.`; }
+    else if(slots<=0){ status='BACKUP'; why=`You already have ${DEFAULT_MAX_POSITIONS} open positions. Wait until a position closes.`; }
+    else if(remainingRisk<=0){ status='BACKUP'; why=`Your ${MAX_PORTFOLIO_RISK_PCT.toFixed(2)}% total planned-risk limit is already being used.`; }
     else if(stopPct>0 && remainingCash>0){
       const desiredRisk=accountSize*(riskPct/100);
       risk=Math.min(desiredRisk,remainingRisk);
       amount=Math.min(remainingCash,risk/(stopPct/100));
       if(amount>0){
-        // Recalculate actual planned risk if available cash was the limiter.
         risk=amount*(stopPct/100);
         shares=amount/Number(curVal(s,'price')||1);
         status='FUND';
-        why=`Risk ${riskPct.toFixed(2)}% max for this evidence tier; ${stopPct.toFixed(1)}% emergency stop.`;
-        remainingRisk-=risk; remainingCash-=amount; slots-=1; fundedCount+=1;
+        why=`Use about ${riskPct.toFixed(2)}% of the account as planned risk. The position size is smaller when this stock needs a wider stop.`;
+        remainingRisk-=risk; remainingCash-=amount; slots-=1;
       }
     }
     rows.push({s,state:x.state,status,why,riskPct,risk,amount,shares,stopPct});
@@ -9186,14 +9203,14 @@ function capitalPlanBox(){
   const backups=plan.rows.filter(r=>r.status!=='FUND');
   const row=r=>{const pct=r.status==='FUND'&&accountSize>0?(r.amount/accountSize*100):null; const sh=r.status==='FUND'&&r.shares>0?r.shares:null; return `<div style="display:grid;grid-template-columns:62px 1fr auto;gap:8px;align-items:center;padding:9px 0;border-bottom:1px solid ${C.border};"><span style="color:${r.status==='FUND'?C.green:C.textMuted};font-size:10px;font-weight:950;">${r.status}</span><div><div style="color:${C.text};font-size:13px;font-weight:900;">${r.s.ticker} <span style="color:${C.textMuted};font-size:9px;">${evidenceFor(r.s)?.grade||pbFor(r.s)?.confidence||''}</span></div><div style="color:${C.textSub};font-size:10.5px;line-height:1.4;margin-top:2px;">${r.why}</div></div><div style="text-align:right;"><div style="color:${r.status==='FUND'?C.text:C.textMuted};font-size:12px;font-weight:900;white-space:nowrap;">${r.status==='FUND'?`Invest up to ${money(r.amount)}`:'—'}</div>${r.status==='FUND'?`<div style="color:${C.textMuted};font-size:9px;white-space:nowrap;">~${sh.toFixed(2)} shares · ${pct.toFixed(1)}% capital · risk ${money(r.risk)}</div>`:''}</div></div>`;};
   const committedRisk=Math.max(0,plan.maxRisk-plan.remainingRisk), committedCash=Math.max(0,accountSize-plan.remainingCash);
-  return `<div style="background:${C.card};border-radius:16px;border:1px solid ${C.blue}55;padding:15px 16px;margin:0 16px 12px;"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:6px;"><div><div style="color:${C.blue};font-size:10px;text-transform:uppercase;letter-spacing:.09em;font-weight:950;">Capital Plan · Fund the best, not all</div><div style="color:${C.textSub};font-size:11px;line-height:1.45;margin-top:4px;">${PRIMARY_POSITION_TARGET} primary positions · 3rd slot only for PROVEN A+ · ${MAX_PORTFOLIO_RISK_PCT.toFixed(1)}% planned portfolio stop risk · A+ does not automatically get larger size.</div></div><button onclick="setAccountSize()" style="background:none;border:1px solid ${C.border};border-radius:8px;color:${C.textSub};padding:6px 8px;font-size:10px;font-weight:800;cursor:pointer;">${money(accountSize)}</button></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0 4px;"><div style="background:${C.cardHigh};border-radius:9px;padding:8px 9px;"><div class="v2lbl">Capital committed</div><div style="color:${C.text};font-size:12px;font-weight:900;">${money(committedCash)} / ${money(accountSize)}</div></div><div style="background:${C.cardHigh};border-radius:9px;padding:8px 9px;"><div class="v2lbl">Stop risk committed</div><div style="color:${C.text};font-size:12px;font-weight:900;">${money(committedRisk)} / ${money(plan.maxRisk)}</div></div></div>${plan.rows.map(row).join('')}<div style="color:${C.textMuted};font-size:10px;line-height:1.45;margin-top:8px;">Wide validated stops can intentionally leave cash unused. Do not increase size just to deploy cash. Planned stop risk uses the position's active stop, but gaps can still execute below it and create a larger loss.</div></div>`;
+  return `<div style="background:${C.card};border-radius:16px;border:1px solid ${C.blue}55;padding:15px 16px;margin:0 16px 12px;"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:6px;"><div><div style="color:${C.blue};font-size:10px;text-transform:uppercase;letter-spacing:.09em;font-weight:950;">Capital Plan · Fund the best, not all</div><div style="color:${C.textSub};font-size:11px;line-height:1.45;margin-top:4px;">Up to ${DEFAULT_MAX_POSITIONS} normal positions · ${MAX_PORTFOLIO_RISK_PCT.toFixed(2)}% maximum total planned risk · each normal trade starts at 0.75% planned risk.</div></div><button onclick="setAccountSize()" style="background:none;border:1px solid ${C.border};border-radius:8px;color:${C.textSub};padding:6px 8px;font-size:10px;font-weight:800;cursor:pointer;">${money(accountSize)}</button></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0 4px;"><div style="background:${C.cardHigh};border-radius:9px;padding:8px 9px;"><div class="v2lbl">Capital committed</div><div style="color:${C.text};font-size:12px;font-weight:900;">${money(committedCash)} / ${money(accountSize)}</div></div><div style="background:${C.cardHigh};border-radius:9px;padding:8px 9px;"><div class="v2lbl">Stop risk committed</div><div style="color:${C.text};font-size:12px;font-weight:900;">${money(committedRisk)} / ${money(plan.maxRisk)}</div></div></div>${plan.rows.map(row).join('')}<div style="color:${C.textMuted};font-size:10px;line-height:1.45;margin-top:8px;">Wide validated stops can intentionally leave cash unused. Do not increase size just to deploy cash. Planned stop risk uses the position's active stop, but gaps can still execute below it and create a larger loss.</div></div>`;
 }
 
 function renderTonightsOpportunities(){
   const el=document.getElementById('tonights-opportunities');
   if(!el)return;
 
-  const owned=stocks.filter(s=>isValidatedStock(s)&&s.position).map(s=>({s,state:safeStockState(s)}))
+  const owned=stocks.filter(s=>isValidatedStock(s)&&s.position&&Number(s.position.shares||0)>0).map(s=>({s,state:safeStockState(s)}))
     .sort((a,b)=>statePriority(a.state?.state)-statePriority(b.state?.state));
 
   const live=liveCandidateItems();
@@ -9380,6 +9397,26 @@ function regressionPanel(s,pb){
     <div style="color:${range&&(pos.startsWith('IN'))?C.green:(pos.startsWith('OUTSIDE')?C.red:C.textSub)};font-size:12.5px;font-weight:900;margin-top:4px;">${pos}</div>
     <div style="color:${C.textSub};font-size:12.5px;line-height:1.6;margin-top:6px;">${note}</div>`);
 }
+
+function fmtTradeDate(v){
+  if(!v) return '—';
+  const s=String(v).trim();
+
+  // ISO YYYY-MM-DD
+  let m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if(m) return `${String(m[2]).padStart(2,'0')}/${String(m[3]).padStart(2,'0')}/${m[1]}`;
+
+  // Already M/D/YYYY or MM/DD/YYYY
+  m=s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+  if(m) return `${String(m[1]).padStart(2,'0')}/${String(m[2]).padStart(2,'0')}/${m[3]}`;
+
+  // Friendly dates such as Aug 11, 2026
+  const d=parseAppDateStr(s);
+  if(d && !isNaN(d)){
+    return `${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}/${d.getFullYear()}`;
+  }
+  return s;
+}
 function tradeWindowStats(s,entry,entryDate,exitDate=null){
   if(!entry||!entryDate)return {mfe:null,mae:null};
   const start=new Date(entryDate), end=exitDate?new Date(exitDate):null;
@@ -9401,7 +9438,27 @@ function yourTradeProofPanel(s,pb){
     <div><div class="v2lbl">Avg Return</div><div class="v2big">${avg!=null?(avg>=0?'+':'')+avg.toFixed(1)+'%':'—'}</div></div>
   </div>`;
   if(s.position) body+=`<div style="background:${C.green}10;border:1px solid ${C.green}44;border-radius:12px;padding:11px 12px;margin-bottom:12px;"><div style="color:${C.green};font-size:11px;font-weight:900;text-transform:uppercase;margin-bottom:6px;">Current Trade</div><div style="color:${C.text};font-size:12.5px;line-height:1.7;">Entry ${money(s.position.entry)} · ${s.position.shares} shares · ${s.position.signalTier||'BUY'}<br>Current ${livePct!=null?(livePct>=0?'+':'')+livePct.toFixed(1)+'%':'—'} · Max gain while held ${live&&live.mfe!=null?'+'+live.mfe.toFixed(1)+'%':'—'} · Worst drawdown ${live&&live.mae!=null?live.mae.toFixed(1)+'%':'—'}</div></div>`;
-  if(realized.length){ body+=`<div style="color:${C.text};font-size:12px;font-weight:900;margin-bottom:6px;">Buy / Sell History</div>`; body+=realized.slice().reverse().slice(0,6).map(r=>{const rp=pct(r),path=tradeWindowStats(s,Number(r.entry),r.dateIn||r.date,r.dateOut||r.date),give=path.mfe!=null?Math.max(0,path.mfe-rp):null;return `<div style="border-top:1px solid ${C.border};padding:9px 0;"><div style="display:flex;justify-content:space-between;"><span style="color:${C.text};font-size:12.5px;font-weight:800;">${r.dateIn||'—'} → ${r.dateOut||r.date||'—'} · ${r.signalTier||'BUY'}</span><span style="color:${rp>=0?C.green:C.red};font-size:12.5px;font-weight:900;">${rp>=0?'+':''}${rp.toFixed(1)}%</span></div><div style="color:${C.textSub};font-size:11.5px;margin-top:4px;line-height:1.5;">${money(r.entry)} → ${money(r.exit)} · ${r.shares} sh · Peak while held ${path.mfe!=null?'+'+path.mfe.toFixed(1)+'%':'—'} · Drawdown ${path.mae!=null?path.mae.toFixed(1)+'%':'—'}${give!=null?' · Gave back '+give.toFixed(1)+' pts':''}</div></div>`;}).join(''); }
+  if(realized.length){
+    body+=`<div style="color:${C.text};font-size:12px;font-weight:900;margin-bottom:6px;">Buy / Sell History</div>`;
+    body+=realized.slice().reverse().slice(0,6).map(r=>{
+      const rp=pct(r);
+      const path=tradeWindowStats(s,Number(r.entry),r.dateIn||r.date,r.dateOut||r.date);
+      const shares=Number(r.shares||0);
+      const peakPrice=(path.mfe!=null&&Number(r.entry)>0)?Number(r.entry)*(1+path.mfe/100):null;
+      const givebackDollars=(peakPrice!=null&&Number.isFinite(Number(r.exit))&&shares>0)
+        ? Math.max(0,(peakPrice-Number(r.exit))*shares)
+        : null;
+      return `<div style="border-top:1px solid ${C.border};padding:9px 0;">
+        <div style="display:flex;justify-content:space-between;">
+          <span style="color:${C.text};font-size:12.5px;font-weight:800;">${fmtTradeDate(r.dateIn||r.date)} → ${fmtTradeDate(r.dateOut||r.date)} · ${r.signalTier||'BUY'}</span>
+          <span style="color:${rp>=0?C.green:C.red};font-size:12.5px;font-weight:900;">${rp>=0?'+':''}${rp.toFixed(1)}%</span>
+        </div>
+        <div style="color:${C.textSub};font-size:11.5px;margin-top:4px;line-height:1.5;">
+          ${money(r.entry)} → ${money(r.exit)} · ${r.shares} sh · Peak while held ${path.mfe!=null?'+'+path.mfe.toFixed(1)+'%':'—'} · Drawdown ${path.mae!=null?path.mae.toFixed(1)+'%':'—'}${givebackDollars!=null?' · Gave back '+money(givebackDollars)+' from peak':''}
+        </div>
+      </div>`;
+    }).join('');
+  }
   else if(!s.position) body+=`<div style="color:${C.textSub};font-size:12.5px;line-height:1.6;">No completed trades yet. Your first recorded buy and sell will start the forward-learning record for ${s.ticker}.</div>`;
   body+=`<div style="margin-top:12px;padding-top:10px;border-top:1px solid ${C.border};color:${C.textSub};font-size:11.5px;line-height:1.55;"><b style="color:${C.text};">Historical Proof stays unchanged.</b> Your trades are forward evidence. After about 10 completed trades in the same ticker/playbook, this becomes meaningful live validation.</div>`;
   if(missed.length){ body+=`<div style="margin-top:11px;padding-top:10px;border-top:1px solid ${C.border};"><div style="color:${C.yellow};font-size:11px;font-weight:900;text-transform:uppercase;margin-bottom:5px;">Missed Opportunity Study</div><div style="color:${C.textSub};font-size:11.5px;line-height:1.5;">${missed.length} PREPARING setup${missed.length===1?' has':'s have'} moved +6% before BUY. This is logged for rule research only; StockIQ will not loosen the setup automatically.</div></div>`; }
@@ -9651,18 +9708,16 @@ function setupFamilyEducation(pb){
 }
 function exitEducationFor(pb){
   const fam=String(pb?.family||pb?.name||'').toUpperCase();
-  if(fam.includes('MOMENTUM')||fam.includes('DEEP_PULLBACK')||fam.includes('SMA50')||fam.includes('50-DAY')||fam.includes('50 DAY')||fam.includes('BREAKOUT')) return {
-    title:'Runner',
-    text:'These setup families historically kept producing meaningful upside after reaching about +6%. If the trade reaches that checkpoint, StockIQ protects the gain with the validated 3× ATR trailing stop and gives the winner room to keep running.'
+  if(fam.includes('SMA50')||fam.includes('50-DAY')||fam.includes('50 DAY')) return {
+    title:'Fast Protect',
+    text:'This family moves quickly. Once the trade reaches +6%, StockIQ turns on a 2.5× Wilder ATR protection price and tells you exactly where to get out.'
   };
-  if(fam.includes('EMA20')||fam.includes('20-DAY')||fam.includes('20 DAY')) return {
-    title:'Quicker Harvest',
-    text:'EMA20 reclaim trades tended to give back more of their gains after the +6% area. StockIQ therefore protects them more aggressively with the validated 2.5× ATR trail and is quicker to rotate if momentum stalls.'
-  };
-  return {
-    title:'Balanced',
-    text:'Regression-style trades often have additional upside after +6%, but not as consistently as the Runner families. StockIQ uses the validated 2.5× ATR trail and treats +6% as a decision checkpoint — not an automatic sell.'
-  };
+  if(fam.includes('EMA20')) return {title:'Medium Hold',text:'The main decision is Day 14. +6% is only a checkpoint. If the larger trend is still healthy, the trade may continue toward its maximum hold window.'};
+  if(fam.includes('MOMENTUM')) return {title:'Runner',text:'This family needs room for normal swings. +6% is only a checkpoint. The main decision is Day 20, with more time allowed only while the trade stays healthy.'};
+  if(fam.includes('DEEP_PULLBACK')) return {title:'Long Runner',text:'This family is designed to tolerate larger swings. +6% is only a checkpoint. Follow the actual stop and use the normal hold window instead of reacting to one ugly day.'};
+  if(fam.includes('REG')) return {title:'Balanced Hold',text:'This family often looks weak before it rebounds. +6% is only a checkpoint. Follow the actual stop and the normal hold window.'};
+  if(fam.includes('BREAKOUT')) return {title:'Breakout Hold',text:'A pullback toward the breakout area can be normal. +6% is only a checkpoint. Follow the actual stop and the normal hold window.'};
+  return {title:'Validated Hold',text:'Follow the setup-specific stop and holding window shown by StockIQ.'};
 }
 function setupEducationPanel(s,pb,st=null){
   // Keep the live screen visual. Detailed strategy family stays in the backend.
@@ -9811,30 +9866,34 @@ function entryPanel(s,pb,st){
   const sig=curVal(s,'price'),max=buyUpTo(s);
   return panel('Entry Plan',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;"><div><div class="v2lbl">Signal Price</div><div class="v2big">${money(sig)}</div></div><div><div class="v2lbl">Buy Up To</div><div class="v2big" style="color:${C.green};">${money(max)}</div></div></div><div style="color:${C.textSub};font-size:12.5px;line-height:1.55;margin-top:10px;">At or below ${money(max)}: OK to buy. Above it: don’t chase. A sharp gap down should be reviewed before entering.</div>`);
 }
-function riskPanel(s,pb){ if(s.position){ const st=suggestedStop(s),p=curVal(s,'price'),dist=p&&st.price?((p/st.price)-1)*100:null, risk=plannedRisk(s); return panel('Risk Plan',`<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;"><div><div class="v2lbl">Entry</div><div class="v2val">${money(s.position.entry)}</div></div><div><div class="v2lbl">${st.type}</div><div class="v2val" style="color:${st.active?C.purple:C.red};">${money(st.price)}</div></div><div><div class="v2lbl">Distance</div><div class="v2val">${dist==null?'—':dist.toFixed(1)+'%'}</div></div></div><div style="color:${C.textSub};font-size:12.5px;line-height:1.55;margin-top:10px;">Planned risk: ${risk==null?'—':fmtP(risk)}. ${st.why}</div>`);} return panel('Risk Plan',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;"><div><div class="v2lbl">Emergency Stop</div><div class="v2big">-${pb.stopPct}%</div></div><div><div class="v2lbl">Normal Hold</div><div class="v2big">${pb.hold} days</div></div></div><div style="color:${C.textSub};font-size:12.5px;line-height:1.55;margin-top:10px;">The exact stop is calculated from your actual purchase price. Want less risk? Buy fewer shares—don’t squeeze the stop.</div>`); }
+function riskPanel(s,pb){
+  if(s.position){
+    const st=suggestedStop(s),p=curVal(s,'price'),dist=p&&st.price?((p/st.price)-1)*100:null,risk=plannedRisk(s);
+    return panel('Risk Plan',`<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;"><div><div class="v2lbl">Bought At</div><div class="v2val">${money(s.position.entry)}</div></div><div><div class="v2lbl">Sell Protection</div><div class="v2val" style="color:${st.active?C.purple:C.red};">${money(st.price)}</div></div><div><div class="v2lbl">Room Left</div><div class="v2val">${dist==null?'—':dist.toFixed(1)+'%'}</div></div></div><div style="color:${C.textSub};font-size:12.5px;line-height:1.55;margin-top:10px;">Planned loss if the protection price works as expected: ${risk==null?'—':fmtP(risk)}. A fast overnight gap can still create a larger loss.</div>`);
+  }
+  return panel('Risk Plan',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;"><div><div class="v2lbl">Emergency Stop</div><div class="v2big">-${pb.stopPct}%</div></div><div><div class="v2lbl">Normal Hold</div><div class="v2big">${pb.hold} days</div></div></div><div style="color:${C.textSub};font-size:12.5px;line-height:1.55;margin-top:10px;">StockIQ normally plans to risk 0.75% of the account on one trade. A stock with a wider stop gets a smaller dollar position. Do not tighten the stop just to buy more shares.</div>`);
+}
 function exitPersonalityPanel(s,pb,st){
   if(!s.position) return '';
   const ep=exitPersonality(s), gain=st?.gainPct;
   const stop=suggestedStop(s);
   const day=positionDays(s)||1;
-
   let next='';
   if(ep.autoTrail){
     const active=gain!=null&&gain>=ep.activationPct;
     next=active
-      ? `Stay above ${money(stop?.price)}. ${ep.atrMult.toFixed(1)}× ATR protection is active.`
-      : `At +${ep.activationPct}% gain, ${ep.atrMult.toFixed(1)}× ATR protection activates.`;
+      ? `Profit protection is active. Keep holding while price stays above ${money(stop?.price)}. Sell if price reaches that protection price.`
+      : `Keep holding under the normal stop. If this trade reaches +${ep.activationPct}%, StockIQ will raise the protection price automatically.`;
   }else{
-    next=`Hold through Day ${pb.hold} unless the stop or a validated exit rule triggers.`;
+    next=`+6% is a checkpoint only — it is not a sell signal. Keep following the normal stop and hold plan. Your main decision is Day ${pb.hold}${pb.maxHold>pb.hold?`, and a healthy trade may continue toward Day ${pb.maxHold}`:''}.`;
   }
-
   return panel('Exit Plan',
     `<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;">`+
-      `<div style="background:${C.cardHigh};border-radius:10px;padding:9px;"><div class="v2lbl">Stop</div><div class="v2val">${money(stop?.price)}</div></div>`+
-      `<div style="background:${C.cardHigh};border-radius:10px;padding:9px;"><div class="v2lbl">Day</div><div class="v2val">${day}/${pb.hold}</div></div>`+
-      `<div style="background:${C.cardHigh};border-radius:10px;padding:9px;"><div class="v2lbl">Plan</div><div class="v2val" style="font-size:11px;">${ep.label}</div></div>`+
+      `<div style="background:${C.cardHigh};border-radius:10px;padding:9px;"><div class="v2lbl">Sell Protection</div><div class="v2val">${money(stop?.price)}</div></div>`+
+      `<div style="background:${C.cardHigh};border-radius:10px;padding:9px;"><div class="v2lbl">Trade Day</div><div class="v2val">${day}/${pb.hold}</div></div>`+
+      `<div style="background:${C.cardHigh};border-radius:10px;padding:9px;"><div class="v2lbl">Trade Style</div><div class="v2val" style="font-size:11px;">${ep.label}</div></div>`+
     `</div>`+
-    `<div style="margin-top:9px;color:${C.text};font-size:12.5px;font-weight:850;line-height:1.4;">${next}</div>`
+    `<div style="margin-top:9px;color:${C.text};font-size:12.5px;font-weight:850;line-height:1.5;">${next}</div>`
   );
 }
 function cleanPlaybookName(pb){
@@ -9853,6 +9912,95 @@ function trendTypeLabel(s,pb){
   if(/Breakout/i.test(n)) return 'Breakout';
   return n||'Validated Setup';
 }
+function familyDefinitionText(s,pb){
+  const trend=trendTypeLabel(s,pb);
+  const defs={
+    'SMA50 Reclaim':'A strong stock pulled back and is trying to regain its 50-day trend line for a fast rebound.',
+    'EMA20 Reclaim':'A healthy uptrend dipped below its 20-day trend line and moved back above it.',
+    'Momentum':'A stock is already moving strongly higher and still has evidence the move can continue.',
+    'Deep Pullback':'A strong longer-term stock has fallen significantly and is setting up for a larger rebound.',
+    'Regression Pullback':'A rising stock has pulled back into a price area where it has historically tended to rebound.',
+    'Breakout':'A stock has pushed above recent resistance and may be starting a new move higher.'
+  };
+  return defs[trend]||'A validated StockIQ setup with its own entry, hold, and exit rules.';
+}
+
+function plainOwnedAction(s,pb,st){
+  const day=positionDays(s)||1;
+  const maxDay=pb?.maxHold||pb?.hold||day;
+  const stop=st?.stop||suggestedStop(s);
+  const stopPrice=stop?.price;
+  const state=String(st?.state||'BOUGHT').toUpperCase();
+  const ep=exitPersonality(s);
+  const gain=Number(st?.gainPct);
+  const healthy=runnerHealthy(s);
+
+  if(state==='EXIT' || state==='SELL' || state==='EXIT NOW' || state==='STOP HIT'){
+    return {label:'SELL NOW',color:C.red,
+      action:'Close the position at the next available price.',
+      why:'Your sell rule has been triggered. Do not keep holding and hope it reverses.',
+      sellIf:'The sell condition has already happened.',
+      next:'No next hold decision — this trade is ready to close.'};
+  }
+  if(day>=maxDay){
+    return {label:'SELL NOW',color:C.red,
+      action:`Close the position. You have reached the maximum Day ${maxDay} holding window for this setup.`,
+      why:'The trade has used all of the time this setup is allowed.',
+      sellIf:'The maximum holding window has been reached.',
+      next:'Close the trade instead of extending it again.'};
+  }
+  if(state.includes('DECISION') || day>=Number(pb?.hold||999)){
+    if(maxDay>Number(pb?.hold||0) && healthy && day<maxDay){
+      return {label:'STAY IN',color:C.green,
+        action:`Keep holding. The trade is still healthy enough to continue beyond Day ${pb.hold}.`,
+        why:`This setup can continue toward Day ${maxDay} while the larger trend stays healthy.`,
+        sellIf:stopPrice!=null?`Sell if the price reaches ${money(stopPrice)}, or if StockIQ changes this instruction to SELL NOW.`:'Sell if StockIQ changes this instruction to SELL NOW.',
+        next:`Final holding limit: Day ${maxDay}.`};
+    }
+    return {label:'SELL NOW',color:C.red,
+      action:`Close the position. The normal Day ${pb?.hold||day} holding window is complete and the trade is not healthy enough to extend.`,
+      why:'The setup did not earn more time.',
+      sellIf:'The normal holding decision has already been reached.',
+      next:'Close the trade.'};
+  }
+  if(ep?.autoTrail && Number.isFinite(gain) && gain>=Number(ep.activationPct||6)){
+    return {label:'PROTECT PROFITS',color:C.purple,
+      action:`Keep holding, but your profit-protection price is now active at ${money(stopPrice)}.`,
+      why:'This SMA50 Reclaim reached the profit-protection point, so StockIQ has raised the price that gets you out.',
+      sellIf:stopPrice!=null?`Sell if the price reaches ${money(stopPrice)}.`:'Sell if the active protection price is reached.',
+      next:'Keep following the protection price. It can move higher, but it never moves lower.'};
+  }
+  const weakening=state.includes('WATCH') || state.includes('CONSIDER') || positionHealthSummary(s)?.label==='WEAKENING';
+  if(weakening){
+    return {label:'WATCH CLOSELY',color:C.yellow,
+      action:'Keep holding for now. Do not sell just because the stock is weaker today.',
+      why:'The trade has warning signs, but the actual sell rule has not been triggered.',
+      sellIf:stopPrice!=null?`Sell if the price reaches ${money(stopPrice)}, or if StockIQ changes this instruction to SELL NOW.`:'Sell if StockIQ changes this instruction to SELL NOW.',
+      next:`Next main decision: Day ${pb?.hold||'—'}.`};
+  }
+  return {label:'STAY IN',color:C.green,
+    action:'Keep holding. Nothing has happened that requires you to sell.',
+    why:'Your actual sell rule has not been triggered.',
+    sellIf:stopPrice!=null?`Sell if the price reaches ${money(stopPrice)}, or if StockIQ changes this instruction to SELL NOW.`:'Sell if StockIQ changes this instruction to SELL NOW.',
+    next:`Next main decision: Day ${pb?.hold||'—'}${maxDay>Number(pb?.hold||0)?`; if the trade is still healthy, it may continue toward Day ${maxDay}.`:'.'}`};
+}
+
+function plainEntryAction(s,pb,st){
+  const state=String(st?.state||'WAIT').toUpperCase();
+  const max=buyUpTo(s);
+  if(state==='A+ BUY' || state==='BUY') return {
+    label:'BUY', color:C.green,
+    action:max!=null?`The setup is ready. Buy only at or below ${money(max)}.`:'The setup is ready. Use the entry price shown below.',
+    why:'All required setup rules are ready.',
+    next:'If the price moves above the allowed entry range, do not chase it.'
+  };
+  if(state==='ENTRY MISSED') return {label:'DO NOT BUY',color:C.orange,action:'Do not buy this stock now.',why:'The stock has already moved too far above the safe entry area.',next:'Wait for a new setup. Do not chase the old one.'};
+  if(state==='ENTRY SIGNAL PASSED') return {label:'DO NOT BUY',color:C.textSub,action:'Do not treat this as a new buy.',why:'A prior valid buy signal already happened and has passed.',next:'Wait for a new setup.'};
+  if(state==='TRIGGERED / VERIFY') return {label:'CHECK ENTRY NOW',color:C.purple,action:'Upload or verify the 30-minute data before buying.',why:'The daily setup qualified and the required reclaim trigger may have happened.',next:'Buy only if StockIQ verifies the trigger and the price is still inside the allowed entry range.'};
+  if(state==='PREPARING') return {label:'WAIT',color:C.yellow,action:'Do not buy yet.',why:'The setup is close, but one required trigger still has to happen.',next:'StockIQ will change this to BUY when the required trigger is confirmed.'};
+  return {label:'WAIT',color:C.textSub,action:'Do not buy yet.',why:'The setup is not ready.',next:'Wait until StockIQ changes the action to BUY.'};
+}
+
 function chartWatchMeta(s,pb,st){
   const trend=trendTypeLabel(s,pb);
   // Daily remains the authority for setup/state. 30-minute is a watch/execution view only.
@@ -9865,32 +10013,20 @@ function detailMetaStrip(s,pb,st){
   const trend=trendTypeLabel(s,pb), cw=chartWatchMeta(s,pb,st);
   const day=s.position?positionDays(s):null;
   return `<div style="margin:0 16px 12px;display:grid;grid-template-columns:${s.position?'repeat(3,minmax(0,1fr))':'repeat(2,minmax(0,1fr))'};gap:8px;">`+
-    `<div style="background:${C.card};border:1px solid ${C.border};border-radius:12px;padding:10px 11px;"><div class="v2lbl">Trend Type</div><div style="color:${C.text};font-size:12.5px;font-weight:900;margin-top:3px;">${trend}</div></div>`+
+    `<div style="background:${C.card};border:1px solid ${C.border};border-radius:12px;padding:10px 11px;"><div class="v2lbl">Trend Type</div><div style="color:${C.text};font-size:12.5px;font-weight:900;margin-top:3px;">${trend}</div><div style="color:${C.textSub};font-size:10.5px;line-height:1.45;margin-top:5px;">${familyDefinitionText(s,pb)}</div></div>`+
     (s.position?`<div style="background:${C.card};border:1px solid ${C.border};border-radius:12px;padding:10px 11px;"><div class="v2lbl">Trade Age</div><div style="color:${C.text};font-size:14px;font-weight:950;margin-top:3px;">Day ${day}/${pb?.hold||'—'}</div></div>`:'')+
     `<div title="${cw.reason}" style="background:${C.card};border:1px solid ${cw.color}55;border-radius:12px;padding:10px 11px;"><div class="v2lbl">Chart To Watch</div><div style="color:${cw.color};font-size:12.5px;font-weight:950;margin-top:3px;">${cw.chart}</div><div style="color:${C.textMuted};font-size:9.5px;line-height:1.35;margin-top:3px;">${cw.chart==='30-Min'?'Intraday trigger watch':'Primary view'}</div></div>`+
   `</div>`;
 }
 function positionTop(s,pb,st){
   const gain=st?.gainPct;
-  const stop=st?.stop||suggestedStop(s);
   const day=positionDays(s)||1;
-  const ep=exitPersonality(s);
-  const health=positionHealthSummary(s);
   const chart=chartWatchMeta(s,pb,st);
-  const prev=completedDayMoveContext(s);
   const todayPct=Number.isFinite(Number(s?.liveDayPct))?Number(s.liveDayPct):null;
-
-  let plan='STAY IN', planColor=C.green;
-  if(st?.state==='SELL'||st?.state==='EXIT NOW'||st?.state==='STOP HIT'){
-    plan='SELL', planColor=C.red;
-  }else if(String(st?.state||'').includes('WATCH')||String(st?.state||'').includes('CONSIDER ROTATION')){
-    plan='WATCH EXIT', planColor=C.yellow;
-  }else if(String(st?.state||'').includes('DECISION')){
-    plan='DECISION DAY', planColor=C.yellow;
-  }
-
-  const holdLabel = `Day ${day} of ${pb.hold}`;
-  const holdExplain = `Normal research window: up to ${pb.hold} trading days — not a rule to hold exactly ${pb.hold} days. Exit sooner if a validated sell rule or stop triggers.`;
+  const dayCmp=todayVsPreviousDayContext(s);
+  const trend=trendTypeLabel(s,pb);
+  const action=plainOwnedAction(s,pb,st);
+  const holdExplain=`Normal research window: ${pb.hold} trading days. If the setup allows more time and the trade stays healthy, StockIQ can extend it to Day ${pb.maxHold||pb.hold}.`;
 
   return `
     <div style="margin-bottom:14px;">
@@ -9903,70 +10039,39 @@ function positionTop(s,pb,st){
           </div>
           <div style="font-size:13px;color:${C.text};font-weight:800;margin-top:3px;">${s.name||s.company||''}</div>
         </div>
-
         <div style="text-align:right;min-width:170px;">
           <div style="font-size:23px;font-weight:950;color:${C.text};">${money(curVal(s,'price'))}</div>
-          <div style="font-size:12px;font-weight:900;margin-top:5px;color:${todayPct==null?C.textMuted:(todayPct>=0?C.green:C.red)};">
-            Today ${todayPct==null?'—':pctFmt(todayPct)}
-          </div>
-          <div title="${prev.label||''}" style="font-size:12px;font-weight:900;margin-top:3px;color:${prev.pct==null?C.textMuted:(prev.pct>=0?C.green:C.red)};">
-            Previous Day ${prev.pct==null?'—':pctFmt(prev.pct)} ${prev.arrow||''}
-          </div>
+          <div style="font-size:12px;font-weight:900;margin-top:5px;color:${todayPct==null?C.textMuted:(todayPct>=0?C.green:C.red)};">Today ${todayPct==null?'—':pctFmt(todayPct)}</div>
+          <div title="${dayCmp.label||''}" style="font-size:12px;font-weight:900;margin-top:3px;color:${dayCmp.delta==null?C.textMuted:(dayCmp.delta>=0?C.green:C.red)};">Vs Previous Day ${dayCmp.delta==null?'—':`${dayCmp.delta>=0?'+':''}${dayCmp.delta.toFixed(1)} pts`} <span style="color:${dayCmp.color};">${dayCmp.arrow||''}</span></div>
         </div>
       </div>
 
-      <div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:11px;padding-top:10px;border-top:1px solid ${C.border};">
-        <div><span class="v2lbl">Trend</span> <span style="font-size:12px;font-weight:900;color:${C.text};margin-left:5px;">${cleanPlaybookName(pb)}</span></div>
-        <div title="${holdExplain}"><span class="v2lbl">Trade Age</span> <span style="font-size:12px;font-weight:900;color:${C.text};margin-left:5px;">${holdLabel}</span></div>
-        <div><span class="v2lbl">Chart</span> <span style="font-size:12px;font-weight:900;color:${chart.color};margin-left:5px;">${chart.chart}</span></div>
+      <div style="margin-top:11px;padding-top:10px;border-top:1px solid ${C.border};display:grid;grid-template-columns:minmax(0,1.4fr) minmax(110px,.7fr) minmax(110px,.7fr);gap:8px;">
+        <div style="background:${C.card};border:1px solid ${C.border};border-radius:12px;padding:10px 11px;">
+          <div class="v2lbl">Trend Type</div><div style="font-size:12.5px;font-weight:950;color:${C.text};margin-top:3px;">${trend}</div>
+          <div style="font-size:10.5px;line-height:1.45;color:${C.textSub};margin-top:5px;">${familyDefinitionText(s,pb)}</div>
+        </div>
+        <div title="${holdExplain}" style="background:${C.card};border:1px solid ${C.border};border-radius:12px;padding:10px 11px;">
+          <div class="v2lbl">Trade Age</div><div style="font-size:13px;font-weight:950;color:${C.text};margin-top:3px;">Day ${day}/${pb.hold}</div>
+        </div>
+        <div title="${chart.reason}" style="background:${C.card};border:1px solid ${chart.color}55;border-radius:12px;padding:10px 11px;">
+          <div class="v2lbl">Chart To Watch</div><div style="font-size:12.5px;font-weight:950;color:${chart.color};margin-top:3px;">${chart.chart}</div>
+        </div>
       </div>
     </div>
 
-    <div style="background:${C.card};border:1px solid ${C.border};border-radius:16px;padding:15px 16px;margin-bottom:12px;">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
-        <div>
-          <div class="v2lbl">CURRENT PLAN</div>
-          <div style="font-size:22px;font-weight:950;color:${planColor};margin-top:2px;">${plan}</div>
-          <div style="font-size:11.5px;color:${C.textSub};font-weight:800;margin-top:5px;">${holdLabel} · ${cleanPlaybookName(pb)}</div>
-        </div>
-        <div style="text-align:right;">
-          <div class="v2lbl">RESULT</div>
-          <div style="font-size:18px;font-weight:950;color:${gain==null?C.text:(gain>=0?C.green:C.red)};">${gain==null?'—':pctFmt(gain)}</div>
-        </div>
+    <div style="background:${C.card};border:2px solid ${action.color}66;border-radius:16px;padding:16px;margin-bottom:12px;">
+      <div class="v2lbl">WHAT TO DO NOW</div>
+      <div style="font-size:23px;font-weight:950;color:${action.color};margin-top:3px;">${action.label}</div>
+      <div style="font-size:14px;font-weight:900;color:${C.text};line-height:1.5;margin-top:8px;">${action.action}</div>
+      <div style="margin-top:12px;padding-top:11px;border-top:1px solid ${C.border};display:grid;grid-template-columns:1fr;gap:8px;">
+        <div><div class="v2lbl">WHY</div><div style="font-size:12.5px;line-height:1.5;color:${C.text};font-weight:800;margin-top:3px;">${action.why}</div></div>
+        <div><div class="v2lbl">WHEN TO GET OUT</div><div style="font-size:12.5px;line-height:1.5;color:${C.text};font-weight:850;margin-top:3px;">${action.sellIf}</div></div>
+        <div><div class="v2lbl">NEXT DECISION</div><div style="font-size:12.5px;line-height:1.5;color:${C.textSub};font-weight:800;margin-top:3px;">${action.next}</div></div>
       </div>
-
-      <div style="margin-top:13px;padding-top:12px;border-top:1px solid ${C.border};">
-        <div class="v2lbl" style="margin-bottom:7px;">POSITION HEALTH</div>
-        <div style="font-size:15px;font-weight:950;color:${String(health?.label||'').toUpperCase().includes('WATCH')?C.yellow:C.green};">${health?.label||'HEALTHY'}</div>
-      </div>
-
-      <div style="margin-top:13px;padding-top:12px;border-top:1px solid ${C.border};">
-        <div class="v2lbl" style="margin-bottom:9px;">WATCH FOR</div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;">
-          ${stop?.price!=null?`
-            <div style="background:${C.cardHigh};border:1px solid ${C.red}55;border-radius:11px;padding:10px 11px;">
-              <div style="font-size:10px;font-weight:950;color:${C.red};letter-spacing:.7px;">🛑 STOP</div>
-              <div style="font-size:17px;font-weight:950;color:${C.text};margin-top:3px;">${money(stop.price)}</div>
-              <div style="font-size:10.5px;color:${C.textMuted};margin-top:2px;">${stop.type||'Emergency stop'}</div>
-            </div>`:''}
-          ${ep.autoTrail?`
-            <div style="background:${C.cardHigh};border:1px solid ${C.yellow}55;border-radius:11px;padding:10px 11px;">
-              <div style="font-size:10px;font-weight:950;color:${C.yellow};letter-spacing:.7px;">🛡 PROFIT PROTECTION</div>
-              <div style="font-size:15px;font-weight:950;color:${C.text};margin-top:3px;">At +${ep.activationPct}%</div>
-              <div style="font-size:10.5px;color:${C.textMuted};margin-top:2px;">${ep.atrMult.toFixed(1)}× ATR trail activates</div>
-            </div>`:''}
-          <div style="background:${C.cardHigh};border:1px solid ${C.yellow}33;border-radius:11px;padding:10px 11px;">
-            <div style="font-size:10px;font-weight:950;color:${C.yellow};letter-spacing:.7px;">⚠️ HEALTH</div>
-            <div style="font-size:15px;font-weight:950;color:${C.text};margin-top:3px;">Watch for change</div>
-            <div style="font-size:10.5px;color:${C.textMuted};margin-top:2px;">HEALTHY → WATCH</div>
-          </div>
-          <div style="background:${C.cardHigh};border:1px solid ${C.teal}33;border-radius:11px;padding:10px 11px;">
-            <div style="font-size:10px;font-weight:950;color:${C.teal};letter-spacing:.7px;">📅 REVIEW</div>
-            <div style="font-size:15px;font-weight:950;color:${C.text};margin-top:3px;">Day ${pb.hold}</div>
-            <div style="font-size:10.5px;color:${C.textMuted};margin-top:2px;">Review if still in trade</div>
-          </div>
-        </div>
-        <div style="margin-top:8px;color:${C.textMuted};font-size:10.5px;line-height:1.35;">${holdExplain}</div>
+      <div style="margin-top:11px;padding-top:10px;border-top:1px solid ${C.border};display:flex;justify-content:space-between;gap:12px;align-items:center;">
+        <div><div class="v2lbl">TRADE RESULT</div><div style="font-size:17px;font-weight:950;color:${gain==null?C.text:(gain>=0?C.green:C.red)};margin-top:2px;">${gain==null?'—':pctFmt(gain)}</div></div>
+        <div style="text-align:right;"><div class="v2lbl">CURRENT FAMILY</div><div style="font-size:11.5px;font-weight:900;color:${C.text};margin-top:2px;">${trend}</div></div>
       </div>
     </div>`;
 }
@@ -9976,7 +10081,7 @@ function preTop(s,pb,st){
   const executionLine=ix?.arm
     ? `<div style="color:${C.textMuted};font-size:10.5px;margin-top:5px;font-weight:800;">Qualified ${ix.arm.dailyDate} · RSI ${ix.arm.priorRSI==null?'—':Number(ix.arm.priorRSI).toFixed(1)} · SMA50 trigger ${money(ix.arm.trigger)}</div>`
     : '';
-  return `<div style="padding:16px 16px 10px;"><button onclick="stockIQBackFromDetail()" style="background:none;border:none;color:${C.textSub};padding:0 0 9px;cursor:pointer;">← Back</button><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;"><div style="min-width:0;"><div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;"><span style="color:${C.text};font-size:24px;font-weight:950;">${s.ticker}</span>${badge(st.state)}</div><div style="color:${C.text};font-size:13px;font-weight:700;margin-top:5px;">${companyNameFor(s)}</div>${label?`<div style="color:${C.textSub};font-size:12px;margin-top:3px;">${label}</div>`:''}${executionLine}<div style="color:${C.textMuted};font-size:9px;margin-top:5px;">v2.9.84</div></div><div style="text-align:right;flex-shrink:0;"><div style="color:${C.text};font-size:20px;font-weight:900;margin-bottom:2px;">${money(displayPrice(s))}</div>${liveDayMoveHTML(s,'11px')} ${canBuy?`<button onclick="showV2BuyFlow('${s.id}','${buyLabel}')" style="border:none;border-radius:10px;background:${C.green};color:#000;font-size:13px;font-weight:950;padding:9px 18px;cursor:pointer;box-shadow:0 0 0 1px ${C.green}33;">${buyLabel}</button>`:''}</div></div></div>`;
+  return `<div style="padding:16px 16px 10px;"><button onclick="stockIQBackFromDetail()" style="background:none;border:none;color:${C.textSub};padding:0 0 9px;cursor:pointer;">← Back</button><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;"><div style="min-width:0;"><div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;"><span style="color:${C.text};font-size:24px;font-weight:950;">${s.ticker}</span>${badge(st.state)}</div><div style="color:${C.text};font-size:13px;font-weight:700;margin-top:5px;">${companyNameFor(s)}</div>${label?`<div style="color:${C.textSub};font-size:12px;margin-top:3px;">${label}</div>`:''}${executionLine}<div style="color:${C.textMuted};font-size:9px;margin-top:5px;">v2.9.88</div></div><div style="text-align:right;flex-shrink:0;"><div style="color:${C.text};font-size:20px;font-weight:900;margin-bottom:2px;">${money(displayPrice(s))}</div>${liveDayMoveHTML(s,'11px')} ${canBuy?`<button onclick="showV2BuyFlow('${s.id}','${buyLabel}')" style="border:none;border-radius:10px;background:${C.green};color:#000;font-size:13px;font-weight:950;padding:9px 18px;cursor:pointer;box-shadow:0 0 0 1px ${C.green}33;">${buyLabel}</button>`:''}</div></div></div>`;
 }
 function ownedResearchDetails(s,pb){
   const research = [
@@ -10016,7 +10121,7 @@ function renderDetail(s){
   s=withRecentDailyHistory(s);
   const el=document.getElementById('detail-content'); if(!el)return; const pb=pbFor(s); if(!pb){ const ev=evidenceFor(s), rp=researchPromotionLabel(s); el.innerHTML=`<div style="padding:16px;"><button onclick="stockIQBackFromDetail()" style="background:none;border:none;color:${C.textSub};padding:0 0 12px;">← Back</button><h2 style="color:${C.text};margin:0;">${s.ticker}</h2>${companyNameFor(s)?`<div style="color:${C.textSub};font-size:13px;margin-top:4px;">${companyNameFor(s)}</div>`:''}<div style="margin-top:12px;color:${rp.color};font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;">${rp.label}${ev?.grade?` · ${ev.grade}`:''}</div>${ev?.family?`<div style="color:${C.text};font-size:13px;font-weight:800;margin-top:8px;">Candidate family: ${ev.family.replaceAll('_',' ')}</div>`:''}<p style="color:${C.textSub};font-size:13px;line-height:1.65;">${ev?.summary||'This ticker can show indicators, but StockIQ will not issue trading signals until it has a validated playbook.'}</p><div style="background:${C.card};border:1px solid ${C.border};border-radius:14px;padding:13px 14px;margin:12px 0;"><div style="color:${C.yellow};font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;margin-bottom:7px;">Promotion gate</div><div style="color:${C.textSub};font-size:12px;line-height:1.6;">Current readiness is not enough. Promotion requires useful trade frequency, positive friction-adjusted expectancy, older/newer or OOS survival, parameter-neighborhood robustness, and tolerable downside. Until that evidence is explicitly approved, this stock stays research-only.</div></div>${indicatorPanel(s,{})}</div>`; return; }
   const st=stockState(s),checks=(Array.isArray(st?.checks)&&st.checks.length)?st.checks:setupChecks(s),conflict=portfolioConflict(s);
-  let html=s.position?positionTop(s,pb,st):preTop(s,pb,st); if(!s.position)html+=detailMetaStrip(s,pb,st); html+=topCallout(s,pb,st);
+  let html=s.position?positionTop(s,pb,st):preTop(s,pb,st); if(!s.position){ html+=detailMetaStrip(s,pb,st); const pa=plainEntryAction(s,pb,st); html+=panel('What To Do Now',`<div style="font-size:21px;font-weight:950;color:${pa.color};margin-bottom:7px;">${pa.label}</div><div style="color:${C.text};font-size:14px;font-weight:850;line-height:1.5;">${pa.action}</div><div style="color:${C.textSub};font-size:12px;line-height:1.55;margin-top:8px;">Why: ${pa.why}</div><div style="color:${C.textSub};font-size:12px;line-height:1.55;margin-top:4px;">Next: ${pa.next}</div>`); } html+=topCallout(s,pb,st);
   if(s.position){
     html+=panel('Trade Health',positionHealthHTML(s));
     html+=riskPanel(s,pb);
@@ -10126,16 +10231,76 @@ async function saveV2Buy(id,signalTier){
 function showV2StopFlow(id){ const s=stocks.find(x=>String(x.id)===String(id)); if(!s)return; const sug=suggestedStop(s); showModal(`<div style="background:${C.card};border-radius:20px;padding:22px;border:1px solid ${C.border};"><div style="color:${C.text};font-size:18px;font-weight:900;margin-bottom:12px;">Update Recorded Stop</div><div style="color:${C.textSub};font-size:13px;margin-bottom:12px;">Suggested: ${money(sug.price)} (${sug.type})</div><input id="v2-stop" type="number" step="0.01" value="${s.position?.recordedStop||sug.price||''}" style="width:100%;box-sizing:border-box;background:${C.cardHigh};border:1px solid ${C.border};border-radius:10px;color:${C.text};padding:11px;margin-bottom:14px;"><button onclick="saveV2Stop('${id}')" style="width:100%;padding:12px;border:none;border-radius:10px;background:${C.text};color:${C.bg};font-weight:900;">Save Stop</button></div>`); }
 async function saveV2Stop(id){ const s=stocks.find(x=>String(x.id)===String(id)); if(!s)return; const v=parseFloat(document.getElementById('v2-stop').value); const u={...s,position:{...s.position,recordedStop:v}}; stocks=stocks.map(x=>String(x.id)===String(id)?u:x); closeAllOverlays(); await fbSaveStock(u); renderHome(); openDetail(id); }
 function showV2CloseFlow(id){ const s=stocks.find(x=>String(x.id)===String(id)); if(!s||!s.position)return; const held=s.position.shares||0; showModal(`<div style="background:${C.card};border-radius:20px;padding:22px;border:1px solid ${C.border};"><div style="color:${C.text};font-size:18px;font-weight:900;margin-bottom:4px;">Sell ${s.ticker}</div><div style="color:${C.textSub};font-size:12px;margin-bottom:14px;">Paper position: ${held} shares @ ${money(s.position.entry)}</div><label class="v2lbl">Sell Price</label><input id="v2-exit" type="number" step="0.01" value="${curVal(s,'price')||''}" style="width:100%;box-sizing:border-box;background:${C.cardHigh};border:1px solid ${C.border};border-radius:10px;color:${C.text};padding:11px;margin:5px 0 12px;"><label class="v2lbl">Shares to Sell</label><input id="v2-sell-shares" type="number" min="0.01" max="${held}" step="0.01" value="${held}" style="width:100%;box-sizing:border-box;background:${C.cardHigh};border:1px solid ${C.border};border-radius:10px;color:${C.text};padding:11px;margin:5px 0 14px;"><button onclick="saveV2Close('${id}')" style="width:100%;padding:12px;border:none;border-radius:10px;background:${C.red};color:#fff;font-weight:900;">SELL</button></div>`); }
-async function saveV2Close(id){ const s=stocks.find(x=>String(x.id)===String(id)); if(!s||!s.position)return; const ex=parseFloat(document.getElementById('v2-exit').value),held=Number(s.position.shares||0),sellShares=parseFloat(document.getElementById('v2-sell-shares')?.value); if(!ex||!sellShares||sellShares<=0||sellShares>held)return; const outDate=latestSnap(s)?.date||today(),inDate=s.position.date||today(),pl=(ex-s.position.entry)*sellShares,plPct=s.position.entry?((ex/s.position.entry)-1)*100:0,path=tradeWindowStats(s,Number(s.position.entry),inDate,outDate),rec={entry:s.position.entry,exit:ex,shares:sellShares,pl,plPct,date:outDate,dateIn:inDate,dateOut:outDate,playbook:s.position.entryPlaybook||cleanPlaybookName(pbFor(s))||'',entryFamily:s.position.entryFamily||null,entrySnapshot:s.position.entrySnapshot||null,days:positionDays(s),action:'SELL',signalTier:s.position.signalTier||'BUY',mfePct:path.mfe,maePct:path.mae}; const remaining=Math.max(0,held-sellShares),nextPosition=remaining>0?{...s.position,shares:remaining}:null,u={...s,position:nextPosition,realized:[...(s.realized||[]),rec]}; stocks=stocks.map(x=>String(x.id)===String(id)?u:x); closeAllOverlays(); await fbSaveStock(u); renderHome(); if(nextPosition)openDetail(id); else showScreen('home'); }
+async function saveV2Close(id){
+  const s=stocks.find(x=>String(x.id)===String(id));
+  if(!s||!s.position) return;
 
-// ── One-file daily import ───────────────────────────────────────────────────
-function parseDailyMultiCSV(text){
-  text=text.replace(/^\uFEFF/,''); const lines=text.split(/\r?\n/); if(lines.length<2)return {groups:new Map(),headers:[]}; const delim=lines[0].includes('\t')?'\t':','; const headers=splitCSVLine(lines[0],delim); const norm=h=>String(h).toLowerCase().replace(/[^a-z0-9]/g,''); const find=(...alts)=>headers.findIndex(h=>alts.some(a=>norm(h)===norm(a)||norm(h).includes(norm(a))));
-  const I={date:find('Date'),ticker:find('Symbol','Ticker'),close:find('Day Close','Close'),livePrice:find('LivePrice'),liveDayPct:find('LiveDayPct'),liveSessionDate:find('LiveSessionDate'),liveAsOfET:find('LiveAsOfET'),open:find('Open'),high:find('High'),low:find('Low'),vol:find('Volume'),rsi:find('RSI14','RSI'),macd:find('MACD'),sig:find('MACDSignal'),atr:find('ATR14','ATR'),atrPct:find('ATRPercentage'),ema20:find('EMA20'),ma50:find('SMA50'),ma200:find('SMA200'),avgvol:find('AvgVol20'),hi52:find('High52W'),lo52:find('Low52W'),regZ126:find('RegZ126'),regSlope126:find('RegSlope126'),regCenter126:find('RegCenter126'),regResidualSD126:find('RegResidualSD126'),sector:find('Sector'),industry:find('Industry'),earn:find('DaysToEarnings','Days To Earnings'),earnDate:find('NextEarningsDate','EarningsDate'),lastEarnDate:find('LastEarningsDate'),earnTime:find('EarningsTime'),earnVerified:find('EarningsVerified'),earnSource:find('EarningsSource'),nearHighSamples:find('NearHigh5PctSamples'),nearHighAvg10:find('NearHighAvgReturn10D'),nearHighWin10:find('NearHighWinRate10D'),nearHighBreakout10:find('NearHighBreakoutRate10D'),nearHighFailure10:find('NearHighFailureRate10D'),nearHighBehavior:find('NearHighBehavior')}; if(I.date<0||I.ticker<0||I.close<0)return {groups:new Map(),headers};
-  const groups=new Map(), num=(cols,i)=>{ if(i<0)return null; const v=parseFloat(String(cols[i]??'').replace(/,/g,'')); return Number.isNaN(v)?null:v; }, str=(cols,i)=>{ if(i<0)return null; const v=String(cols[i]??'').trim(); return v===''?null:v; };
-  for(let j=1;j<lines.length;j++){ if(!lines[j].trim())continue; const c=splitCSVLine(lines[j],delim),t=String(c[I.ticker]||'').trim().toUpperCase(); if(!t)continue; const rawDate=String(c[I.date]||'').trim(),date=parseCSVDateISO(rawDate),price=num(c,I.close),atrp=num(c,I.atrPct);
-    if(!date) throw new Error(`Invalid Date in daily CSV row ${j+1}: "${rawDate}". Expected YYYY-MM-DD or M/D/YYYY.`); const ev=str(c,I.earnVerified); const row={date,price,livePrice:num(c,I.livePrice),liveDayPct:num(c,I.liveDayPct),liveSessionDate:parseCSVDateISO(str(c,I.liveSessionDate))||date,liveAsOfET:str(c,I.liveAsOfET),open:num(c,I.open),high:num(c,I.high),low:num(c,I.low),vol:num(c,I.vol),rsi:num(c,I.rsi),macdLine:num(c,I.macd),signalLine:num(c,I.sig),atr:atrp!=null&&price?price*atrp/100:num(c,I.atr),ma20:num(c,I.ema20),ema20:num(c,I.ema20),ma50:num(c,I.ma50),ma200:num(c,I.ma200),avgvol:num(c,I.avgvol),hi52:num(c,I.hi52),lo52:num(c,I.lo52),regZ126:num(c,I.regZ126),regSlope126:num(c,I.regSlope126),regCenter126:num(c,I.regCenter126),regResidualSD126:num(c,I.regResidualSD126),sector:str(c,I.sector),industry:str(c,I.industry),earnOffset:parseEarnOffset(str(c,I.earn)),earnDate:normalizeEarningsDate(str(c,I.earnDate)),lastEarnDate:normalizeEarningsDate(str(c,I.lastEarnDate)),earnTime:str(c,I.earnTime),earnVerified:ev==null?null:/^(yes|true|1|verified)$/i.test(ev),earnSource:str(c,I.earnSource),nearHighSamples:num(c,I.nearHighSamples),nearHighAvg10:num(c,I.nearHighAvg10),nearHighWin10:num(c,I.nearHighWin10),nearHighBreakout10:num(c,I.nearHighBreakout10),nearHighFailure10:num(c,I.nearHighFailure10),nearHighBehavior:str(c,I.nearHighBehavior)}; if(!groups.has(t))groups.set(t,[]); groups.get(t).push(row); }
-  for(const rows of groups.values())rows.sort((a,b)=>new Date(a.date)-new Date(b.date)); return {groups,headers};
+  const ex=parseFloat(document.getElementById('v2-exit').value);
+  const held=Number(s.position.shares||0);
+  const requested=parseFloat(document.getElementById('v2-sell-shares')?.value);
+
+  if(!Number.isFinite(ex)||ex<=0||!Number.isFinite(requested)||requested<=0||held<=0) return;
+
+  // Never allow an accidental oversell from decimal/floating-point noise.
+  const sellShares=Math.min(requested,held);
+
+  // Treat anything within a tiny tolerance of the full holding as a FULL SELL.
+  // This prevents microscopic "dust" shares from keeping a stock in BOUGHT.
+  const tolerance=Math.max(0.000001,held*0.000001);
+  const remainingRaw=held-sellShares;
+  const isFullSell=remainingRaw<=tolerance;
+  const remaining=isFullSell?0:remainingRaw;
+
+  const outDate=latestSnap(s)?.date||today();
+  const inDate=s.position.date||today();
+  const pl=(ex-s.position.entry)*sellShares;
+  const plPct=s.position.entry?((ex/s.position.entry)-1)*100:0;
+  const path=tradeWindowStats(s,Number(s.position.entry),inDate,outDate);
+
+  const rec={
+    entry:s.position.entry,
+    exit:ex,
+    shares:sellShares,
+    pl,plPct,
+    date:outDate,
+    dateIn:inDate,
+    dateOut:outDate,
+    playbook:s.position.entryPlaybook||cleanPlaybookName(pbFor(s))||'',
+    entryFamily:s.position.entryFamily||null,
+    entrySnapshot:s.position.entrySnapshot||null,
+    days:positionDays(s),
+    action:'SELL',
+    signalTier:s.position.signalTier||'BUY',
+    mfePct:path.mfe,
+    maePct:path.mae
+  };
+
+  const u={...s,realized:[...(s.realized||[]),rec]};
+
+  if(isFullSell){
+    // Full exit means there is NO open position field at all.
+    delete u.position;
+  }else{
+    u.position={...s.position,shares:remaining};
+  }
+
+  // Optimistic local update: dashboard classification changes immediately.
+  stocks=stocks.map(x=>String(x.id)===String(id)?u:x);
+  closeAllOverlays();
+  detailStockId=null;
+  showScreen('home');
+  renderHome();
+
+  try{
+    await fbSaveStock(u);
+    showSaveStatus('saved');
+    setTimeout(()=>showSaveStatus('ready'),1200);
+  }catch(e){
+    console.error('SELL save failed',e);
+    showSaveStatus('error');
+    const reason=e?.message?String(e.message).replace(/^FirebaseError:\s*/,''):'Unknown save error';
+    alert(`StockIQ removed the position locally, but could not save the SELL to your account.\n\n${reason}\n\nDo not refresh until the save succeeds.`);
+  }
 }
 function showDailyDataFlow(){ showModal(`<div style="background:${C.card};border-radius:20px;padding:24px;border:1px solid ${C.teal}44;"><div style="color:${C.text};font-size:20px;font-weight:900;margin-bottom:6px;">Upload Daily Data</div><div style="color:${C.textSub};font-size:13px;line-height:1.6;margin-bottom:18px;">Use the dynamic multi-ticker daily CSV. StockIQ now imports every ticker in the file — validated names, market ETFs, and newly discovered research candidates. New research names are added automatically but cannot reach the live BUY/PREPARING screen until they have a validated StockIQ playbook. Your trade entries and stops stay untouched.</div><input id="v2-daily-file" type="file" accept=".csv,.txt" multiple style="display:none" onchange="previewV2Daily(this)"><button onclick="document.getElementById('v2-daily-file').click()" style="width:100%;padding:14px;border:none;border-radius:12px;background:${C.teal};color:#000;font-weight:900;cursor:pointer;">Select Daily CSV</button></div>`); }
 async function previewV2Daily(input){
@@ -11126,7 +11291,7 @@ async function applyV2IntradayFile(input){
 // ── v2 initialization ────────────────────────────────────────────────────────
 (function initStockIQV2(){
   const style=document.createElement('style'); style.textContent=`.v2lbl{color:${C.textSub};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}.v2val{color:${C.text};font-size:14px;font-weight:900}.v2big{color:${C.text};font-size:18px;font-weight:950}`; document.head.appendChild(style);
-  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.84 · Top Back Button Fix';
+  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.88 · Lifecycle Clarity + Family Filter + Risk Lock';
   const topButtons=[...document.querySelectorAll('button')]; const add=topButtons.find(b=>b.textContent.includes('Add Stock')); if(add){ add.style.display='none'; add.setAttribute('aria-hidden','true'); add.tabIndex=-1; } const scan=topButtons.find(b=>b.textContent.includes('Import Scan')); if(scan){scan.textContent='Daily Data';scan.onclick=showDailyDataFlow;scan.setAttribute('aria-label','Upload daily multi-ticker data');}
   if(scan && !document.getElementById('intraday-data-btn')){ const b=document.createElement('button'); b.id='intraday-data-btn'; b.textContent='Intraday Data'; b.onclick=showIntradayDataFlow; b.setAttribute('aria-label','Upload current 30-minute execution data'); b.style.cssText=scan.style.cssText; b.style.borderColor=C.yellow; b.style.color=C.yellow; scan.parentNode.insertBefore(b,scan.nextSibling); }
   if(scan && !document.getElementById('sunday-discovery-btn')){ const b=document.createElement('button'); b.id='sunday-discovery-btn'; b.textContent='Sunday Discovery'; b.onclick=showSundayDiscoveryFlow; b.setAttribute('aria-label','Upload Sunday scanner discovery report'); b.style.cssText=scan.style.cssText; b.style.borderColor=C.purple; b.style.color=C.purple; const anchor=document.getElementById('intraday-data-btn')||scan; anchor.parentNode.insertBefore(b,anchor.nextSibling); }
@@ -11309,7 +11474,7 @@ function showSundayDiscoveryFlow(){
     </div>
   </div>`);
 }
-(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.84 · Top Back Button Fix';})();
+(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.88 · Lifecycle Clarity + Family Filter + Risk Lock';})();
 
 // ── v2.9.54 HISTORY LIFECYCLE ──────────────────────────────────────
 // Research is no longer a catch-all. The visible Research tab contains only:
@@ -11551,7 +11716,7 @@ function renderStockList(){
 }
 
 (function v2953Init(){
-  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.84 · Top Back Button Fix';
+  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.88 · Lifecycle Clarity + Family Filter + Risk Lock';
   // Safe cleanup on load: de-duplicate queue and remove only records that already
   // have evidence. Genuine pending Sunday names are never deleted automatically.
   try{ applyResearchReconciliation(true); }catch(e){ console.warn('Research reconciliation init failed',e); }
@@ -11784,7 +11949,7 @@ saveV2Close=async function(id){
 auth.onAuthStateChanged(user=>{ if(user){ loadSignalLedger(); syncSignalLedgerFromCloud(); } else { SIGNAL_LEDGER=[]; } });
 loadSignalLedger();
 setTimeout(()=>{ try{ updateAndCaptureSignals(); renderFilterBar(); }catch(e){ console.warn('Signal ledger init failed',e); } },800);
-const _v2965Version=document.getElementById('stockiq-version'); if(_v2965Version)_v2965Version.textContent='StockIQ v2.9.84 · Top Back Button Fix';
+const _v2965Version=document.getElementById('stockiq-version'); if(_v2965Version)_v2965Version.textContent='StockIQ v2.9.88 · Lifecycle Clarity + Family Filter + Risk Lock';
 // v2.9.82: preserves the v2.9.81 verified-entry persistence logic; fixes canonical daily CSV dates, filename/date validation, and Detail Back navigation.
 [...document.querySelectorAll('button')].filter(b=>/^(\+\s*)?(Add Stock|Research)$/i.test((b.textContent||'').trim())).forEach(b=>{ if(!b.closest('#tag-bar')){ b.style.display='none'; b.setAttribute('aria-hidden','true'); b.tabIndex=-1; } });
 </script>
