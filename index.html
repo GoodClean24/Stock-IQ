@@ -95,7 +95,7 @@ input[type=number]{-moz-appearance:textfield;}
   <div id="portfolio-box"></div>
   <div id="position-watch"></div>
   <!-- Tonight's Best Opportunities — the ranking engine -->
-  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">v2.9.93 · TIGO Close + Family Trend Controls Fix</div>
+  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">v2.9.94 · Sector + 30-Min Copy + Start Fresh</div>
   <div id="tonights-opportunities"></div>
   <!-- Filter tags + sort -->
   <div id="filter-bar" style="background:#11141C;border-bottom:1px solid #1E2230;padding:9px 20px;"></div>
@@ -9123,7 +9123,7 @@ function renderPortfolioBox(){
   const el=document.getElementById('portfolio-box'); if(!el)return; const open=stocks.filter(s=>hasOpenPosition(s)&&isValidatedStock(s)); if(!open.length){el.innerHTML='';return;}
   const val=open.reduce((a,s)=>a+(displayPrice(s)||0)*(s.position.shares||0),0), cost=open.reduce((a,s)=>a+(s.position.entry||0)*(s.position.shares||0),0), pl=val-cost, risk=open.reduce((a,s)=>a+(plannedRisk(s)||0),0), exp=clusterExposure();
   el.innerHTML=`<div style="margin:14px 16px;"><div style="background:${C.card};border:1.5px solid ${C.border};border-radius:20px;padding:16px 18px;">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;"><span style="color:${C.textMuted};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.1em;">Portfolio</span><span style="color:${open.length>=DEFAULT_MAX_POSITIONS?C.yellow:C.textSub};font-size:12px;font-weight:800;">${open.length} / ${DEFAULT_MAX_POSITIONS} positions</span></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:10px;"><span style="color:${C.textMuted};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.1em;">Portfolio</span><div style="display:flex;align-items:center;gap:9px;"><span style="color:${open.length>=DEFAULT_MAX_POSITIONS?C.yellow:C.textSub};font-size:12px;font-weight:800;">${open.length} / ${DEFAULT_MAX_POSITIONS} positions</span><button onclick="clearOpenPaperPositions()" title="Remove all current paper positions and start fresh. Completed trade history and the Signal Log are kept." style="border:1px solid ${C.border};background:${C.cardHigh};color:${C.textSub};border-radius:8px;padding:5px 8px;font-size:9.5px;font-weight:850;cursor:pointer;white-space:nowrap;">Start Fresh</button></div></div>
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px;">
       <div><div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;">Unrealized</div><div style="color:${pl>=0?C.green:C.red};font-size:14px;font-weight:900;">${pl>=0?'+':''}${fmtP(pl)}</div></div>
       <div><div style="color:${C.textMuted};font-size:9px;text-transform:uppercase;">Planned Risk</div><div style="color:${C.text};font-size:14px;font-weight:900;">${fmtP(risk)}</div></div>
@@ -10113,6 +10113,7 @@ function positionTop(s,pb,st){
             <div style="font-size:11px;font-weight:950;color:${C.teal};border:1px solid ${C.teal}66;border-radius:7px;padding:4px 7px;">BOUGHT</div>
           </div>
           <div style="font-size:13px;color:${C.text};font-weight:800;margin-top:3px;">${s.name||s.company||''}</div>
+          ${s.sector?`<div style="font-size:10.5px;color:${C.textMuted};font-weight:750;margin-top:3px;">Sector: ${s.sector}</div>`:''}
         </div>
         <div style="text-align:right;min-width:170px;">
           <div style="font-size:23px;font-weight:950;color:${C.text};">${money(curVal(s,'price'))}</div>
@@ -10161,7 +10162,7 @@ function preTop(s,pb,st){
   const executionLine=ix?.arm
     ? `<div style="color:${C.textMuted};font-size:10.5px;margin-top:5px;font-weight:800;">Qualified ${ix.arm.dailyDate} · RSI ${ix.arm.priorRSI==null?'—':Number(ix.arm.priorRSI).toFixed(1)} · SMA50 trigger ${money(ix.arm.trigger)}</div>`
     : '';
-  return `<div style="padding:16px 16px 10px;"><button onclick="stockIQBackFromDetail()" style="background:none;border:none;color:${C.textSub};padding:0 0 9px;cursor:pointer;">← Back</button><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;"><div style="min-width:0;"><div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;"><span style="color:${C.text};font-size:24px;font-weight:950;">${s.ticker}</span>${badge(st.state)}</div><div style="color:${C.text};font-size:13px;font-weight:700;margin-top:5px;">${companyNameFor(s)}</div>${label?`<div style="color:${C.textSub};font-size:12px;margin-top:3px;">${label}</div>`:''}${executionLine}<div style="color:${C.textMuted};font-size:9px;margin-top:5px;">v2.9.90</div></div><div style="text-align:right;flex-shrink:0;"><div style="color:${C.text};font-size:20px;font-weight:900;margin-bottom:2px;">${money(displayPrice(s))}</div>${liveDayMoveHTML(s,'11px')} ${canBuy?`<button onclick="showV2BuyFlow('${s.id}','${buyLabel}')" style="border:none;border-radius:10px;background:${C.green};color:#000;font-size:13px;font-weight:950;padding:9px 18px;cursor:pointer;box-shadow:0 0 0 1px ${C.green}33;">${buyLabel}</button>`:''}</div></div></div>`;
+  return `<div style="padding:16px 16px 10px;"><button onclick="stockIQBackFromDetail()" style="background:none;border:none;color:${C.textSub};padding:0 0 9px;cursor:pointer;">← Back</button><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;"><div style="min-width:0;"><div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;"><span style="color:${C.text};font-size:24px;font-weight:950;">${s.ticker}</span>${badge(st.state)}</div><div style="color:${C.text};font-size:13px;font-weight:700;margin-top:5px;">${companyNameFor(s)}</div>${s.sector?`<div style="color:${C.textMuted};font-size:10.5px;font-weight:750;margin-top:3px;">Sector: ${s.sector}</div>`:''}${label?`<div style="color:${C.textSub};font-size:12px;margin-top:3px;">${label}</div>`:''}${executionLine}</div><div style="text-align:right;flex-shrink:0;"><div style="color:${C.text};font-size:20px;font-weight:900;margin-bottom:2px;">${money(displayPrice(s))}</div>${liveDayMoveHTML(s,'11px')} ${canBuy?`<button onclick="showV2BuyFlow('${s.id}','${buyLabel}')" style="border:none;border-radius:10px;background:${C.green};color:#000;font-size:13px;font-weight:950;padding:9px 18px;cursor:pointer;box-shadow:0 0 0 1px ${C.green}33;">${buyLabel}</button>`:''}</div></div></div>`;
 }
 function ownedResearchDetails(s,pb){
   const research = [
@@ -11381,7 +11382,7 @@ async function applyV2IntradayFile(input){
 // ── v2 initialization ────────────────────────────────────────────────────────
 (function initStockIQV2(){
   const style=document.createElement('style'); style.textContent=`.v2lbl{color:${C.textSub};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}.v2val{color:${C.text};font-size:14px;font-weight:900}.v2big{color:${C.text};font-size:18px;font-weight:950}`; document.head.appendChild(style);
-  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.93 · TIGO Close + Family Trend Controls Fix';
+  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.94 · Sector + 30-Min Copy + Start Fresh';
   const topButtons=[...document.querySelectorAll('button')]; const add=topButtons.find(b=>b.textContent.includes('Add Stock')); if(add){ add.style.display='none'; add.setAttribute('aria-hidden','true'); add.tabIndex=-1; } const scan=topButtons.find(b=>b.textContent.includes('Import Scan')); if(scan){scan.textContent='Daily Data';scan.onclick=showDailyDataFlow;scan.setAttribute('aria-label','Upload daily multi-ticker data');}
   if(scan && !document.getElementById('intraday-data-btn')){ const b=document.createElement('button'); b.id='intraday-data-btn'; b.textContent='Intraday Data'; b.onclick=showIntradayDataFlow; b.setAttribute('aria-label','Upload current 30-minute execution data'); b.style.cssText=scan.style.cssText; b.style.borderColor=C.yellow; b.style.color=C.yellow; scan.parentNode.insertBefore(b,scan.nextSibling); }
   if(scan && !document.getElementById('sunday-discovery-btn')){ const b=document.createElement('button'); b.id='sunday-discovery-btn'; b.textContent='Sunday Discovery'; b.onclick=showSundayDiscoveryFlow; b.setAttribute('aria-label','Upload Sunday scanner discovery report'); b.style.cssText=scan.style.cssText; b.style.borderColor=C.purple; b.style.color=C.purple; const anchor=document.getElementById('intraday-data-btn')||scan; anchor.parentNode.insertBefore(b,anchor.nextSibling); }
@@ -11564,7 +11565,7 @@ function showSundayDiscoveryFlow(){
     </div>
   </div>`);
 }
-(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.93 · TIGO Close + Family Trend Controls Fix';})();
+(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.94 · Sector + 30-Min Copy + Start Fresh';})();
 
 // ── v2.9.54 HISTORY LIFECYCLE ──────────────────────────────────────
 // Research is no longer a catch-all. The visible Research tab contains only:
@@ -11806,7 +11807,7 @@ function renderStockList(){
 }
 
 (function v2953Init(){
-  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.93 · TIGO Close + Family Trend Controls Fix';
+  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.94 · Sector + 30-Min Copy + Start Fresh';
   // Safe cleanup on load: de-duplicate queue and remove only records that already
   // have evidence. Genuine pending Sunday names are never deleted automatically.
   try{ applyResearchReconciliation(true); }catch(e){ console.warn('Research reconciliation init failed',e); }
@@ -12039,7 +12040,7 @@ saveV2Close=async function(id){
 auth.onAuthStateChanged(user=>{ if(user){ loadSignalLedger(); syncSignalLedgerFromCloud(); } else { SIGNAL_LEDGER=[]; } });
 loadSignalLedger();
 setTimeout(()=>{ try{ updateAndCaptureSignals(); renderFilterBar(); }catch(e){ console.warn('Signal ledger init failed',e); } },800);
-const _v2965Version=document.getElementById('stockiq-version'); if(_v2965Version)_v2965Version.textContent='StockIQ v2.9.93 · TIGO Close + Family Trend Controls Fix';
+const _v2965Version=document.getElementById('stockiq-version'); if(_v2965Version)_v2965Version.textContent='StockIQ v2.9.94 · Sector + 30-Min Copy + Start Fresh';
 // v2.9.82: preserves the v2.9.81 verified-entry persistence logic; fixes canonical daily CSV dates, filename/date validation, and Detail Back navigation.
 [...document.querySelectorAll('button')].filter(b=>/^(\+\s*)?(Add Stock|Research)$/i.test((b.textContent||'').trim())).forEach(b=>{ if(!b.closest('#tag-bar')){ b.style.display='none'; b.setAttribute('aria-hidden','true'); b.tabIndex=-1; } });
 </script>
@@ -12062,6 +12063,7 @@ renderFilterBar=function(){
   el.innerHTML=`
     <div style="display:flex;gap:7px;overflow-x:auto;align-items:center;margin-bottom:10px;">
       ${opts.map(t=>`<button onclick="setTag('${t}')" style="padding:7px 14px;border-radius:22px;font-size:11.5px;font-weight:800;border:1px solid ${activeTag===t?C.green:C.border};background:${activeTag===t?C.greenDim:'none'};color:${activeTag===t?C.green:C.textSub};cursor:pointer;white-space:nowrap;">${t}</button>`).join('')}
+      <button id="copy-30min-tickers-btn" onclick="copyThirtyMinuteTickers(this)" title="Copy the tickers that currently need 30-minute data" style="padding:5px 9px;border-radius:8px;font-size:9.5px;font-weight:900;border:1px solid ${C.yellow}66;background:${C.yellow}14;color:${C.yellow};cursor:pointer;white-space:nowrap;">30-Minute Tickers</button>
       <button onclick="showResearchReconciliation()" title="Audit research queue" style="padding:5px 8px;border-radius:8px;font-size:9.5px;font-weight:850;border:1px solid ${C.border};background:${C.cardHigh};color:${C.textMuted};cursor:pointer;white-space:nowrap;">Research Audit</button>
       <button data-signal-log="1" onclick="showSignalLedger()" title="Forward-test BUY signal ledger" style="padding:5px 8px;border-radius:8px;font-size:9.5px;font-weight:850;border:1px solid ${C.border};background:${C.cardHigh};color:${C.textMuted};cursor:pointer;white-space:nowrap;">Signal Log</button>
     </div>
@@ -12128,7 +12130,104 @@ renderStockList=function(){
 
 // Re-render with final controls and persist any stale closed positions after auth/data load.
 setTimeout(()=>{ try{ reconcileClosedPositionsInMemory(); renderHome(); }catch(e){ console.warn('v2.9.93 final home refresh failed',e); } },1100);
-const _v2993Version=document.getElementById('stockiq-version'); if(_v2993Version)_v2993Version.textContent='StockIQ v2.9.93 · TIGO Close + Family Trend Controls Fix';
+const _v2993Version=document.getElementById('stockiq-version'); if(_v2993Version)_v2993Version.textContent='StockIQ v2.9.94 · Sector + 30-Min Copy + Start Fresh';
+</script>
+
+
+<script>
+// ── v2.9.94 WORKFLOW CLEANUP ────────────────────────────────────────────────
+// UX/data-flow only. No family entry/exit rules are changed here.
+function thirtyMinuteTickersNeeded(){
+  const out=[];
+  for(const s of (stocks||[])){
+    try{
+      if(!s || isMarketStock(s) || hasOpenPosition(s) || !isValidatedStock(s)) continue;
+      const pb=pbFor(s); if(!pb) continue;
+      const st=safeStockState(s);
+      const cw=chartWatchMeta(s,pb,st);
+      if(cw?.chart==='30-Min') out.push(String(s.ticker||'').toUpperCase());
+    }catch(e){ console.warn('30-minute ticker check failed',s?.ticker,e); }
+  }
+  return [...new Set(out)].filter(Boolean).sort();
+}
+
+async function copyThirtyMinuteTickers(btn){
+  const tickers=thirtyMinuteTickersNeeded();
+  const text=tickers.join(',');
+  const original=btn?.textContent||'30-Minute Tickers';
+  if(!tickers.length){
+    if(btn){ btn.textContent='None Needed'; setTimeout(()=>btn.textContent=original,1600); }
+    return;
+  }
+  let copied=false;
+  try{
+    if(navigator.clipboard?.writeText){ await navigator.clipboard.writeText(text); copied=true; }
+  }catch(e){}
+  if(!copied){
+    try{
+      const ta=document.createElement('textarea'); ta.value=text; ta.setAttribute('readonly',''); ta.style.position='fixed'; ta.style.opacity='0';
+      document.body.appendChild(ta); ta.select(); copied=document.execCommand('copy'); ta.remove();
+    }catch(e){}
+  }
+  if(btn){
+    btn.textContent=copied?`Copied ${tickers.length} ✓`:'Copy Failed';
+    setTimeout(()=>btn.textContent=original,1700);
+  }
+}
+
+async function clearOpenPaperPositions(){
+  const open=(stocks||[]).filter(s=>hasOpenPosition(s)&&!isMarketStock(s));
+  if(!open.length){ alert('There are no open paper positions to clear.'); return; }
+  const ok=confirm(`Start fresh with StockIQ?\n\nThis will remove ${open.length} current paper position${open.length===1?'':'s'} from BOUGHT.\n\nCompleted trade history and the Forward Signal Log will NOT be erased.`);
+  if(!ok) return;
+
+  const changed=[];
+  for(const s of open){
+    if(!s?.position) continue;
+    delete s.position;
+    changed.push(s);
+  }
+  detailStockId=null;
+  showScreen('home');
+  renderHome();
+  window.scrollTo(0,0);
+
+  const failures=[];
+  for(const s of changed){
+    try{ await fbSaveStock(s); }
+    catch(e){ failures.push(`${s.ticker}: ${e?.message||e}`); }
+  }
+  if(failures.length){
+    alert(`The screen was cleared, but ${failures.length} position${failures.length===1?'':'s'} did not save to the cloud. Please check your connection before refreshing.\n\n${failures.slice(0,3).join('\n')}`);
+  }else{
+    renderHome();
+  }
+}
+
+// Also show sector in research/unvalidated detail headers when the data is available.
+const _v2994RenderDetail = renderDetail;
+renderDetail=function(s){
+  _v2994RenderDetail(s);
+  // The validated detail headers already render sector directly. For research
+  // detail pages, add a quiet sector line only if no sector label is present.
+  try{
+    if(!pbFor(s) && s?.sector){
+      const root=document.getElementById('detail-content');
+      const h2=root?.querySelector('h2');
+      if(h2 && !root.querySelector('[data-stock-sector]')){
+        const company=h2.nextElementSibling;
+        const d=document.createElement('div');
+        d.setAttribute('data-stock-sector','1');
+        d.textContent=`Sector: ${s.sector}`;
+        d.style.cssText=`color:${C.textMuted};font-size:10.5px;font-weight:750;margin-top:3px;`;
+        if(company) company.insertAdjacentElement('afterend',d); else h2.insertAdjacentElement('afterend',d);
+      }
+    }
+  }catch(e){}
+};
+
+const _v2994Version=document.getElementById('stockiq-version');
+if(_v2994Version)_v2994Version.textContent='StockIQ v2.9.94 · Sector + 30-Min Copy + Start Fresh';
 </script>
 
 </body>
