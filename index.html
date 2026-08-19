@@ -13447,5 +13447,286 @@ const _v29102Version=document.getElementById('stockiq-version');
 if(_v29102Version)_v29102Version.textContent='StockIQ v2.9.102 · Firebase Ownership Audit Cleanup';
 </script>
 
+
+<script>
+// ── v2.9.103 CLEAN STATE ARCHITECTURE ──────────────────────────────────────
+// Two completely separate responsibilities:
+//   1) Daily overlay / stock collection decides WHICH tickers exist.
+//   2) settings/currentPortfolioV3 decides ONLY which tickers are currently owned.
+// No ownership cache is ever allowed to rebuild or replace the stock universe.
+
+const CURRENT_PORTFOLIO_DOC_ID_V29103='currentPortfolioV3';
+const CURRENT_PORTFOLIO_STORAGE_KEY_V29103='stockiq_current_portfolio_v3';
+let currentPortfolioV29103={initialized:false,positions:{},revision:0,updatedAtMs:0,pendingSync:false};
+let currentPortfolioReadyV29103=false;
+let currentPortfolioSaveChainV29103=Promise.resolve();
+
+function normalizeCurrentPortfolioV29103(raw){
+  const r=(raw&&typeof raw==='object')?raw:{};
+  return {
+    initialized:r.initialized===true,
+    positions:(r.positions&&typeof r.positions==='object')?r.positions:{},
+    revision:Number(r.revision||0)||0,
+    updatedAtMs:Number(r.updatedAtMs||0)||0,
+    pendingSync:r.pendingSync===true
+  };
+}
+function currentPortfolioRefV29103(uid){
+  return db.collection('users').doc(uid).collection('settings').doc(CURRENT_PORTFOLIO_DOC_ID_V29103);
+}
+function loadCurrentPortfolioLocalV29103(){
+  try{
+    const raw=JSON.parse(localStorage.getItem(CURRENT_PORTFOLIO_STORAGE_KEY_V29103)||'null');
+    if(raw){
+      currentPortfolioV29103=normalizeCurrentPortfolioV29103(raw);
+      currentPortfolioReadyV29103=currentPortfolioV29103.initialized===true;
+    }
+  }catch(e){}
+}
+function saveCurrentPortfolioLocalV29103(){
+  try{ localStorage.setItem(CURRENT_PORTFOLIO_STORAGE_KEY_V29103,JSON.stringify(currentPortfolioV29103)); }catch(e){}
+}
+function portfolioKeyV29103(s){ return String(s?.ticker||s?.symbol||s?.id||'').trim().toUpperCase(); }
+function positionRowV29103(s){
+  if(!s?.position || Number(s.position.shares||0)<=0) return null;
+  return {
+    ticker:String(s.ticker||'').toUpperCase(), id:s.id,
+    name:s.name||s.ticker||'', sector:s.sector||'', industry:s.industry||'',
+    position:cleanForFirestore({...s.position}), updatedAtMs:Date.now()
+  };
+}
+function applyCurrentPortfolioV29103(){
+  if(!currentPortfolioReadyV29103 || !Array.isArray(stocks)) return false;
+  const rows=currentPortfolioV29103.positions||{};
+  let changed=false;
+  const seen=new Set();
+  stocks=stocks.map(s=>{
+    if(!s || isMarketStock(s)) return s;
+    const key=portfolioKeyV29103(s); seen.add(key);
+    const row=rows[key];
+    if(row?.position && Number(row.position.shares||0)>0){
+      if(JSON.stringify(s.position||null)!==JSON.stringify(row.position)) changed=true;
+      return {...s,position:{...row.position}};
+    }
+    if(s.position){ const n={...s}; delete n.position; changed=true; return n; }
+    return s;
+  });
+  // If a currently-owned ticker is temporarily missing from today's Daily file,
+  // keep a minimal position row visible without replacing the rest of the universe.
+  for(const [key,row] of Object.entries(rows)){
+    if(seen.has(key) || !row?.position || Number(row.position.shares||0)<=0) continue;
+    stocks.push({id:row.id||`v2_${key}`,ticker:key,name:row.name||key,sector:row.sector||'',industry:row.industry||'',type:'Swing Trade',starred:false,notes:'',realized:[],scannerSources:[],snapshots:[],position:{...row.position},_v2Placeholder:true});
+    changed=true;
+  }
+  return changed;
+}
+function setPortfolioMutationV29103(mutator){
+  if(!currentPortfolioReadyV29103){
+    currentPortfolioV29103={initialized:true,positions:{},revision:0,updatedAtMs:0,pendingSync:false};
+    currentPortfolioReadyV29103=true;
+  }
+  mutator(currentPortfolioV29103.positions);
+  currentPortfolioV29103.revision=(Number(currentPortfolioV29103.revision||0)||0)+1;
+  currentPortfolioV29103.updatedAtMs=Date.now();
+  currentPortfolioV29103.pendingSync=true;
+  saveCurrentPortfolioLocalV29103();
+  applyCurrentPortfolioV29103();
+}
+function queueCurrentPortfolioCloudSaveV29103(){
+  if(!currentPortfolioReadyV29103) return Promise.resolve(false);
+  const user=auth.currentUser;
+  if(!user) return Promise.reject(new Error('You are not signed in to StockIQ.'));
+  const snap=JSON.parse(JSON.stringify(currentPortfolioV29103));
+  snap.pendingSync=false;
+  currentPortfolioSaveChainV29103=currentPortfolioSaveChainV29103.catch(()=>false).then(async()=>{
+    await Promise.race([
+      currentPortfolioRefV29103(user.uid).set(cleanForFirestore(snap),{merge:false}),
+      new Promise((_,rej)=>setTimeout(()=>rej(new Error('Current Portfolio save timed out after 12s')),12000))
+    ]);
+    if(Number(currentPortfolioV29103.revision||0)===Number(snap.revision||0)){
+      currentPortfolioV29103.pendingSync=false;
+      saveCurrentPortfolioLocalV29103();
+    }
+    return true;
+  });
+  return currentPortfolioSaveChainV29103;
+}
+async function syncCurrentPortfolioCloudV29103(){
+  const user=auth.currentUser; if(!user) return false;
+  try{
+    const snap=await Promise.race([
+      currentPortfolioRefV29103(user.uid).get(),
+      new Promise((_,rej)=>setTimeout(()=>rej(new Error('Current Portfolio read timed out after 8s')),8000))
+    ]);
+    const local=normalizeCurrentPortfolioV29103(currentPortfolioV29103);
+    if(snap.exists){
+      const cloud=normalizeCurrentPortfolioV29103(snap.data());
+      if(local.initialized && local.pendingSync && local.revision>=cloud.revision){
+        currentPortfolioV29103=local; currentPortfolioReadyV29103=true;
+        applyCurrentPortfolioV29103(); renderHome();
+        try{ await queueCurrentPortfolioCloudSaveV29103(); }catch(e){ console.warn('Pending Current Portfolio retry failed',e); }
+      }else if(cloud.initialized){
+        currentPortfolioV29103={...cloud,pendingSync:false}; currentPortfolioReadyV29103=true;
+        saveCurrentPortfolioLocalV29103(); applyCurrentPortfolioV29103(); renderHome();
+      }
+    }else if(local.initialized){
+      currentPortfolioV29103=local; currentPortfolioReadyV29103=true;
+      applyCurrentPortfolioV29103(); renderHome();
+      try{ await queueCurrentPortfolioCloudSaveV29103(); }catch(e){ console.warn('Current Portfolio seed failed',e); }
+    }
+    return true;
+  }catch(e){
+    console.warn('Current Portfolio V3 cloud sync failed',e);
+    if(currentPortfolioReadyV29103){ applyCurrentPortfolioV29103(); try{renderHome();}catch(_){} }
+    return false;
+  }
+}
+
+// Retire every older ownership authority. They may remain in Firebase for history,
+// but they can no longer read, write, apply, or infer current ownership.
+try{ applyCurrentPortfolioV29101=function(){return false;}; }catch(e){}
+try{ syncCurrentPortfolioCloudV29101=async function(){return false;}; }catch(e){}
+try{ saveCurrentPortfolioCloudV29101=async function(){return false;}; }catch(e){}
+try{ syncPortfolioStateFromCloud=async function(){return false;}; }catch(e){}
+try{ savePortfolioStateCloud=async function(){return false;}; }catch(e){}
+try{ syncActivePositionsFromCloud=async function(){return false;}; }catch(e){}
+try{ saveActivePositionsCloud=async function(){return false;}; }catch(e){}
+try{ mergeActivePositions=function(){return false;}; }catch(e){}
+try{ saveActivePositionsLocal=function(){return false;}; }catch(e){}
+
+loadCurrentPortfolioLocalV29103();
+
+// CRITICAL: Current Portfolio decides ownership only. It never decides which
+// stocks exist. The Daily overlay / full stock collection remain the universe.
+hasOpenPosition=function(s){
+  if(!currentPortfolioReadyV29103) return false;
+  const row=currentPortfolioV29103.positions?.[portfolioKeyV29103(s)];
+  return !!(row?.position && Number(row.position.shares||0)>0);
+};
+
+// Fix the v2.9.99 local-first bug: never replace the full stock universe with
+// the small interaction/user-state cache. If Firestore stocks are not ready,
+// render from the locally persisted Daily overlay instead.
+v2999RenderLocalFirst=function(){
+  try{
+    if(!(stocks||[]).length && dailyOverlayByTicker?.size){
+      stocks=applyDailyOverlayToStocks([]);
+    }
+    if(currentPortfolioReadyV29103) applyCurrentPortfolioV29103();
+    showScreen('home'); renderHome();
+    const el=document.getElementById('save-status');
+    if(el){ el.style.display='block'; el.style.color=C.textMuted; el.textContent='StockIQ ready · cloud updates loading in background'; }
+  }catch(e){ console.warn('Local-first Daily render failed',e); }
+};
+
+// Reconcile ownership after every home/detail render without touching the universe.
+const _v29103RenderHome=renderHome;
+renderHome=function(...args){
+  if(currentPortfolioReadyV29103) applyCurrentPortfolioV29103();
+  return _v29103RenderHome.apply(this,args);
+};
+const _v29103RenderDetail=renderDetail;
+renderDetail=function(s,...args){
+  if(currentPortfolioReadyV29103){
+    applyCurrentPortfolioV29103();
+    const fresh=stocks.find(x=>String(x.id)===String(s?.id)) || stocks.find(x=>portfolioKeyV29103(x)===portfolioKeyV29103(s));
+    if(fresh) s=fresh;
+  }
+  return _v29103RenderDetail.call(this,s,...args);
+};
+
+// FINAL BUY implementation. Update Current Portfolio locally FIRST so the UI
+// changes immediately; then persist ownership and non-ownership stock history.
+saveV2Buy=async function(id,signalTier){
+  const s=stocks.find(x=>String(x.id)===String(id));
+  if(!s){ alert('StockIQ could not find this stock. Please reopen the ticker and try again.'); return; }
+  if(hasOpenPosition(s)){ alert(`${s.ticker} is already in your Current Portfolio.`); return; }
+  const entry=parseFloat(document.getElementById('v2-entry')?.value||'');
+  let shares=parseFloat(document.getElementById('v2-shares')?.value||'');
+  let amount=parseFloat(document.getElementById('v2-amount')?.value||'');
+  if(!entry||entry<=0){ alert('Enter the actual buy price.'); return; }
+  if((!shares||shares<=0)&&amount>0) shares=amount/entry;
+  if((!amount||amount<=0)&&shares>0) amount=shares*entry;
+  if(!shares||shares<=0){ alert('Enter either the total amount to invest or the number of shares.'); return; }
+  const d=latestSnap(s)?.date||today();
+  const tier=signalTier==='A+ BUY'?'A+ BUY':'BUY';
+  const pb=pbFor(s), stopPct=Number(pb?.stopPct||0), recordedStop=stopPct>0?entry*(1-stopPct/100):null;
+  const reg=regressionStats(s), earn=earningsState(s), pxNow=curVal(s,'price'), atrNow=curVal(s,'atr');
+  const entrySnapshot={price:pxNow,rsi:curVal(s,'rsi'),regZ126:reg?.z??null,momentum20:changeN(s,20),atrPct:(atrNow&&pxNow)?(atrNow/pxNow*100):null,pctFrom52High:pctFrom52High(s),relativeVolume:relativeVolume(s),earningsRule:earn?.rule||pb?.earnings||null,earningsDays:earn?.days??null,market:pb?.market||null};
+  const u={...s,position:{entry,shares,date:d,signalTier:tier,investmentAmount:amount>0?amount:entry*shares,recordedStop,entryFamily:pb?.family||null,entryPlaybook:cleanPlaybookName(pb)||null,entrySnapshot},prepWatch:null,type:'Swing Trade'};
+  stocks=stocks.map(x=>String(x.id)===String(id)?u:x);
+  setPortfolioMutationV29103(pos=>{ pos[portfolioKeyV29103(u)]=positionRowV29103(u); });
+  closeAllOverlays(); renderHome(); openDetail(id); showSaveStatus('saving');
+  try{
+    await Promise.all([queueCurrentPortfolioCloudSaveV29103(),fbSaveStock(u)]);
+    if(typeof markSignalFunded==='function') markSignalFunded(u.ticker,Number(entry),Number(shares),d,tier);
+    showSaveStatus('saved'); setTimeout(()=>showSaveStatus('ready'),1000);
+  }catch(e){
+    console.error('BUY persistence failed',e); showSaveStatus('error');
+    alert(`${u.ticker} is saved in this device's Current Portfolio, but Firebase did not finish saving. Do not refresh or switch versions until the cloud save succeeds.`);
+  }
+};
+
+// Stop changes are ownership state too, so persist them in Current Portfolio.
+saveV2Stop=async function(id){
+  const s=stocks.find(x=>String(x.id)===String(id)); if(!s||!hasOpenPosition(s)) return;
+  const v=parseFloat(document.getElementById('v2-stop')?.value||''); if(!Number.isFinite(v)||v<=0) return;
+  const u={...s,position:{...s.position,recordedStop:v}};
+  stocks=stocks.map(x=>String(x.id)===String(id)?u:x);
+  setPortfolioMutationV29103(pos=>{ pos[portfolioKeyV29103(u)]=positionRowV29103(u); });
+  closeAllOverlays(); renderHome(); openDetail(id);
+  try{ await Promise.all([queueCurrentPortfolioCloudSaveV29103(),fbSaveStock(u)]); }
+  catch(e){ console.warn('Sell-protection save incomplete',e); alert('The sell protection changed on this device, but Firebase did not finish saving it.'); }
+};
+
+// FINAL SELL implementation. Current Portfolio updates immediately and the
+// realized trade is stored in the stock/history document with no open position.
+saveV2Close=async function(id){
+  const s=stocks.find(x=>String(x.id)===String(id)); if(!s||!hasOpenPosition(s)||!s.position) return;
+  const ex=parseFloat(document.getElementById('v2-exit')?.value||'');
+  const held=Number(s.position.shares||0), requested=parseFloat(document.getElementById('v2-sell-shares')?.value||'');
+  if(!Number.isFinite(ex)||ex<=0||!Number.isFinite(requested)||requested<=0||held<=0) return;
+  const sellShares=Math.min(requested,held), tolerance=Math.max(0.000001,held*0.000001), remainingRaw=held-sellShares, isFullSell=remainingRaw<=tolerance, remaining=isFullSell?0:remainingRaw;
+  const outDate=latestSnap(s)?.date||today(), inDate=s.position.date||today();
+  const pl=(ex-s.position.entry)*sellShares, plPct=s.position.entry?((ex/s.position.entry)-1)*100:0, path=tradeWindowStats(s,Number(s.position.entry),inDate,outDate);
+  const rec={entry:s.position.entry,exit:ex,shares:sellShares,pl,plPct,date:outDate,dateIn:inDate,dateOut:outDate,playbook:s.position.entryPlaybook||cleanPlaybookName(pbFor(s))||'',entryFamily:s.position.entryFamily||null,entrySnapshot:s.position.entrySnapshot||null,days:positionDays(s),action:'SELL',signalTier:s.position.signalTier||'BUY',mfePct:path.mfe,maePct:path.mae,fullExit:isFullSell};
+  const u={...s,realized:[...(s.realized||[]),rec]};
+  if(isFullSell) delete u.position; else u.position={...s.position,shares:remaining};
+  stocks=stocks.map(x=>String(x.id)===String(id)?u:x);
+  setPortfolioMutationV29103(pos=>{ const k=portfolioKeyV29103(u); if(isFullSell) delete pos[k]; else pos[k]=positionRowV29103(u); });
+  closeAllOverlays(); detailStockId=null; showScreen('home'); renderHome(); showSaveStatus('saving');
+  try{
+    await Promise.all([queueCurrentPortfolioCloudSaveV29103(),fbSaveStock(u)]);
+    if(isFullSell && typeof markSignalActualExit==='function') markSignalActualExit(s.ticker,rec);
+    showSaveStatus('saved'); setTimeout(()=>showSaveStatus('ready'),1000);
+  }catch(e){
+    console.error('SELL persistence failed',e); showSaveStatus('error');
+    alert(`${s.ticker} changed on this device, but Firebase did not finish saving the Current Portfolio. Do not refresh or switch versions until the cloud save succeeds.`);
+  }
+};
+
+// Start Fresh initializes the clean V3 source of truth. Historical documents
+// remain history and can never recreate ownership.
+clearOpenPaperPositions=async function(){
+  const count=Object.keys(currentPortfolioV29103.positions||{}).length;
+  const ok=confirm(`Start Fresh will clear ${count} current paper position${count===1?'':'s'} and keep completed trade history and research. Continue?`);
+  if(!ok) return;
+  currentPortfolioV29103={initialized:true,positions:{},revision:(Number(currentPortfolioV29103.revision||0)||0)+1,updatedAtMs:Date.now(),pendingSync:true};
+  currentPortfolioReadyV29103=true; saveCurrentPortfolioLocalV29103(); applyCurrentPortfolioV29103(); renderHome();
+  try{ await queueCurrentPortfolioCloudSaveV29103(); alert('Start Fresh saved. Current Portfolio is empty and will stay empty across refreshes and future versions until you record a new BUY.'); }
+  catch(e){ console.error('Start Fresh cloud save failed',e); alert('The clean slate is saved on this device, but Firebase did not finish saving. Do not refresh until the cloud save succeeds.'); }
+};
+
+// Cloud startup: Daily universe renders independently; portfolio is layered on top.
+auth.onAuthStateChanged(user=>{
+  if(user){
+    if(currentPortfolioReadyV29103){ applyCurrentPortfolioV29103(); try{renderHome();}catch(e){} }
+    setTimeout(()=>syncCurrentPortfolioCloudV29103(),250);
+  }
+});
+
+const _v29103Version=document.getElementById('stockiq-version');
+if(_v29103Version)_v29103Version.textContent='StockIQ v2.9.103 · Portfolio + Daily Universe State Fix';
+</script>
 </body>
 </html>
