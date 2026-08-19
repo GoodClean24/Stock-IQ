@@ -12724,5 +12724,138 @@ if(_v2998Version)_v2998Version.textContent='StockIQ v2.9.98 · Owned Flow + Home
 setTimeout(()=>{ try{ renderHome(); }catch(e){ console.warn('v2.9.98 refresh failed',e); } },300);
 </script>
 
+
+
+<script>
+// ── v2.9.99 CLOUD FAIL-SAFE / LOCAL-FIRST STARTUP ───────────────────────────
+// Critical rule: StockIQ must render even when Firestore support documents are
+// slow/unavailable. Daily overlay + cached user state render first; research,
+// daily-cloud, signal-ledger, and portfolio-state synchronization are staggered.
+
+const V2999_STOCK_STATE_CACHE_KEY='stockiq_user_stock_state_v1';
+let v2999CloudStockStateSeen=false;
+
+function v2999StockStateCacheRows(){
+  return (stocks||[]).filter(s=>s && !isMarketStock(s)).map(s=>({
+    id:s.id,ticker:s.ticker,name:s.name,type:s.type,coreStatus:s.coreStatus,
+    starred:s.starred,notes:s.notes,position:s.position||null,
+    realized:Array.isArray(s.realized)?s.realized:[],tranche:s.tranche||null,
+    invested:s.invested,plannedInvest:s.plannedInvest,archived:s.archived,
+    archiveDate:s.archiveDate,archiveReason:s.archiveReason,
+    scannerSources:s.scannerSources||[],sector:s.sector,industry:s.industry,
+    analyzed:s.analyzed,intradayEntryArm:s.intradayEntryArm||null,
+    intradayEntrySignal:s.intradayEntrySignal||null
+  }));
+}
+function v2999SaveStockStateCache(){
+  try{
+    const rows=v2999StockStateCacheRows();
+    // Never overwrite a useful user-state cache with an overlay-only empty shell.
+    const useful=rows.some(r=>r.position || (r.realized&&r.realized.length) || r.notes || r.starred || r.archived);
+    if(useful || v2999CloudStockStateSeen) localStorage.setItem(V2999_STOCK_STATE_CACHE_KEY,JSON.stringify(rows));
+  }catch(e){ console.warn('Local stock-state cache save failed',e); }
+}
+function v2999LoadStockStateCache(){
+  try{
+    const rows=JSON.parse(localStorage.getItem(V2999_STOCK_STATE_CACHE_KEY)||'[]');
+    return Array.isArray(rows)?rows:[];
+  }catch(e){ return []; }
+}
+function v2999RenderLocalFirst(){
+  try{
+    const cached=v2999LoadStockStateCache();
+    if(!(stocks||[]).length){
+      stocks=applyDailyOverlayToStocks(cached);
+      if(typeof reconcilePortfolioGenerationLocal==='function') reconcilePortfolioGenerationLocal();
+    }
+    showScreen('home');
+    renderHome();
+    const el=document.getElementById('save-status');
+    if(el){
+      el.style.display='block'; el.style.color=C.textMuted;
+      el.textContent='StockIQ ready · cloud updates loading in background';
+    }
+  }catch(e){ console.warn('Local-first render failed',e); }
+}
+
+// Cache user state after successful normal renders. This gives future versions
+// a safe fallback without treating local market data as authoritative cloud state.
+const _v2999BaseRenderHome=renderHome;
+renderHome=function(){
+  _v2999BaseRenderHome();
+  try{
+    if((stocks||[]).some(s=>s && !String(s.id||'').startsWith('v2_'))) v2999CloudStockStateSeen=true;
+    v2999SaveStockStateCache();
+  }catch(e){}
+};
+
+// Stagger non-critical cloud services so they cannot all compete with the
+// primary stocks listener during app startup.
+const _v2999ResearchSync=syncResearchStateFromCloud;
+syncResearchStateFromCloud=function(){
+  return new Promise(resolve=>setTimeout(()=>{
+    Promise.resolve(_v2999ResearchSync()).then(resolve).catch(e=>{console.warn('Deferred research sync failed',e);resolve({source:'error'});});
+  },5500));
+};
+const _v2999DailySync=syncDailyOverlayFromCloud;
+syncDailyOverlayFromCloud=function(){
+  return new Promise(resolve=>setTimeout(()=>{
+    Promise.resolve(_v2999DailySync()).then(resolve).catch(e=>{console.warn('Deferred daily sync failed',e);resolve({source:'error'});});
+  },3000));
+};
+const _v2999SignalSync=syncSignalLedgerFromCloud;
+syncSignalLedgerFromCloud=function(){
+  return new Promise(resolve=>setTimeout(()=>{
+    Promise.resolve(_v2999SignalSync()).then(resolve).catch(e=>{console.warn('Deferred signal-ledger sync failed',e);resolve();});
+  },8000));
+};
+if(typeof syncPortfolioStateFromCloud==='function'){
+  const _v2999PortfolioSync=syncPortfolioStateFromCloud;
+  syncPortfolioStateFromCloud=function(){
+    return new Promise(resolve=>setTimeout(()=>{
+      Promise.resolve(_v2999PortfolioSync()).then(resolve).catch(e=>{console.warn('Deferred portfolio-state sync failed',e);resolve();});
+    },1200));
+  };
+}
+
+// Any BUY/SELL action immediately refreshes the local user-state fallback.
+if(typeof saveV2Buy==='function'){
+  const _v2999Buy=saveV2Buy;
+  saveV2Buy=async function(...args){ const r=await _v2999Buy.apply(this,args); v2999SaveStockStateCache(); return r; };
+}
+if(typeof saveV2Close==='function'){
+  const _v2999Close=saveV2Close;
+  saveV2Close=async function(...args){ const r=await _v2999Close.apply(this,args); v2999SaveStockStateCache(); return r; };
+}
+
+// Render immediately on authenticated startup even if Firestore is slow.
+auth.onAuthStateChanged(user=>{
+  if(user){
+    v2999RenderLocalFirst();
+    // Re-render once more shortly after startup in case the critical stock
+    // snapshot landed between auth callbacks.
+    setTimeout(()=>{ try{ renderHome(); }catch(e){} },900);
+  }
+});
+
+// Never allow a support-cloud timeout to leave the loading indicator looking fatal.
+setTimeout(()=>{
+  try{
+    if(currentUser){
+      const home=document.getElementById('screen-home');
+      if(home && !home.classList.contains('active')) showScreen('home');
+      renderHome();
+      const el=document.getElementById('save-status');
+      if(el && /loading|saving/i.test(el.textContent||'')){
+        el.style.color=C.textMuted;
+        el.textContent='StockIQ ready · cloud sync will retry automatically';
+      }
+    }
+  }catch(e){ console.warn('Startup recovery render failed',e); }
+},2500);
+
+const _v2999Version=document.getElementById('stockiq-version');
+if(_v2999Version)_v2999Version.textContent='StockIQ v2.9.99 · Cloud Fail-Safe Startup';
+</script>
 </body>
 </html>
