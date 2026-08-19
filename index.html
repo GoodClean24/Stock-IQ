@@ -95,7 +95,7 @@ input[type=number]{-moz-appearance:textfield;}
   <div id="portfolio-box"></div>
   <div id="position-watch"></div>
   <!-- Tonight's Best Opportunities — the ranking engine -->
-  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">v2.9.92 · Legacy Full Sell Reconciliation Fix</div>
+  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">v2.9.93 · TIGO Close + Family Trend Controls Fix</div>
   <div id="tonights-opportunities"></div>
   <!-- Filter tags + sort -->
   <div id="filter-bar" style="background:#11141C;border-bottom:1px solid #1E2230;padding:9px 20px;"></div>
@@ -1320,7 +1320,8 @@ function positionWasFullySold(s){
   // New records are explicit. Honor them first.
   const latest=realized[realized.length-1]||{};
   if(latest.fullExit===true) return true;
-  if(latest.fullExit===false) return false;
+  // A legacy fullExit:false marker may have been written by an older buggy sell path.
+  // Do not stop here; continue checking the completed trade record itself.
 
   // Legacy StockIQ sells were not always tagged action:'SELL' or fullExit:true.
   // Infer a completed exit from the trade record itself: matching entry,
@@ -1349,15 +1350,30 @@ function positionWasFullySold(s){
 function hasOpenPosition(s){
   return !!(s&&s.position&&Number(s.position.shares||0)>0&&!positionWasFullySold(s));
 }
+const _reconciledCloseSaveIds=new Set();
 function reconcileClosedPositionsInMemory(){
   let changed=false;
+  const repaired=[];
   stocks=(stocks||[]).map(s=>{
     if(!s||!s.position||!positionWasFullySold(s)) return s;
     const u={...s};
     delete u.position;
     changed=true;
+    repaired.push(u);
     return u;
   });
+  // Persist the repair so a stale cloud position cannot reappear on refresh/device sync.
+  if(repaired.length && currentUser){
+    repaired.forEach(u=>{
+      const key=String(u.id||u.ticker||'');
+      if(!key || _reconciledCloseSaveIds.has(key)) return;
+      _reconciledCloseSaveIds.add(key);
+      Promise.resolve().then(()=>fbSaveStock(u)).catch(e=>{
+        _reconciledCloseSaveIds.delete(key);
+        console.warn('Could not persist closed-position reconciliation for',u.ticker,e);
+      });
+    });
+  }
   return changed;
 }
 function renderCleanCard(s){
@@ -9268,7 +9284,7 @@ function renderTonightsOpportunities(){
   const el=document.getElementById('tonights-opportunities');
   if(!el)return;
 
-  const owned=stocks.filter(s=>isValidatedStock(s)&&s.position&&Number(s.position.shares||0)>0).map(s=>({s,state:safeStockState(s)}))
+  const owned=stocks.filter(s=>isValidatedStock(s)&&hasOpenPosition(s)).map(s=>({s,state:safeStockState(s)}))
     .sort((a,b)=>statePriority(a.state?.state)-statePriority(b.state?.state));
 
   const live=liveCandidateItems();
@@ -11365,7 +11381,7 @@ async function applyV2IntradayFile(input){
 // ── v2 initialization ────────────────────────────────────────────────────────
 (function initStockIQV2(){
   const style=document.createElement('style'); style.textContent=`.v2lbl{color:${C.textSub};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}.v2val{color:${C.text};font-size:14px;font-weight:900}.v2big{color:${C.text};font-size:18px;font-weight:950}`; document.head.appendChild(style);
-  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.92 · Daily Parser Restore Fix';
+  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.93 · TIGO Close + Family Trend Controls Fix';
   const topButtons=[...document.querySelectorAll('button')]; const add=topButtons.find(b=>b.textContent.includes('Add Stock')); if(add){ add.style.display='none'; add.setAttribute('aria-hidden','true'); add.tabIndex=-1; } const scan=topButtons.find(b=>b.textContent.includes('Import Scan')); if(scan){scan.textContent='Daily Data';scan.onclick=showDailyDataFlow;scan.setAttribute('aria-label','Upload daily multi-ticker data');}
   if(scan && !document.getElementById('intraday-data-btn')){ const b=document.createElement('button'); b.id='intraday-data-btn'; b.textContent='Intraday Data'; b.onclick=showIntradayDataFlow; b.setAttribute('aria-label','Upload current 30-minute execution data'); b.style.cssText=scan.style.cssText; b.style.borderColor=C.yellow; b.style.color=C.yellow; scan.parentNode.insertBefore(b,scan.nextSibling); }
   if(scan && !document.getElementById('sunday-discovery-btn')){ const b=document.createElement('button'); b.id='sunday-discovery-btn'; b.textContent='Sunday Discovery'; b.onclick=showSundayDiscoveryFlow; b.setAttribute('aria-label','Upload Sunday scanner discovery report'); b.style.cssText=scan.style.cssText; b.style.borderColor=C.purple; b.style.color=C.purple; const anchor=document.getElementById('intraday-data-btn')||scan; anchor.parentNode.insertBefore(b,anchor.nextSibling); }
@@ -11548,7 +11564,7 @@ function showSundayDiscoveryFlow(){
     </div>
   </div>`);
 }
-(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.92 · Daily Parser Restore Fix';})();
+(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.93 · TIGO Close + Family Trend Controls Fix';})();
 
 // ── v2.9.54 HISTORY LIFECYCLE ──────────────────────────────────────
 // Research is no longer a catch-all. The visible Research tab contains only:
@@ -11790,7 +11806,7 @@ function renderStockList(){
 }
 
 (function v2953Init(){
-  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.92 · Daily Parser Restore Fix';
+  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.93 · TIGO Close + Family Trend Controls Fix';
   // Safe cleanup on load: de-duplicate queue and remove only records that already
   // have evidence. Genuine pending Sunday names are never deleted automatically.
   try{ applyResearchReconciliation(true); }catch(e){ console.warn('Research reconciliation init failed',e); }
@@ -12023,9 +12039,96 @@ saveV2Close=async function(id){
 auth.onAuthStateChanged(user=>{ if(user){ loadSignalLedger(); syncSignalLedgerFromCloud(); } else { SIGNAL_LEDGER=[]; } });
 loadSignalLedger();
 setTimeout(()=>{ try{ updateAndCaptureSignals(); renderFilterBar(); }catch(e){ console.warn('Signal ledger init failed',e); } },800);
-const _v2965Version=document.getElementById('stockiq-version'); if(_v2965Version)_v2965Version.textContent='StockIQ v2.9.92 · Daily Parser Restore Fix';
+const _v2965Version=document.getElementById('stockiq-version'); if(_v2965Version)_v2965Version.textContent='StockIQ v2.9.93 · TIGO Close + Family Trend Controls Fix';
 // v2.9.82: preserves the v2.9.81 verified-entry persistence logic; fixes canonical daily CSV dates, filename/date validation, and Detail Back navigation.
 [...document.querySelectorAll('button')].filter(b=>/^(\+\s*)?(Add Stock|Research)$/i.test((b.textContent||'').trim())).forEach(b=>{ if(!b.closest('#tag-bar')){ b.style.display='none'; b.setAttribute('aria-hidden','true'); b.tabIndex=-1; } });
+</script>
+
+
+<script>
+// ── v2.9.93 FINAL HOME CONTROLS + SOLD POSITION HARDENING ───────────────────
+// This block is intentionally last so older renderFilterBar definitions cannot overwrite it.
+const _v2993BaseRenderStockList = renderStockList;
+
+function familyNameForStock(s){
+  try{ const pb=pbFor(s); return pb ? trendTypeLabel(s,pb) : ''; }
+  catch(e){ return ''; }
+}
+
+renderFilterBar=function(){
+  const el=document.getElementById('filter-bar'); if(!el)return;
+  const opts=['Ready Now','Buy','Preparing','Positions','Validated Library','Research'];
+  const families=['All Families','SMA50 Reclaim','EMA20 Reclaim','Momentum','Deep Pullback','Regression Pullback','Breakout'];
+  el.innerHTML=`
+    <div style="display:flex;gap:7px;overflow-x:auto;align-items:center;margin-bottom:10px;">
+      ${opts.map(t=>`<button onclick="setTag('${t}')" style="padding:7px 14px;border-radius:22px;font-size:11.5px;font-weight:800;border:1px solid ${activeTag===t?C.green:C.border};background:${activeTag===t?C.greenDim:'none'};color:${activeTag===t?C.green:C.textSub};cursor:pointer;white-space:nowrap;">${t}</button>`).join('')}
+      <button onclick="showResearchReconciliation()" title="Audit research queue" style="padding:5px 8px;border-radius:8px;font-size:9.5px;font-weight:850;border:1px solid ${C.border};background:${C.cardHigh};color:${C.textMuted};cursor:pointer;white-space:nowrap;">Research Audit</button>
+      <button data-signal-log="1" onclick="showSignalLedger()" title="Forward-test BUY signal ledger" style="padding:5px 8px;border-radius:8px;font-size:9.5px;font-weight:850;border:1px solid ${C.border};background:${C.cardHigh};color:${C.textMuted};cursor:pointer;white-space:nowrap;">Signal Log</button>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;background:${C.card};border:1px solid ${C.border};border-radius:12px;padding:10px 11px;">
+      <label style="display:flex;align-items:center;gap:7px;color:${C.textSub};font-size:11px;font-weight:850;">
+        Family Trend
+        <select onchange="setFamilyFilter(this.value)" style="background:${C.cardHigh};border:1px solid ${C.borderLight};border-radius:8px;color:${C.text};font-size:11px;font-weight:800;padding:6px 8px;outline:none;max-width:190px;">
+          ${families.map(f=>`<option value="${f}" ${familyFilter===f?'selected':''}>${f}</option>`).join('')}
+        </select>
+      </label>
+      <label style="display:flex;align-items:center;gap:7px;color:${C.textSub};font-size:11px;font-weight:850;">
+        Sort
+        <select onchange="setSortMode(this.value)" style="background:${C.cardHigh};border:1px solid ${C.borderLight};border-radius:8px;color:${C.text};font-size:11px;font-weight:800;padding:6px 8px;outline:none;">
+          <option value="opportunity" ${sortMode==='opportunity'?'selected':''}>Best Opportunity</option>
+          <option value="family" ${sortMode==='family'?'selected':''}>Family Trend</option>
+          <option value="price" ${sortMode==='price'?'selected':''}>Price</option>
+          <option value="pct" ${sortMode==='pct'?'selected':''}>% Change</option>
+          <option value="name" ${sortMode==='name'?'selected':''}>Ticker Name</option>
+        </select>
+      </label>
+    </div>`;
+};
+
+// Apply family filter/sort to the final v2 stock-list renderer without changing
+// its BUY/PREPARING/Research semantics.
+renderStockList=function(){
+  updateAndCaptureSignals();
+  const el=document.getElementById('stock-list'); if(!el)return;
+  let list=getRanked(); const q=searchQuery||'';
+  if(q) list=list.filter(s=>String(s.ticker).toLowerCase().includes(q)||String(s.name||'').toLowerCase().includes(q));
+
+  if(activeTag==='Buy') list=liveCandidateItems().filter(x=>['BUY','A+ BUY'].includes(x.state?.state)).map(x=>x.s);
+  else if(activeTag==='Preparing') list=liveCandidateItems().filter(x=>x.state?.state==='PREPARING').map(x=>x.s);
+  else if(activeTag==='Positions') list=list.filter(s=>hasOpenPosition(s)&&isValidatedStock(s));
+  else if(activeTag==='Validated Library') list=list.filter(s=>isValidatedStock(s)&&String(s.ticker||'').toUpperCase()!=='PBF');
+  else if(activeTag==='Research') list=list.filter(researchVisibleStock);
+  else list=liveCandidateItems().map(x=>x.s);
+
+  if(familyFilter!=='All Families') list=list.filter(s=>familyNameForStock(s)===familyFilter);
+
+  if(sortMode!=='opportunity'){
+    list=list.slice().sort((a,b)=>{
+      if(sortMode==='family') return String(familyNameForStock(a)).localeCompare(String(familyNameForStock(b))) || String(a.ticker||'').localeCompare(String(b.ticker||''));
+      if(sortMode==='price') return Number(displayPrice(b)||0)-Number(displayPrice(a)||0);
+      if(sortMode==='pct') return Number(curVal(b,'pct')||b.pct||0)-Number(curVal(a,'pct')||a.pct||0);
+      if(sortMode==='name') return String(a.ticker||'').localeCompare(String(b.ticker||''));
+      return 0;
+    });
+  }
+
+  const evidenceOnly=q?evidenceOnlySearchMatches(q):[];
+  if(activeTag==='Ready Now' && !q){
+    const buy=list.filter(s=>['BUY','A+ BUY'].includes(safeStockState(s)?.state));
+    const prep=list.filter(s=>safeStockState(s)?.state==='PREPARING');
+    const section=(title,subtitle,items,color)=>items.length?`<div style="margin:14px 2px 8px;display:flex;justify-content:space-between;align-items:end;"><div><div style="color:${color};font-size:11px;font-weight:950;text-transform:uppercase;letter-spacing:.08em;">${title}</div><div style="color:${C.textMuted};font-size:10px;margin-top:2px;">${subtitle}</div></div><div style="color:${C.textMuted};font-size:10px;">${items.length}</div></div>${items.map(renderStockCard).join('')}`:'';
+    el.innerHTML=section('Buy / A+ Buy','Actionable setups only',buy,C.green)+section('Getting Ready','Only one close trigger missing; all structure already passes',prep,C.yellow);
+    if(!buy.length&&!prep.length) el.innerHTML=`<div style="color:${C.textSub};font-size:13px;padding:20px 4px;">NO NEW QUALIFIED STOCKS. WAIT names are hidden but still monitored in the validated library.</div>`;
+  }else{
+    const stockHtml=list.map(renderStockCard).join('');
+    const evidenceHtml=evidenceOnly.map(renderEvidenceOnlySearchCard).join('');
+    el.innerHTML=stockHtml+evidenceHtml || `<div style="color:${C.textSub};font-size:13px;padding:20px 4px;">Nothing in this view.</div>`;
+  }
+};
+
+// Re-render with final controls and persist any stale closed positions after auth/data load.
+setTimeout(()=>{ try{ reconcileClosedPositionsInMemory(); renderHome(); }catch(e){ console.warn('v2.9.93 final home refresh failed',e); } },1100);
+const _v2993Version=document.getElementById('stockiq-version'); if(_v2993Version)_v2993Version.textContent='StockIQ v2.9.93 · TIGO Close + Family Trend Controls Fix';
 </script>
 
 </body>
