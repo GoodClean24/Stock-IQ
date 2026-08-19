@@ -12230,5 +12230,150 @@ const _v2994Version=document.getElementById('stockiq-version');
 if(_v2994Version)_v2994Version.textContent='StockIQ v2.9.94 · Sector + 30-Min Copy + Start Fresh';
 </script>
 
+
+<script>
+// ── v2.9.95 DECISION FLOW + DEDUPE + HEADER CLEANUP ────────────────────────
+// UX/order cleanup only. No family entry/exit qualification rules are changed.
+
+// De-duplicate live candidates by ticker before the 5-name cap is applied.
+// If duplicate stock records exist, keep the strongest current state/evidence row.
+liveCandidateItems=function(){
+  const ranked=[];
+  for(const s of stocks.filter(isLiveValidatedCandidate)){
+    const state=safeStockState(s);
+    if(!['A+ BUY','BUY','PREPARING'].includes(state?.state)) continue;
+    ranked.push({s,state});
+  }
+  ranked.sort((a,b)=>{
+    const sp=statePriority(a.state?.state)-statePriority(b.state?.state);
+    if(sp!==0) return sp;
+    const ep=evidenceTier(b.s)-evidenceTier(a.s);
+    if(ep!==0) return ep;
+    const pa=pbFor(a.s)||{}, pb=pbFor(b.s)||{};
+    const qa=(pa.stats?.win||0)+(pa.stats?.avg||0);
+    const qb=(pb.stats?.win||0)+(pb.stats?.avg||0);
+    if(qb!==qa) return qb-qa;
+    return String(a.s.ticker||'').localeCompare(String(b.s.ticker||''));
+  });
+  const seen=new Set(), unique=[];
+  for(const x of ranked){
+    const t=String(x.s?.ticker||'').toUpperCase();
+    if(!t || seen.has(t)) continue;
+    seen.add(t); unique.push(x);
+  }
+  return unique.slice(0,LIVE_CANDIDATE_CAP);
+};
+
+function v2995FamilyHeader(s,pb){
+  const family=trendTypeLabel(s,pb);
+  const def=familyDefinitionText(s,pb);
+  return `${s.sector?`<div style="color:${C.textMuted};font-size:10.5px;font-weight:750;margin-top:3px;">Sector: ${s.sector}</div>`:''}`+
+         `${family?`<div style="color:${C.textSub};font-size:11.5px;font-weight:850;margin-top:3px;">${family}</div>`:''}`+
+         `${def?`<div style="color:${C.textMuted};font-size:10.3px;line-height:1.4;margin-top:3px;max-width:560px;">${def}</div>`:''}`;
+}
+
+preTop=function(s,pb,st){
+  const canBuy=['BUY','A+ BUY'].includes(st.state), buyLabel=st.state==='A+ BUY'?'A+ BUY':'BUY';
+  const ix=st?.intraday;
+  const executionLine=ix?.arm
+    ? `<div style="color:${C.textMuted};font-size:10.5px;margin-top:5px;font-weight:800;">Qualified ${ix.arm.dailyDate} · RSI ${ix.arm.priorRSI==null?'—':Number(ix.arm.priorRSI).toFixed(1)} · SMA50 trigger ${money(ix.arm.trigger)}</div>`
+    : '';
+  return `<div style="padding:16px 16px 10px;"><button onclick="stockIQBackFromDetail()" style="background:none;border:none;color:${C.textSub};padding:0 0 9px;cursor:pointer;">← Back</button><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;"><div style="min-width:0;"><div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;"><span style="color:${C.text};font-size:24px;font-weight:950;">${s.ticker}</span>${badge(st.state)}</div><div style="color:${C.text};font-size:13px;font-weight:700;margin-top:5px;">${companyNameFor(s)}</div>${v2995FamilyHeader(s,pb)}${executionLine}</div><div style="text-align:right;flex-shrink:0;"><div style="color:${C.text};font-size:20px;font-weight:900;margin-bottom:2px;">${money(displayPrice(s))}</div>${liveDayMoveHTML(s,'11px')} ${canBuy?`<button onclick="showV2BuyFlow('${s.id}','${buyLabel}')" style="border:none;border-radius:10px;background:${C.green};color:#000;font-size:13px;font-weight:950;padding:9px 18px;cursor:pointer;box-shadow:0 0 0 1px ${C.green}33;">${buyLabel}</button>`:''}</div></div></div>`;
+};
+
+// Keep the family in the header; the separate Trend Type card is no longer needed.
+detailMetaStrip=function(s,pb,st){
+  const cw=chartWatchMeta(s,pb,st);
+  const day=s.position?positionDays(s):null;
+  return `<div style="margin:0 16px 12px;display:grid;grid-template-columns:${s.position?'repeat(2,minmax(0,1fr))':'1fr'};gap:8px;">`+
+    (s.position?`<div style="background:${C.card};border:1px solid ${C.border};border-radius:12px;padding:10px 11px;"><div class="v2lbl">Trade Age</div><div style="color:${C.text};font-size:14px;font-weight:950;margin-top:3px;">Day ${day}/${pb?.hold||'—'}</div></div>`:'')+
+    `<div title="${cw.reason}" style="background:${C.card};border:1px solid ${cw.color}55;border-radius:12px;padding:10px 11px;"><div class="v2lbl">Chart To Watch</div><div style="color:${cw.color};font-size:12.5px;font-weight:950;margin-top:3px;">${cw.chart}</div><div style="color:${C.textMuted};font-size:10px;line-height:1.4;margin-top:4px;">${cw.chart==='30-Min'?'Use the 30-minute report for the required entry check.':'Use the Daily chart. No 30-minute report is needed right now.'}</div></div>`+
+  `</div>`;
+};
+
+// Owned header follows the same top hierarchy: company, sector, family, definition.
+const _v2995OldPositionTop=positionTop;
+positionTop=function(s,pb,st){
+  let html=_v2995OldPositionTop(s,pb,st);
+  const family=trendTypeLabel(s,pb), def=familyDefinitionText(s,pb);
+  // Add family/definition beneath sector in the header.
+  const sectorHtml=s.sector?`<div style="font-size:10.5px;color:${C.textMuted};font-weight:750;margin-top:3px;">Sector: ${s.sector}</div>`:'';
+  if(sectorHtml && !html.includes(`>${family}</div><div style="font-size:10.5px;line-height:1.4`)){
+    html=html.replace(sectorHtml, sectorHtml+`<div style="font-size:11.5px;color:${C.textSub};font-weight:850;margin-top:3px;">${family}</div><div style="font-size:10.3px;line-height:1.4;color:${C.textMuted};margin-top:3px;max-width:560px;">${def}</div>`);
+  }
+  // Remove the separate Trend Type card from the owned meta row while preserving Trade Age + Chart.
+  html=html.replace(/<div style="background:\$\{C\.card\};border:1px solid \$\{C\.border\};border-radius:12px;padding:10px 11px;">\s*<div class="v2lbl">Trend Type<\/div>[\s\S]*?<\/div>\s*(?=<div title="\$\{holdExplain\}")/,'');
+  return html;
+};
+
+function v2995SetupPanel(s,pb,st,checks){
+  const title=['BUY','A+ BUY'].includes(String(st?.state||''))?'Why This Is a Buy':(st?.state==='PREPARING'?'What Is Ready / What Is Missing':'Why StockIQ Is Watching It');
+  return panel(title, checklistHTML(checks));
+}
+
+// Plain-English market wording.
+marketPanel=function(s,pb){
+  const t=marketTailwind(s);
+  const label=t.ok?'GOOD':'CAUTION';
+  const action=t.ok?'The overall market is currently helping this trade rather than working against it.':'The overall market is not giving this trade a clear advantage right now.';
+  return panel('Market & Sector',`<div><div style="color:${t.ok?C.green:C.yellow};font-size:14px;font-weight:950;">Market Support: ${label}</div><div style="color:${C.text};font-size:12.5px;margin-top:5px;line-height:1.5;font-weight:750;">${action}</div><div style="color:${C.textSub};font-size:11.5px;margin-top:5px;line-height:1.5;">${t.text}</div></div>`);
+};
+
+// Rebuild detail order around the user's actual decision sequence.
+renderDetail=function(s){
+  s=withRecentDailyHistory(s);
+  const el=document.getElementById('detail-content'); if(!el)return;
+  const pb=pbFor(s);
+  if(!pb){
+    const ev=evidenceFor(s), rp=researchPromotionLabel(s);
+    el.innerHTML=`<div style="padding:16px;"><button onclick="stockIQBackFromDetail()" style="background:none;border:none;color:${C.textSub};padding:0 0 12px;">← Back</button><h2 style="color:${C.text};margin:0;">${s.ticker}</h2>${companyNameFor(s)?`<div style="color:${C.textSub};font-size:13px;margin-top:4px;">${companyNameFor(s)}</div>`:''}${s.sector?`<div style="color:${C.textMuted};font-size:10.5px;margin-top:4px;">Sector: ${s.sector}</div>`:''}<div style="margin-top:12px;color:${rp.color};font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;">${rp.label}${ev?.grade?` · ${ev.grade}`:''}</div><p style="color:${C.textSub};font-size:13px;line-height:1.65;">${ev?.summary||'This ticker can show indicators, but StockIQ will not issue trading signals until it has a validated playbook.'}</p>${indicatorPanel(s,{})}</div>`;
+    return;
+  }
+  const st=stockState(s), checks=(Array.isArray(st?.checks)&&st.checks.length)?st.checks:setupChecks(s), conflict=portfolioConflict(s);
+  let html=hasOpenPosition(s)?positionTop(s,pb,st):preTop(s,pb,st);
+
+  if(hasOpenPosition(s)){
+    html+=panel('Trade Health',positionHealthHTML(s));
+    html+=riskPanel(s,pb);
+    html+=exitPersonalityPanel(s,pb,st);
+    html+=earningsPanel(s,pb);
+    if(pb.maxHold>pb.hold) html+=panel('Decision / Runner',`<div style="color:${C.text};font-size:13px;font-weight:800;">Normal hold: ${pb.hold} days · Max runner window: ${pb.maxHold} days</div><div style="color:${C.textSub};font-size:11px;margin-top:6px;">At decision day, StockIQ tells you whether to stay in or get out.</div>`);
+    html+=panel('Manage Position',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;"><button onclick="showV2CloseFlow('${s.id}')" style="padding:11px;border-radius:10px;border:1px solid ${C.red}66;background:${C.redDim};color:${C.red};font-weight:800;cursor:pointer;">Sell</button><button onclick="showV2StopFlow('${s.id}')" style="padding:11px;border-radius:10px;border:1px solid ${C.border};background:${C.cardHigh};color:${C.text};font-weight:800;cursor:pointer;">Update Sell Protection</button></div>`);
+    html+=ownedResearchDetails(s,pb);
+  }else{
+    // 1) Header already shows ticker/company/sector/family.
+    html+=detailMetaStrip(s,pb,st);
+    // 2) What to do now.
+    const pa=plainEntryAction(s,pb,st);
+    html+=panel('What To Do Now',`<div style="font-size:21px;font-weight:950;color:${pa.color};margin-bottom:7px;">${pa.label}</div><div style="color:${C.text};font-size:14px;font-weight:850;line-height:1.5;">${pa.action}</div><div style="color:${C.textSub};font-size:12px;line-height:1.55;margin-top:8px;">Why: ${pa.why}</div><div style="color:${C.textSub};font-size:12px;line-height:1.55;margin-top:4px;">Next: ${pa.next}</div>`);
+    // 3) Entry price immediately after the action.
+    if(['BUY','A+ BUY','TRIGGERED / VERIFY','ENTRY MISSED','ENTRY SIGNAL PASSED'].includes(st.state) || st?.intraday?.arm) html+=entryPanel(s,pb,st);
+    // 4) Risk/hold plan.
+    html+=riskPanel(s,pb);
+    // 5) Event check before supporting evidence.
+    html+=earningsPanel(s,pb);
+    if(conflict) html+=panel('Portfolio Conflict',`<div style="color:${C.yellow};font-size:12.5px;line-height:1.55;font-weight:700;">${conflict}</div>`);
+    // 6) One combined qualification section; remove duplicated education/checklist boxes.
+    html+=v2995SetupPanel(s,pb,st,checks);
+    // 7) Market context in plain language.
+    html+=marketPanel(s,pb);
+    // 8) Today's setup vs historical winners.
+    html+=sweetSpotPanel(s,pb);
+    // 9) Family-specific technical detail is reference material.
+    html+=regressionPanel(s,pb);
+    // 10) Historical evidence, then personal trade evidence.
+    html+=historyPanel(s,pb);
+    html+=yourTradeProofPanel(s,pb);
+    // 11) Raw indicators last for learning/reference.
+    html+=indicatorPanel(s,pb);
+  }
+  el.innerHTML=html;
+};
+
+// Re-render home and update version after all overrides are active.
+const _v2995Version=document.getElementById('stockiq-version');
+if(_v2995Version)_v2995Version.textContent='StockIQ v2.9.95 · Decision Flow + Dedupe + Header Cleanup';
+setTimeout(()=>{ try{ renderHome(); }catch(e){ console.warn('v2.9.95 refresh failed',e); } },250);
+</script>
 </body>
 </html>
