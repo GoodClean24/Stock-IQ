@@ -11256,6 +11256,8 @@ function evaluateSma50IntradayEntry(s){
 
     const last=bars[bars.length-1];
     const lastPrice=last&&Number.isFinite(Number(last.close))?Number(last.close):null;
+    const sessionHigh=bars.reduce((m,b)=>{const h=Number(b?.high);return Number.isFinite(h)?Math.max(m,h):m;},-Infinity);
+    const checkedHigh=Number.isFinite(sessionHigh)?sessionHigh:null;
 
     if(hitBar){
       const tooLate=entryPrice>arm.maxFill;
@@ -11271,6 +11273,7 @@ function evaluateSma50IntradayEntry(s){
     return {
       arm,sessionDate,triggered:false,triggeredAt:null,
       entryPrice:null,lastPrice,observedPrice:null,
+      sessionHigh:checkedHigh,barsChecked:bars.length,
       maxFill:arm.maxFill,tooLate:false,
       needsIntradayVerify:false,verified:true,
       source:'Intraday 30-Min'
@@ -11344,7 +11347,9 @@ function applyIntradayEntryLayer(s,baseState){
       state:'PREPARING',
       checks:frozenChecks,
       intraday:x,
-      reason:`ENTRY ARMED from ${x.arm.dailyDate}. Daily eligibility is frozen. Waiting only for the SMA50 reclaim at ${money(x.arm.trigger)} · max fill ${money(x.arm.maxFill)}.`
+      reason:x.verified
+        ? `30-minute data checked. Price has not reached the SMA50 buy level yet. Buy level: ${money(x.arm.trigger)}${x.sessionHigh!=null?` · Highest price checked: ${money(x.sessionHigh)}`:''}. Do not buy yet.`
+        : `The Daily setup passed. Now wait for price to reach the SMA50 buy level at ${money(x.arm.trigger)}. Do not buy before it gets there.`
     };
   }
 
@@ -11381,7 +11386,7 @@ function intradayEntryPlanPanel(s,pb,st){
   const x=st?.intraday||evaluateSma50IntradayEntry(s);
   if(!x?.arm) return '';
 
-  let status='ARMED', color=C.yellow;
+  let status=x.verified?'WAIT — PRICE NOT AT BUY LEVEL':'WAITING FOR PRICE TO REACH BUY LEVEL', color=C.yellow;
   if(x.historicalSignal && x.expired){
     status='PRIOR BUY SIGNAL — NOT A FRESH ENTRY';
     color=C.textMuted;
@@ -11402,7 +11407,9 @@ function intradayEntryPlanPanel(s,pb,st){
   if(x.historicalSignal && x.expired){
     note=`StockIQ verified the ${x.signalDate} entry at ${entryDisplay}. Today's intraday upload does not erase that signal. Since no position was recorded, this is historical evidence now — not a new BUY.`;
   }else if(!x.triggered){
-    note=`Qualified from the completed ${x.arm.dailyDate} daily bar. Waiting only for the frozen SMA50 reclaim.`;
+    note=x.verified
+      ? `We checked ${x.barsChecked||0} completed 30-minute bar${(x.barsChecked||0)===1?'':'s'}. The highest price was ${x.sessionHigh!=null?money(x.sessionHigh):'—'}. It must reach the SMA50 buy level at ${money(x.arm.trigger)} before this can become a BUY. Do not buy yet.`
+      : `The Daily setup already passed. The next step is simple: wait for price to reach the SMA50 buy level at ${money(x.arm.trigger)}. Until then, do not buy.`;
   }else if(x.needsIntradayVerify){
     note=`The frozen SMA50 was crossed, but current price cannot tell us the fill. Upload this session's 30-minute Alpaca file before judging BUY vs missed.`;
   }else if(x.tooLate){
@@ -11417,12 +11424,12 @@ function intradayEntryPlanPanel(s,pb,st){
       `<div style="color:${C.textMuted};font-size:10px;font-weight:800;">Qualified ${x.arm.dailyDate} · RSI ${x.arm.priorRSI==null?'—':Number(x.arm.priorRSI).toFixed(1)}</div>`+
     `</div>`+
     `<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:10px;">`+
-      `<div style="background:${C.cardHigh};border-radius:10px;padding:9px;"><div class="v2lbl">SMA50 Trigger</div><div class="v2val">${money(x.arm.trigger)}</div></div>`+
-      `<div style="background:${C.cardHigh};border-radius:10px;padding:9px;"><div class="v2lbl">Verified Entry</div><div class="v2val">${entryDisplay}</div></div>`+
-      `<div style="background:${C.cardHigh};border-radius:10px;padding:9px;"><div class="v2lbl">Chase Guard</div><div class="v2val">${money(x.arm.maxFill)}</div></div>`+
+      `<div style="background:${C.cardHigh};border-radius:10px;padding:9px;"><div class="v2lbl">Buy Level (SMA50)</div><div class="v2val">${money(x.arm.trigger)}</div></div>`+
+      `<div style="background:${C.cardHigh};border-radius:10px;padding:9px;"><div class="v2lbl">Buy Price</div><div class="v2val">${entryDisplay}</div></div>`+
+      `<div style="background:${C.cardHigh};border-radius:10px;padding:9px;"><div class="v2lbl">Highest Allowed Entry</div><div class="v2val">${money(x.arm.maxFill)}</div></div>`+
     `</div>`+
     `<div style="margin-top:9px;color:${C.text};font-size:12px;font-weight:850;line-height:1.45;">${note}</div>`+
-    `<div style="margin-top:6px;color:${C.textMuted};font-size:10.5px;line-height:1.4;">Current RSI ${curVal(s,'rsi')==null?'—':Number(curVal(s,'rsi')).toFixed(1)} is context only. It cannot cancel the ${x.arm.dailyDate} setup after that completed bar qualified.</div>`
+    `<div style="margin-top:6px;color:${C.textMuted};font-size:10.5px;line-height:1.4;">The Daily setup already passed on ${x.arm.dailyDate}. The 30-minute file is only checking whether price reached the buy level.</div>`
   );
 }
 function parseIntradayCSV(text){
@@ -13506,6 +13513,17 @@ preTop=function(s,pb,st){
 const _v29110Version=document.getElementById('stockiq-version');
 if(_v29110Version)_v29110Version.textContent='StockIQ v2.9.110 · Re-entry History Detection';
 setTimeout(()=>{try{renderHome(); if(detailStockId){const s=stocks.find(x=>String(x.id)===String(detailStockId)); if(s)renderDetail(s);}}catch(e){console.warn('v2.9.110 refresh failed',e);}},300);
+
+
+// ── v2.9.111 SMA50 PLAIN-ENGLISH INTRADAY STATUS ──────────────────────────
+// Display-only clarity upgrade. No SMA50 trigger math, Daily qualification,
+// chase guard, portfolio ownership, or signal-engine rules changed.
+// When a 30-minute file is checked and the trigger is not reached, StockIQ now
+// explicitly says the price was checked, shows the session high, and says
+// "Do not buy yet" instead of using the jargon-heavy "ENTRY ARMED" wording.
+const _v29111Version=document.getElementById('stockiq-version');
+if(_v29111Version)_v29111Version.textContent='StockIQ v2.9.111 · SMA50 30-Min Plain-English Status';
+
 </script>
 </body>
 </html>
