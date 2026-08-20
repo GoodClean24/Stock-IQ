@@ -13525,5 +13525,170 @@ const _v29111Version=document.getElementById('stockiq-version');
 if(_v29111Version)_v29111Version.textContent='StockIQ v2.9.111 · SMA50 30-Min Plain-English Status';
 
 </script>
+<script>
+// ── v2.9.112 DOWN-MARKET MEMORY + FAMILY INTRADAY CONTEXT ────────────────
+// Research/display layer only. No BUY, PREPARING, stop, re-entry, sizing,
+// portfolio ownership, or family qualification rules are changed.
+// Purpose: remind the user what the historical research found when markets are
+// weak, and translate 30-minute behavior into simple family-specific context.
+
+const V29112_DOWN_MARKET_FAMILY = {
+  'Regression Pullback': {n:'large sample', avg:2.43, win:56.6, tone:'good', text:'A falling market was not a reason to avoid this setup. Regression Pullbacks still worked well when SPY and QQQ had both been falling.'},
+  'Deep Pullback':       {n:'large sample', avg:4.10, win:59.1, tone:'strong', text:'This family handled falling markets especially well. Market weakness often creates the deeper pullback this setup is built to buy.'},
+  'EMA20 Reclaim':       {n:'large sample', avg:2.20, win:58.3, tone:'strong', text:'Fresh EMA20 Reclaims continued to work well after the market had been falling. A weak market alone was not a reason to skip the trade.'},
+  'Momentum':            {n:'large sample', avg:1.85, win:54.5, tone:'neutral', text:'Momentum trades still worked in falling markets, but weakness did not improve this family enough to change the trade plan.'},
+  'Breakout':            {n:'large sample', avg:2.43, win:56.6, tone:'neutral', text:'Breakouts still worked during recent market weakness. The benefit was not consistent enough to treat a down market as an advantage.'},
+  'SMA50 Reclaim':       {n:'daily proxy', avg:2.52, win:58.1, tone:'neutral', text:'A weak market did not automatically hurt the Daily SMA50 setup. The 30-minute reclaim still decides whether there is an actual entry.'}
+};
+
+// Ticker-specific weak-market replays from the 6-year Daily history.
+// Weak market = both SPY and QQQ down over the prior 5 trading days.
+// Only rows with at least 5 historical trades are displayed. These are context,
+// not a new signal engine and never alter BUY/WAIT/exit decisions.
+const V29112_DOWN_MARKET_TICKER = {
+  DVN:{n:16,win:69,avg:5.5}, LQDA:{n:14,win:50,avg:4.3}, VIST:{n:21,win:67,avg:12.3},
+  TIGO:{n:23,win:65,avg:4.5}, NESR:{n:5,win:60,avg:7.8}, ASX:{n:20,win:55,avg:3.4},
+  LTH:{n:6,win:50,avg:2.9}, PRM:{n:8,win:88,avg:10.1}, HPE:{n:14,win:64,avg:3.1},
+  PARR:{n:20,win:55,avg:8.6}, ACHC:{n:6,win:83,avg:17.7}, COGT:{n:22,win:45,avg:5.6},
+  ZETA:{n:11,win:64,avg:5.3}, DYN:{n:12,win:58,avg:3.8}, RELY:{n:5,win:60,avg:-3.0},
+  GTES:{n:11,win:64,avg:2.6}, ROIV:{n:14,win:71,avg:6.4}, PBF:{n:21,win:43,avg:3.4}
+};
+
+function v29112FamilyName(s,pb){
+  const raw=String(pb?.family||pb?.name||'').toUpperCase();
+  if(raw.includes('REG_PULLBACK')||raw.includes('REGRESSION')) return 'Regression Pullback';
+  if(raw.includes('DEEP_PULLBACK')||raw.includes('DEEP PULLBACK')) return 'Deep Pullback';
+  if(raw.includes('EMA20')) return 'EMA20 Reclaim';
+  if(raw.includes('SMA50')||raw.includes('50-DAY')||raw.includes('50 DAY')) return 'SMA50 Reclaim';
+  if(raw.includes('BREAKOUT')) return 'Breakout';
+  if(raw.includes('MOMENTUM')) return 'Momentum';
+  return trendTypeLabel(s,pb)||pb?.name||'This setup';
+}
+function v29112Market5Day(){
+  const spy=marketStock('SPY'), qqq=marketStock('QQQ');
+  const a=spy?changeN(spy,5):null, b=qqq?changeN(qqq,5):null;
+  if(a==null||b==null) return {known:false,weak:false,spy:a,qqq:b};
+  return {known:true,weak:a<0&&b<0,spy:a,qqq:b};
+}
+function v29112Sector5Day(pb){
+  const t=String(pb?.market||'').toUpperCase();
+  const m=t?marketStock(t):null, c=m?changeN(m,5):null;
+  return {ticker:t||null,change:c,weak:c!=null?c<0:null};
+}
+function v29112ToneColor(t){ return t==='strong'?C.green:(t==='good'?C.teal:C.yellow); }
+
+function downMarketHistoryPanel(s,pb){
+  const fam=v29112FamilyName(s,pb), fs=V29112_DOWN_MARKET_FAMILY[fam];
+  if(!fs) return '';
+  const market=v29112Market5Day(), sec=v29112Sector5Day(pb), ts=V29112_DOWN_MARKET_TICKER[String(s.ticker||'').toUpperCase()]||null;
+  const marketNow=!market.known
+    ? 'Current 5-day market direction is not loaded.'
+    : market.weak
+      ? `The market is down over the last 5 trading days (SPY ${pctFmt(market.spy)} · QQQ ${pctFmt(market.qqq)}).`
+      : `The market is not in the weak 5-day condition right now (SPY ${pctFmt(market.spy)} · QQQ ${pctFmt(market.qqq)}).`;
+  const sectorNow=sec.change==null?'':` ${sec.ticker} is ${sec.change<0?'down':'up'} ${Math.abs(sec.change).toFixed(1)}% over the same 5 days.`;
+  const tc=v29112ToneColor(fs.tone);
+  const tickerBlock=ts && ts.n>=5
+    ? `<div style="margin-top:11px;padding:11px 12px;border-radius:11px;background:${C.cardHigh};border:1px solid ${C.border};"><div class="v2lbl">${s.ticker}'S OWN DOWN-MARKET HISTORY</div><div style="color:${ts.avg>=0?C.green:C.red};font-size:14px;font-weight:950;margin-top:4px;">${ts.win}% finished positive · ${ts.avg>=0?'+':''}${ts.avg.toFixed(1)}% average</div><div style="color:${C.textSub};font-size:11.5px;line-height:1.55;margin-top:5px;">Based on ${ts.n} past ${fam} setup trades when both SPY and QQQ had been falling over the prior 5 trading days.</div></div>`
+    : `<div style="margin-top:11px;padding:10px 11px;border-radius:10px;background:${C.cardHigh};color:${C.textSub};font-size:11.5px;line-height:1.55;">There are not enough past ${s.ticker} trades in falling markets to judge this ticker by itself, so use the family history below.</div>`;
+  return panel('How This Setup Has Done In Down Markets',`
+    <div style="color:${market.weak?C.yellow:C.text};font-size:13px;font-weight:900;line-height:1.5;">${marketNow}${sectorNow}</div>
+    ${tickerBlock}
+    <div style="margin-top:11px;padding:11px 12px;border-radius:11px;background:${C.cardHigh};border-left:3px solid ${tc};"><div class="v2lbl">${fam.toUpperCase()} FAMILY HISTORY</div><div style="color:${tc};font-size:14px;font-weight:950;margin-top:4px;">${fs.win.toFixed(1)}% positive · ${fs.avg>=0?'+':''}${fs.avg.toFixed(2)}% average</div><div style="color:${C.text};font-size:12.5px;font-weight:800;line-height:1.55;margin-top:6px;">${fs.text}</div></div>
+    <div style="color:${C.textMuted};font-size:10.5px;line-height:1.5;margin-top:9px;">Simple reminder: a red market by itself is not a reason to skip a valid StockIQ trade or sell a trade you already own. The normal family rules and sell protection still decide what to do. Historical results are not a guarantee.</div>`);
+}
+
+function v29112IntradayRead(s,pb){
+  const fam=v29112FamilyName(s,pb), bars=(s?.intradayBars||[]).slice().sort((a,b)=>String(a.dateTime||'').localeCompare(String(b.dateTime||'')));
+  const has=bars.length>=2;
+  const base={fam,has,bars};
+  if(!has) return base;
+  const first=bars.slice(0,2), later=bars.slice(2), last2=bars.slice(-2);
+  const fLow=Math.min(...first.map(x=>Number(x.low)).filter(Number.isFinite));
+  const fHigh=Math.max(...first.map(x=>Number(x.high)).filter(Number.isFinite));
+  const heldMorningLow=later.length?later.every(x=>Number(x.low)>=fLow):null;
+  const brokeMorningHigh=later.length?later.some(x=>Number(x.high)>fHigh):null;
+  const upVol=first.filter(x=>Number(x.close)>=Number(x.open)).reduce((a,x)=>a+(Number(x.volume)||0),0);
+  const downVol=first.filter(x=>Number(x.close)<Number(x.open)).reduce((a,x)=>a+(Number(x.volume)||0),0);
+  const buyingFirstHour=(upVol+downVol)>0?upVol>downVol:null;
+  const allUp=bars.filter(x=>Number(x.close)>=Number(x.open)).reduce((a,x)=>a+(Number(x.volume)||0),0);
+  const allDown=bars.filter(x=>Number(x.close)<Number(x.open)).reduce((a,x)=>a+(Number(x.volume)||0),0);
+  const buyingAll=(allUp+allDown)>0?allUp>allDown:null;
+  const sessionLow=Math.min(...bars.map(x=>Number(x.low)).filter(Number.isFinite));
+  const sessionHigh=Math.max(...bars.map(x=>Number(x.high)).filter(Number.isFinite));
+  const last=Number(bars[bars.length-1].close);
+  const closeLoc=(Number.isFinite(last)&&sessionHigh>sessionLow)?(last-sessionLow)/(sessionHigh-sessionLow):null;
+  const finalHourPositive=last2.length===2?Number(last2[1].close)>Number(last2[0].open):null;
+  const breakoutLevel=fam==='Breakout'?priorHighN(s,20):null;
+  const heldBreakout=breakoutLevel!=null?bars.every(x=>Number(x.low)>=breakoutLevel):null;
+  const aboveBreakout=breakoutLevel!=null&&Number.isFinite(last)?last>breakoutLevel:null;
+  return {...base,fLow,fHigh,heldMorningLow,brokeMorningHigh,buyingFirstHour,buyingAll,closeLoc,finalHourPositive,breakoutLevel,heldBreakout,aboveBreakout};
+}
+function v29112YN(v,good='Yes',bad='No'){ return v==null?'Not enough bars yet':(v?good:bad); }
+function intradayFamilyContextPanel(s,pb){
+  const r=v29112IntradayRead(s,pb), fam=r.fam;
+  if(fam==='SMA50 Reclaim') return ''; // SMA50 already has its own dedicated 30-minute execution panel.
+  const guidance={
+    'Momentum':{headline:'Daily data decides the BUY.',plain:'The 30-minute chart is extra information after the Daily setup is valid. Momentum trades looked healthier when the stock stopped making new morning lows and buyers handled more of the early trading.',watch:'Watch for the morning low to hold and for buying volume to be stronger than selling volume.'},
+    'EMA20 Reclaim':{headline:'Do not wait for the 30-minute chart to buy.',plain:'Waiting for morning confirmation made EMA20 Reclaim entries worse in the historical test. Use the Daily BUY. The 30-minute chart only tells you whether buyers are starting to take control.',watch:'A stronger first hour is helpful, but a weak first hour is not an automatic sell.'},
+    'Breakout':{headline:'Daily data decides the BUY; the 30-minute chart shows whether the breakout is holding.',plain:'Breakouts did better when they held the morning low, stayed above the breakout area and later pushed above the morning high.',watch:'A failed hold is a warning, not an automatic sell. Follow the normal sell protection.'},
+    'Deep Pullback':{headline:'Do not wait for the stock to turn green.',plain:'Waiting for 30-minute confirmation made Deep Pullback entries much worse. After the BUY, it is encouraging if the stock stops making new lows and buyers gradually take control.',watch:'Holding the morning low and stronger buying volume are good signs. Continued selling is a warning, not an automatic sell.'},
+    'Regression Pullback':{headline:'The first hour does not decide this trade.',plain:'For Regression Pullbacks, the first-hour clues were mostly noise. What mattered more was whether the stock stopped making new lows and improved later in the day.',watch:'Later-day stabilization is helpful. Do not sell just because the morning looks ugly.'}
+  }[fam];
+  if(!guidance) return '';
+  let live='';
+  if(!r.has){
+    live=`<div style="margin-top:10px;padding:10px 11px;border-radius:10px;background:${C.cardHigh};color:${C.textSub};font-size:11.5px;line-height:1.55;">No current 30-minute bars are loaded for ${s.ticker}. That is okay — the Daily setup still controls this family.</div>`;
+  }else{
+    const rows=[];
+    if(fam!=='Regression Pullback') rows.push(['Morning low held',v29112YN(r.heldMorningLow),r.heldMorningLow]);
+    if(['Momentum','EMA20 Reclaim','Deep Pullback'].includes(fam)) rows.push(['More early buying volume',v29112YN(r.buyingFirstHour),r.buyingFirstHour]);
+    if(['Momentum','Breakout','Deep Pullback','Regression Pullback'].includes(fam)) rows.push(['Pushed above morning high later',v29112YN(r.brokeMorningHigh),r.brokeMorningHigh]);
+    if(fam==='Breakout' && r.breakoutLevel!=null){ rows.push(['Still above breakout level',v29112YN(r.aboveBreakout),r.aboveBreakout]); }
+    if(['Deep Pullback','Regression Pullback'].includes(fam)) rows.push(['Final hour positive',v29112YN(r.finalHourPositive),r.finalHourPositive]);
+    live=`<div style="margin-top:10px;padding:10px 11px;border-radius:10px;background:${C.cardHigh};"><div class="v2lbl">TODAY'S 30-MINUTE READ</div>${rows.map(([l,v,ok])=>`<div style="display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px solid ${C.border};"><span style="color:${C.textSub};font-size:11.5px;">${l}</span><span style="color:${ok==null?C.textMuted:(ok?C.green:C.yellow)};font-size:11.5px;font-weight:900;text-align:right;">${v}</span></div>`).join('')}<div style="color:${C.textMuted};font-size:10px;line-height:1.45;margin-top:7px;">As of ${s.intradayAsOfET||'latest uploaded bar'} ET. These are health clues only; they do not change the Daily BUY or the normal sell rule.</div></div>`;
+  }
+  return panel('What The 30-Minute Chart Can Tell You',`<div style="color:${C.text};font-size:14px;font-weight:950;line-height:1.5;">${guidance.headline}</div><div style="color:${C.textSub};font-size:12px;line-height:1.6;margin-top:6px;">${guidance.plain}</div><div style="color:${C.teal};font-size:11.5px;font-weight:850;line-height:1.55;margin-top:7px;">What to watch: ${guidance.watch}</div>${live}`);
+}
+
+// Add the new research memory to both non-owned and owned stock pages without
+// disturbing the canonical Current Portfolio or any trading engine.
+const _v29112MarketPanel=marketPanel;
+marketPanel=function(s,pb){
+  return _v29112MarketPanel(s,pb)+downMarketHistoryPanel(s,pb)+intradayFamilyContextPanel(s,pb);
+};
+
+const _v29112Version=document.getElementById('stockiq-version');
+if(_v29112Version)_v29112Version.textContent='StockIQ v2.9.112 · Down-Market History + 30-Min Family Context';
+setTimeout(()=>{try{renderHome();if(detailStockId){const s=stocks.find(x=>String(x.id)===String(detailStockId));if(s)renderDetail(s);}}catch(e){console.warn('v2.9.112 refresh failed',e);}},300);
+</script>
+
+
+<script>
+// v2.9.112 final wording: make the live market box agree with the family research.
+marketPanel=function(s,pb){
+  const fam=v29112FamilyName(s,pb), m=v29112Market5Day(), sec=v29112Sector5Day(pb);
+  let title='Market direction not loaded', color=C.textMuted, msg='Load SPY and QQQ Daily data to see the current 5-day market backdrop.';
+  if(m.known){
+    if(m.weak){
+      color=C.yellow;
+      if(['Deep Pullback','EMA20 Reclaim','Regression Pullback'].includes(fam)){
+        title='Market has been falling — this setup can still be valid';
+        msg='Do not reject the trade just because the market is red. This family has historically continued to work well after market weakness.';
+      }else{
+        title='Market has been falling';
+        msg='A red market does not automatically cancel this setup. Follow the normal family rules.';
+      }
+    }else{
+      color=C.teal; title='Market is not in the 5-day weak condition';
+      msg='The broad market is not currently showing the same short-term decline used in the down-market research.';
+    }
+  }
+  const secTxt=sec.change==null?'':`${sec.ticker}: ${sec.change>=0?'+':''}${sec.change.toFixed(1)}% over 5 days.`;
+  const live=panel('Market & Sector Today',`<div style="color:${color};font-size:14px;font-weight:950;line-height:1.5;">${title}</div><div style="color:${C.text};font-size:12.5px;font-weight:800;line-height:1.55;margin-top:6px;">${msg}</div><div style="color:${C.textSub};font-size:11.5px;line-height:1.5;margin-top:6px;">${m.known?`SPY ${pctFmt(m.spy)} · QQQ ${pctFmt(m.qqq)} over 5 days.`:''} ${secTxt}</div>`);
+  return live+downMarketHistoryPanel(s,pb)+intradayFamilyContextPanel(s,pb);
+};
+</script>
+
 </body>
 </html>
