@@ -13218,5 +13218,203 @@ const _v29105Version=document.getElementById('stockiq-version');
 if(_v29105Version)_v29105Version.textContent='StockIQ v2.9.107 · Bought Price UI Cleanup';
 
 </script>
+
+<script>
+// ── v2.9.108 FAMILY-SPECIFIC RE-ENTRY RULES ────────────────────────────────
+// Research-only change to the entry engine. Daily data still owns the universe;
+// canonical Current Portfolio still owns BOUGHT positions. No ownership/state
+// architecture is changed here.
+//
+// After a genuine emergency-stop loss in the SAME setup family:
+//   Regression Pullback -> reset + fresh valid setup + price above prior exit
+//   Deep Pullback       -> reset + fresh valid setup + price above prior exit
+//   Breakout            -> fresh valid breakout + price above prior exit
+//   EMA20 Reclaim       -> fresh valid reclaim is allowed
+//   Momentum            -> fresh valid setup is allowed
+//   SMA50 Reclaim       -> block automatic same-family re-entry
+//
+// +6% management remains family-specific: only SMA50 Reclaim activates the
+// existing 2.5x Wilder ATR Fast Protect rule. No new +6% rule is introduced.
+
+function v29108FamilyName(raw){
+  const x=String(raw||'').trim().toUpperCase().replace(/[- ]+/g,'_');
+  if(x.includes('SMA50') || x.includes('50_DAY_RECLAIM')) return 'SMA50 Reclaim';
+  if(x.includes('EMA20')) return 'EMA20 Reclaim';
+  if(x.includes('DEEP') && x.includes('PULLBACK')) return 'Deep Pullback';
+  if(x.includes('REG')) return 'Regression Pullback';
+  if(x.includes('BREAKOUT')) return 'Breakout';
+  if(x.includes('MOMENTUM')) return 'Momentum';
+  return String(raw||'').trim();
+}
+function v29108CurrentFamily(s){
+  const pb=pbFor(s);
+  return v29108FamilyName(trendTypeLabel(s,pb) || pb?.family || pb?.name || s?.setupFamily || '');
+}
+function v29108TradeFamily(r,s){
+  return v29108FamilyName(r?.entryFamily || r?.playbook || r?.family || r?.setupFamily || v29108CurrentFamily(s));
+}
+function v29108IsoDate(v){
+  if(!v) return null;
+  const d=new Date(v); if(isNaN(d)) return null;
+  return d.toISOString().slice(0,10);
+}
+function v29108IsEmergencyStopTrade(r,s){
+  if(!r || r.fullExit===false) return false;
+  const reason=String(r.exitReason||r.closeReason||'').toUpperCase();
+  if(reason.includes('EMERGENCY_STOP') || reason.includes('EMERGENCY STOP')) return true;
+  if(reason.includes('PROFIT') || reason.includes('TIME') || reason.includes('MANUAL')) return false;
+  const entry=Number(r.entry), exit=Number(r.exit);
+  if(!(entry>0) || !(exit>0) || exit>=entry) return false;
+  const pb=pbFor(s), stopPct=Number(pb?.stopPct||0);
+  if(!(stopPct>0)) return false;
+  const original=entry*(1-stopPct/100);
+  // Legacy records did not save exitReason. A loss at/through the modeled
+  // emergency stop (1% price tolerance for fill/rounding) counts as stop-out.
+  return exit <= original*1.01;
+}
+function v29108LatestSameFamilyStop(s){
+  const fam=v29108CurrentFamily(s);
+  const rows=(s?.realized||[]).filter(r=>v29108TradeFamily(r,s)===fam && v29108IsEmergencyStopTrade(r,s));
+  if(!rows.length) return null;
+  return rows.slice().sort((a,b)=>String(v29108IsoDate(a.dateOut||a.date)||'').localeCompare(String(v29108IsoDate(b.dateOut||b.date)||''))).slice(-1)[0];
+}
+function v29108AsOfStock(s,idx){
+  const snaps=(s?.snapshots||[]).filter(x=>x&&x.date).sort((a,b)=>new Date(a.date)-new Date(b.date));
+  const sn=snaps[idx]; if(!sn) return null;
+  return {...s,
+    price:sn.price,livePrice:null,liveDayPct:null,rsi:sn.rsi,atr:sn.atr,
+    ma20:sn.ma20??sn.ema20,ema20:sn.ema20??sn.ma20,ma50:sn.ma50,ma200:sn.ma200,
+    macdLine:sn.macdLine,signalLine:sn.signalLine,vol:sn.vol,avgvol:sn.avgvol,
+    hi52:sn.hi52,lo52:sn.lo52,regZ126:sn.regZ126,regSlope126:sn.regSlope126,
+    regCenter126:sn.regCenter126,regResidualSD126:sn.regResidualSD126,
+    snapshots:snaps.slice(0,idx+1),analyzed:sn.date
+  };
+}
+function v29108SetupQualifiedAsOf(s,idx){
+  try{
+    const a=v29108AsOfStock(s,idx); if(!a) return false;
+    const checks=setupChecks(a), req=(checks||[]).filter(x=>x.required);
+    return req.length>0 && req.every(x=>x.ok);
+  }catch(e){ return false; }
+}
+function v29108ResetAfterStop(s,stopTrade){
+  const out=v29108IsoDate(stopTrade?.dateOut||stopTrade?.date); if(!out) return false;
+  const snaps=(s?.snapshots||[]).filter(x=>x&&x.date).sort((a,b)=>new Date(a.date)-new Date(b.date));
+  // A reset means at least one completed Daily bar AFTER the failed trade where
+  // the old family no longer met all required setup checks. The current fresh
+  // BUY is evaluated separately by the normal StockIQ engine.
+  for(let i=0;i<snaps.length-1;i++){
+    const d=v29108IsoDate(snaps[i].date); if(!d || d<=out) continue;
+    if(!v29108SetupQualifiedAsOf(s,i)) return true;
+  }
+  return false;
+}
+function v29108TradingDaysSinceExit(s,stopTrade){
+  const out=v29108IsoDate(stopTrade?.dateOut||stopTrade?.date); if(!out) return null;
+  const snaps=(s?.snapshots||[]).filter(x=>x&&x.date).sort((a,b)=>new Date(a.date)-new Date(b.date));
+  return snaps.filter(x=>{const d=v29108IsoDate(x.date); return d&&d>out;}).length;
+}
+function v29108ApplyReentryGate(s,base){
+  if(!base || hasOpenPosition(s)) return base;
+  const fam=v29108CurrentFamily(s);
+  const stopTrade=v29108LatestSameFamilyStop(s);
+  if(!stopTrade) return base;
+
+  const actionable=['BUY','A+ BUY','PREPARING','TRIGGERED / VERIFY'];
+  if(!actionable.includes(String(base.state||'').toUpperCase())) return base;
+
+  const exitPx=Number(stopTrade.exit||0), px=curVal(s,'price');
+  const aboveExit=exitPx>0 && px!=null && px>exitPx;
+  const reset=v29108ResetAfterStop(s,stopTrade);
+  const exitText=exitPx>0?money(exitPx):'the prior exit';
+
+  if(fam==='SMA50 Reclaim'){
+    return {...base,state:'WAIT',reentryBlocked:true,reentryFamily:fam,
+      reason:`SAME-FAMILY RE-ENTRY BLOCKED. The previous SMA50 Reclaim stopped out at ${exitText}. Our 3-year 30-minute re-entry study found automatic second SMA50 Reclaims were weak, so StockIQ will not issue another SMA50 BUY from this failed sequence. A different validated setup family can still qualify normally.`};
+  }
+  if(fam==='Regression Pullback' || fam==='Deep Pullback'){
+    if(!reset){
+      return {...base,state:'WAIT',reentryBlocked:true,reentryFamily:fam,
+        reason:`RE-ENTRY NOT READY. The previous ${fam} stopped out at ${exitText}. The failed setup has not produced a completed Daily reset yet. Stay out until the old setup breaks, then a fresh ${fam} qualifies.`};
+    }
+    if(!aboveExit){
+      return {...base,state:'WAIT',reentryBlocked:true,reentryFamily:fam,
+        reason:`RE-ENTRY NOT READY. The old ${fam} has reset and a fresh setup is forming, but price is ${money(px)} and must be above the previous ${exitText} exit before StockIQ allows the re-entry BUY.`};
+    }
+    return {...base,reentry:true,reentryFamily:fam,
+      reason:`FRESH RE-ENTRY READY. The failed ${fam} reset, a new valid setup qualified, and price ${money(px)} is above the prior ${exitText} exit. ${base.reason||''}`};
+  }
+  if(fam==='Breakout'){
+    if(!aboveExit){
+      return {...base,state:'WAIT',reentryBlocked:true,reentryFamily:fam,
+        reason:`RE-ENTRY NOT READY. A fresh Breakout is present, but price ${money(px)} must be above the previous ${exitText} exit before StockIQ treats it as a new BUY.`};
+    }
+    return {...base,reentry:true,reentryFamily:fam,
+      reason:`FRESH BREAKOUT RE-ENTRY READY. A new valid Breakout qualified above the prior ${exitText} exit. ${base.reason||''}`};
+  }
+  if(fam==='EMA20 Reclaim' || fam==='Momentum'){
+    const days=v29108TradingDaysSinceExit(s,stopTrade);
+    if(days!=null && days<=2){
+      return {...base,reentry:true,reentryRisk:'HIGHER',reentryFamily:fam,
+        reason:`FRESH ${fam.toUpperCase()} RE-ENTRY — HIGHER RISK. The new setup is valid, so re-entry is allowed, but it appeared only ${days} completed trading day${days===1?'':'s'} after the stop and quick re-entries were more volatile in research. ${base.reason||''}`};
+    }
+    return {...base,reentry:true,reentryFamily:fam,
+      reason:`FRESH ${fam.toUpperCase()} RE-ENTRY READY. A new valid ${fam} has qualified after the prior stop. No arbitrary cooldown or prior-exit-price recovery is required for this family. ${base.reason||''}`};
+  }
+  return base;
+}
+
+// Wrap only the non-owned state result. The existing family setup engine still
+// decides whether a setup is BUY/PREPARING/WAIT; this layer only decides whether
+// a prior same-family emergency stop changes re-entry eligibility.
+const _v29108StockState=stockState;
+stockState=function(s){
+  const base=_v29108StockState(s);
+  return v29108ApplyReentryGate(s,base);
+};
+
+// Tag future completed exits with a reason without creating another ownership
+// source. This metadata lives only in realized trade history and makes re-entry
+// classification deterministic going forward. Legacy stop-outs are inferred.
+const _v29108SaveV2Close=saveV2Close;
+saveV2Close=async function(id){
+  const s=stocks.find(x=>String(x.id)===String(id));
+  if(!s||!hasOpenPosition(s)||!s.position) return _v29108SaveV2Close(id);
+  const before=(s.realized||[]).length;
+  let reason='MANUAL_EXIT';
+  try{
+    const ps=positionState(s), stop=suggestedStop(s), breach=latestStopBreach(s);
+    if(breach?.hit){
+      reason=(stop?.active || (Number(ps?.gainPct)||0)>0) ? 'PROFIT_PROTECTION' : 'EMERGENCY_STOP';
+    } else if(String(ps?.state||'').toUpperCase()==='DECISION DAY') reason='TIME_DECISION';
+  }catch(e){}
+  await _v29108SaveV2Close(id);
+  // The original close function already persisted the record. Patch the newest
+  // realized row immediately after it returns so future re-entry logic has an
+  // explicit reason; canonical Current Portfolio remains untouched.
+  const fresh=stocks.find(x=>String(x.id)===String(id)) || stocks.find(x=>canonKey(x)===canonKey(s));
+  if(fresh && (fresh.realized||[]).length>before){
+    const rr=[...(fresh.realized||[])];
+    rr[rr.length-1]={...rr[rr.length-1],exitReason:reason};
+    const u={...fresh,realized:rr};
+    stocks=stocks.map(x=>String(x.id)===String(fresh.id)?u:x);
+    try{ await canonSaveStockHistoryOnly(u); }catch(e){ console.warn('Could not save exit reason metadata',e); }
+  }
+};
+
+// Make the new re-entry states obvious anywhere plainEntryAction is used.
+const _v29108PlainEntryAction=plainEntryAction;
+plainEntryAction=function(s,pb,st){
+  if(st?.reentryBlocked) return {label:'WAIT',color:C.yellow,action:'Do not buy this stock yet.',why:st.reason,next:'Wait for StockIQ to approve a genuinely fresh re-entry under this family’s tested rule.'};
+  if(st?.reentry && ['BUY','A+ BUY'].includes(String(st.state||'').toUpperCase())){
+    return {label:'FRESH RE-ENTRY BUY',color:C.green,action:'This is a new trade. The family-specific re-entry rule has passed.',why:st.reason,next:'Use the normal entry, risk, and management plan for this new trade.'};
+  }
+  return _v29108PlainEntryAction(s,pb,st);
+};
+
+const _v29108Version=document.getElementById('stockiq-version');
+if(_v29108Version)_v29108Version.textContent='StockIQ v2.9.108 · Family Re-entry Rules';
+setTimeout(()=>{ try{renderHome();}catch(e){console.warn('v2.9.108 refresh failed',e);} },250);
+</script>
 </body>
 </html>
