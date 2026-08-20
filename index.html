@@ -13429,5 +13429,83 @@ const _v29108Version=document.getElementById('stockiq-version');
 if(_v29108Version)_v29108Version.textContent='StockIQ v2.9.109 · Re-entry Wait Messaging';
 setTimeout(()=>{ try{renderHome();}catch(e){console.warn('v2.9.108 refresh failed',e);} },250);
 </script>
+
+<script>
+// ── v2.9.110 RE-ENTRY HISTORY DETECTION + VISIBLE LABEL FIX ────────────────
+// v2.9.109 correctly contained the family gates, but legacy completed trades
+// can live in either per-stock realized history OR the Forward Signal Log.
+// This patch reads both, so older stopped trades (such as TIGO) are not missed.
+
+function v29110LedgerTradesFor(s){
+  try{ if(typeof loadSignalLedger==='function') loadSignalLedger(); }catch(e){}
+  const t=String(s?.ticker||'').toUpperCase();
+  const rows=(typeof SIGNAL_LEDGER!=='undefined' && Array.isArray(SIGNAL_LEDGER)) ? SIGNAL_LEDGER : [];
+  return rows.filter(r=>String(r?.ticker||'').toUpperCase()===t && r?.actualFunded && r?.actualExitDate && Number(r?.actualEntryPrice)>0 && Number(r?.actualExitPrice)>0)
+    .map(r=>({
+      entry:Number(r.actualEntryPrice), exit:Number(r.actualExitPrice),
+      dateIn:r.actualEntryDate||r.signalDate||null, dateOut:r.actualExitDate, date:r.actualExitDate,
+      plPct:r.actualPLPct, fullExit:true,
+      entryFamily:r.family||null, playbook:r.playbook||null,
+      _source:'signalLedger'
+    }));
+}
+function v29110AllCompletedTrades(s){
+  const a=Array.isArray(s?.realized)?s.realized:[];
+  const b=v29110LedgerTradesFor(s);
+  const seen=new Set(), out=[];
+  [...a,...b].forEach(r=>{
+    const k=[v29108IsoDate(r?.dateOut||r?.date)||'',Number(r?.entry||0).toFixed(4),Number(r?.exit||0).toFixed(4)].join('|');
+    if(seen.has(k)) return; seen.add(k); out.push(r);
+  });
+  return out;
+}
+function v29110IsEmergencyStopTrade(r,s){
+  if(!r || r.fullExit===false) return false;
+  const reason=String(r.exitReason||r.closeReason||'').toUpperCase();
+  if(reason.includes('EMERGENCY_STOP') || reason.includes('EMERGENCY STOP')) return true;
+  if(reason.includes('PROFIT') || reason.includes('TIME') || reason.includes('MANUAL')) return false;
+  const entry=Number(r.entry), exit=Number(r.exit);
+  if(!(entry>0) || !(exit>0) || exit>=entry) return false;
+  const pb=pbFor(s), stopPct=Math.abs(Number(pb?.stopPct||0));
+  if(!(stopPct>0)) return false;
+  const original=entry*(1-stopPct/100);
+  const lossPct=(exit/entry-1)*100;
+  // Allow 1% price tolerance around the planned stop for fill/rounding/gaps.
+  return exit<=original*1.01 || lossPct<=-(stopPct-1);
+}
+// Replace the v2.9.109 lookup with a union of realized history + signal ledger.
+v29108LatestSameFamilyStop=function(s){
+  const fam=v29108CurrentFamily(s);
+  const rows=v29110AllCompletedTrades(s).filter(r=>v29108TradeFamily(r,s)===fam && v29110IsEmergencyStopTrade(r,s));
+  if(!rows.length) return null;
+  return rows.slice().sort((a,b)=>String(v29108IsoDate(a.dateOut||a.date)||'').localeCompare(String(v29108IsoDate(b.dateOut||b.date)||''))).slice(-1)[0];
+};
+
+// Make WAIT re-entry states visually unmistakable, not just different in the paragraph.
+const _v29110PlainEntryAction=plainEntryAction;
+plainEntryAction=function(s,pb,st){
+  const base=_v29110PlainEntryAction(s,pb,st);
+  if(!st?.reentryBlocked) return base;
+  const r=String(st.reason||'');
+  if(r.startsWith('SAME-FAMILY RE-ENTRY BLOCKED')) return {...base,label:'RE-ENTRY BLOCKED',color:C.red};
+  if(r.startsWith('RE-ENTRY WATCH')) return {...base,label:'RE-ENTRY WATCH',color:C.yellow};
+  return {...base,label:'RE-ENTRY NOT READY',color:C.yellow};
+};
+
+// Header chip: keep engine state as WAIT internally, but show the re-entry status to the user.
+const _v29110PreTop=preTop;
+preTop=function(s,pb,st){
+  if(st?.reentryBlocked){
+    const r=String(st.reason||'');
+    const ui={...st,state:r.startsWith('SAME-FAMILY RE-ENTRY BLOCKED')?'RE-ENTRY BLOCKED':(r.startsWith('RE-ENTRY WATCH')?'RE-ENTRY WATCH':'RE-ENTRY NOT READY')};
+    return _v29110PreTop(s,pb,ui);
+  }
+  return _v29110PreTop(s,pb,st);
+};
+
+const _v29110Version=document.getElementById('stockiq-version');
+if(_v29110Version)_v29110Version.textContent='StockIQ v2.9.110 · Re-entry History Detection';
+setTimeout(()=>{try{renderHome(); if(detailStockId){const s=stocks.find(x=>String(x.id)===String(detailStockId)); if(s)renderDetail(s);}}catch(e){console.warn('v2.9.110 refresh failed',e);}},300);
+</script>
 </body>
 </html>
