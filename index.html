@@ -13220,7 +13220,7 @@ if(_v29105Version)_v29105Version.textContent='StockIQ v2.9.107 · Bought Price U
 </script>
 
 <script>
-// ── v2.9.108 FAMILY-SPECIFIC RE-ENTRY RULES ────────────────────────────────
+// ── v2.9.109 FAMILY-SPECIFIC RE-ENTRY RULES + WAIT MESSAGING FIX ────────────────────────────────
 // Research-only change to the entry engine. Daily data still owns the universe;
 // canonical Current Portfolio still owns BOUGHT positions. No ownership/state
 // architecture is changed here.
@@ -13320,8 +13320,9 @@ function v29108ApplyReentryGate(s,base){
   const stopTrade=v29108LatestSameFamilyStop(s);
   if(!stopTrade) return base;
 
+  const baseState=String(base.state||'').toUpperCase();
   const actionable=['BUY','A+ BUY','PREPARING','TRIGGERED / VERIFY'];
-  if(!actionable.includes(String(base.state||'').toUpperCase())) return base;
+  const isActionable=actionable.includes(baseState);
 
   const exitPx=Number(stopTrade.exit||0), px=curVal(s,'price');
   const aboveExit=exitPx>0 && px!=null && px>exitPx;
@@ -13339,7 +13340,11 @@ function v29108ApplyReentryGate(s,base){
     }
     if(!aboveExit){
       return {...base,state:'WAIT',reentryBlocked:true,reentryFamily:fam,
-        reason:`RE-ENTRY NOT READY. The old ${fam} has reset and a fresh setup is forming, but price is ${money(px)} and must be above the previous ${exitText} exit before StockIQ allows the re-entry BUY.`};
+        reason:`RE-ENTRY NOT READY. The old ${fam} has reset, but price is ${money(px)} and must recover above the previous ${exitText} exit before StockIQ can allow another ${fam} BUY. The normal setup must also qualify again.`};
+    }
+    if(!isActionable){
+      return {...base,state:'WAIT',reentryBlocked:true,reentryFamily:fam,reentryReset:true,reentryAboveExit:true,
+        reason:`RE-ENTRY WATCH. The previous ${fam} stopped out at ${exitText}. The reset requirement has passed and price ${money(px)} is back above that exit. But the fresh ${fam} setup is NOT valid yet. ${base.reason||'Wait for the normal family setup to qualify again.'}`};
     }
     return {...base,reentry:true,reentryFamily:fam,
       reason:`FRESH RE-ENTRY READY. The failed ${fam} reset, a new valid setup qualified, and price ${money(px)} is above the prior ${exitText} exit. ${base.reason||''}`};
@@ -13347,13 +13352,21 @@ function v29108ApplyReentryGate(s,base){
   if(fam==='Breakout'){
     if(!aboveExit){
       return {...base,state:'WAIT',reentryBlocked:true,reentryFamily:fam,
-        reason:`RE-ENTRY NOT READY. A fresh Breakout is present, but price ${money(px)} must be above the previous ${exitText} exit before StockIQ treats it as a new BUY.`};
+        reason:`RE-ENTRY NOT READY. The previous Breakout stopped out at ${exitText}. Price ${money(px)} must recover above that exit AND a fresh valid Breakout must qualify before StockIQ can issue another BUY.`};
+    }
+    if(!isActionable){
+      return {...base,state:'WAIT',reentryBlocked:true,reentryFamily:fam,reentryAboveExit:true,
+        reason:`RE-ENTRY WATCH. Price ${money(px)} is above the previous ${exitText} Breakout exit, but a fresh valid Breakout has not qualified yet. Wait for the normal Breakout rules to produce a new setup.`};
     }
     return {...base,reentry:true,reentryFamily:fam,
       reason:`FRESH BREAKOUT RE-ENTRY READY. A new valid Breakout qualified above the prior ${exitText} exit. ${base.reason||''}`};
   }
   if(fam==='EMA20 Reclaim' || fam==='Momentum'){
     const days=v29108TradingDaysSinceExit(s,stopTrade);
+    if(!isActionable){
+      return {...base,state:'WAIT',reentryBlocked:true,reentryFamily:fam,
+        reason:`RE-ENTRY WATCH. The previous ${fam} stopped out at ${exitText}. This family may be bought again when a fresh valid ${fam} setup qualifies; recovery above the old exit and a fixed cooldown are not required. Right now the fresh setup is not ready. ${base.reason||''}`};
+    }
     if(days!=null && days<=2){
       return {...base,reentry:true,reentryRisk:'HIGHER',reentryFamily:fam,
         reason:`FRESH ${fam.toUpperCase()} RE-ENTRY — HIGHER RISK. The new setup is valid, so re-entry is allowed, but it appeared only ${days} completed trading day${days===1?'':'s'} after the stop and quick re-entries were more volatile in research. ${base.reason||''}`};
@@ -13413,7 +13426,7 @@ plainEntryAction=function(s,pb,st){
 };
 
 const _v29108Version=document.getElementById('stockiq-version');
-if(_v29108Version)_v29108Version.textContent='StockIQ v2.9.108 · Family Re-entry Rules';
+if(_v29108Version)_v29108Version.textContent='StockIQ v2.9.109 · Re-entry Wait Messaging';
 setTimeout(()=>{ try{renderHome();}catch(e){console.warn('v2.9.108 refresh failed',e);} },250);
 </script>
 </body>
