@@ -13690,5 +13690,298 @@ marketPanel=function(s,pb){
 };
 </script>
 
+
+
+<script>
+// ── v2.9.113 OWNED DOWN-MARKET CONTEXT PLACEMENT ──────────────────────────
+// On an owned stock, market/sector/down-market history is active management
+// context, not buried entry research. Move it directly below WHAT TO DO NOW.
+// Trading logic, portfolio ownership, BUY/SELL rules and market calculations
+// are unchanged.
+
+ownedResearchDetails=function(s,pb){
+  const research = [
+    regressionPanel(s,pb),
+    high52BehaviorPanel(s),
+    historyPanel(s,pb),
+    yourTradeProofPanel(s,pb),
+    sweetSpotPanel(s,pb),
+    indicatorPanel(s,pb)
+  ].join('');
+  return `<details style="margin:0 16px 12px;background:${C.card};border:1px solid ${C.border};border-radius:16px;overflow:hidden;">`
+    + `<summary style="list-style:none;cursor:pointer;padding:14px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;user-select:none;">`
+    + `<div><div style="color:${C.text};font-size:13px;font-weight:950;">Entry & Historical Research</div><div style="color:${C.textSub};font-size:11.5px;margin-top:3px;line-height:1.4;">Original setup, backtest evidence, regression context and indicators.</div></div>`
+    + `<div style="color:${C.textMuted};font-size:11px;font-weight:900;white-space:nowrap;">SHOW DETAILS ▾</div>`
+    + `</summary>`
+    + `<div style="border-top:1px solid ${C.border};padding-top:12px;padding-bottom:2px;">${research}</div>`
+    + `</details>`;
+};
+
+const _v29113PreBuyRenderDetail=renderDetail;
+renderDetail=function(s){
+  s=withRecentDailyHistory(s);
+  if(!hasOpenPosition(s)) return _v29113PreBuyRenderDetail(s);
+  const el=document.getElementById('detail-content'); if(!el)return;
+  const pb=pbFor(s); if(!pb) return _v29113PreBuyRenderDetail(s);
+  const st=stockState(s);
+  let html=positionTop(s,pb,st);
+
+  // NEW LOCATION: visible immediately after the owned-stock action area.
+  // marketPanel() in v2.9.112 already contains:
+  // Market & Sector Today + Down-Market History + family 30-minute context.
+  html+=marketPanel(s,pb);
+
+  html+=v2998OwnedRiskExitPanel(s,pb,st);
+  html+=v2998ManagePositionPanel(s);
+  html+=panel('Trade Health',positionHealthHTML(s));
+  html+=v2998OwnedEarningsPanel(s,pb);
+  html+=ownedResearchDetails(s,pb);
+  el.innerHTML=html;
+};
+
+const _v29113Version=document.getElementById('stockiq-version');
+if(_v29113Version)_v29113Version.textContent='StockIQ v2.9.113 · Owned Down-Market Context Moved Up';
+setTimeout(()=>{try{renderHome();if(detailStockId){const s=stocks.find(x=>String(x.id)===String(detailStockId));if(s)renderDetail(s);}}catch(e){console.warn('v2.9.113 refresh failed',e);}},300);
+</script>
+
+<script>
+// ── v2.9.114 TICKER HISTORY + CONDITIONAL DOWN-MARKET ACTION CALLOUT ─────
+// DISPLAY / EDUCATION LAYER ONLY.
+// No BUY, PREPARING, stop, re-entry, sizing, portfolio ownership, or family
+// qualification rules are changed.
+//
+// 1) Tested ticker findings get their own compact visual section.
+// 2) WHAT TO DO NOW receives a small market-context strip ONLY when BOTH SPY
+//    and QQQ are down over the prior 5 trading days.
+// 3) When the market is not weak, no extra market callout appears in WHAT TO DO NOW.
+
+const V29114_TICKER_FINDINGS = {
+  VIST:{
+    quality:'GOOD SAMPLE', qualityTone:'good', family:'Deep Pullback',
+    cards:[
+      {tag:'DOWN MARKET', big:'82% positive', sub:'11 past weak-market trades · +13.7% avg', tone:'good'},
+      {tag:'DAY 5', big:'94% positive', sub:'When VIST was above the buy price by Day 5', tone:'good'},
+      {tag:'NORMAL BEHAVIOR', big:'Needs time', sub:'Winning trades often peaked around Day 15', tone:'neutral'}
+    ],
+    note:'A red entry day can be normal. Morning recovery and stronger buying are encouraging, but the Deep Pullback plan still controls the trade.'
+  },
+  ASX:{
+    quality:'GOOD SAMPLE', qualityTone:'good', family:'Regression Pullback',
+    cards:[
+      {tag:'DOWN MARKET', big:'66.7% positive', sub:'9 weak-market trades · +9.3% avg', tone:'good'},
+      {tag:'DAY 5', big:'80% positive', sub:'When ASX was above the buy price by Day 5', tone:'good'},
+      {tag:'DAY 10', big:'87.5% positive', sub:'When ASX was above the buy price by Day 10', tone:'good'}
+    ],
+    note:'A slow start is a warning, not an exit. Automatic Day 5 selling tested worse. Healthy ASX winners often needed most of the 20-day window.'
+  },
+  TIGO:{
+    quality:'STRONG SAMPLE', qualityTone:'strong', family:'Regression Pullback',
+    cards:[
+      {tag:'DOWN MARKET', big:'90% positive', sub:'10 weak-market trades · +6.5% avg', tone:'good'},
+      {tag:'DAY 5', big:'91.7% positive', sub:'When TIGO was already above the buy price', tone:'good'},
+      {tag:'DAY 10', big:'17 of 17', sub:'Positive by Day 10 → all finished positive in this sample', tone:'strong'}
+    ],
+    note:'Do not overreact to another morning low. Later recovery above the morning high mattered more. Very quiet volume deserves extra caution.'
+  },
+  ACHC:{
+    quality:'SMALL SAMPLE', qualityTone:'caution', family:'Deep Pullback',
+    cards:[
+      {tag:'OWN HISTORY', big:'5 trades', sub:'Too small to personalize aggressively', tone:'caution'},
+      {tag:'DOWN MARKET', big:'4 of 4 positive', sub:'Encouraging, but the sample is very small', tone:'good'},
+      {tag:'NORMAL BEHAVIOR', big:'Can look ugly', sub:'Some winners moved lower before recovering', tone:'neutral'}
+    ],
+    note:'Use the broader Deep Pullback family research more than ACHC-specific statistics. A red day alone is not a failure signal.'
+  },
+  MTSI:{
+    quality:'USEFUL SMALL SAMPLE', qualityTone:'caution', family:'SMA50 Reclaim',
+    cards:[
+      {tag:'NEXT MORNING', big:'86% positive', sub:'By Day 10 when MTSI opened at/above the reclaimed SMA50', tone:'good'},
+      {tag:'RECLAIM LOST', big:'40% positive', sub:'By Day 10 when next session opened back below the reclaim', tone:'caution'},
+      {tag:'IMPORTANT', big:'Warning only', sub:'Selling automatically on that weak open tested worse', tone:'neutral'}
+    ],
+    note:'MTSI historically did better when it kept holding the reclaimed 50-day level. Losing it is meaningful context, but not a new automatic sell rule.'
+  }
+};
+
+function v29114Tone(t){
+  if(t==='strong') return C.green;
+  if(t==='good') return C.teal;
+  if(t==='caution') return C.yellow;
+  if(t==='bad') return C.red;
+  return C.textSub;
+}
+
+function v29114TickerFindingsPanel(s,pb){
+  const f=V29114_TICKER_FINDINGS[String(s?.ticker||'').toUpperCase()];
+  if(!f) return '';
+  const qc=v29114Tone(f.qualityTone);
+  return `<div style="margin:0 16px 12px;background:${C.card};border:1px solid ${C.border};border-radius:16px;padding:14px;">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:10px;">
+      <div><div class="v2lbl">THIS STOCK'S HISTORY</div><div style="color:${C.text};font-size:16px;font-weight:950;margin-top:3px;">${s.ticker} · ${f.family}</div></div>
+      <div style="border:1px solid ${qc}55;background:${qc}14;color:${qc};border-radius:999px;padding:5px 8px;font-size:9.5px;font-weight:950;white-space:nowrap;">${f.quality}</div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;">
+      ${f.cards.map(c=>{const cc=v29114Tone(c.tone);return `<div style="background:${C.cardHigh};border:1px solid ${cc}44;border-radius:11px;padding:9px;min-width:0;">
+        <div style="color:${cc};font-size:9px;font-weight:950;letter-spacing:.05em;text-transform:uppercase;">${c.tag}</div>
+        <div style="color:${C.text};font-size:14px;font-weight:950;line-height:1.15;margin-top:4px;">${c.big}</div>
+        <div style="color:${C.textSub};font-size:10px;line-height:1.35;margin-top:4px;">${c.sub}</div>
+      </div>`}).join('')}
+    </div>
+    <div style="display:flex;gap:7px;align-items:flex-start;margin-top:9px;padding:8px 9px;border-radius:9px;background:${C.cardHigh};">
+      <div style="color:${C.teal};font-size:12px;font-weight:950;">ⓘ</div>
+      <div style="color:${C.textSub};font-size:10.5px;line-height:1.45;">${f.note}</div>
+    </div>
+  </div>`;
+}
+
+function v29114WeakMarketActionStrip(s,pb){
+  const m=v29112Market5Day();
+  if(!m?.known || !m.weak) return '';
+  const fam=v29112FamilyName(s,pb);
+  const ts=V29112_DOWN_MARKET_TICKER?.[String(s?.ticker||'').toUpperCase()] || null;
+  const fs=V29112_DOWN_MARKET_FAMILY?.[fam] || null;
+  const sec=v29112Sector5Day(pb);
+  let headline='DOWN MARKET — FOLLOW THE NORMAL PLAN';
+  if(['Deep Pullback','EMA20 Reclaim','Regression Pullback'].includes(fam)) headline='DOWN MARKET CAN FIT THIS SETUP';
+  const own=ts&&Number(ts.n)>=5
+    ? `<div style="flex:1;min-width:92px;background:${C.cardHigh};border:1px solid ${C.teal}44;border-radius:10px;padding:8px;">
+         <div style="color:${C.textMuted};font-size:8.5px;font-weight:950;letter-spacing:.05em;">${String(s.ticker).toUpperCase()} HISTORY</div>
+         <div style="color:${C.teal};font-size:13px;font-weight:950;margin-top:3px;">${ts.win}% positive</div>
+         <div style="color:${C.textSub};font-size:9.5px;margin-top:2px;">${ts.n} past trades</div>
+       </div>`
+    : fs ? `<div style="flex:1;min-width:92px;background:${C.cardHigh};border:1px solid ${C.teal}44;border-radius:10px;padding:8px;">
+         <div style="color:${C.textMuted};font-size:8.5px;font-weight:950;letter-spacing:.05em;">SETUP HISTORY</div>
+         <div style="color:${C.teal};font-size:13px;font-weight:950;margin-top:3px;">${fs.win.toFixed(1)}% positive</div>
+         <div style="color:${C.textSub};font-size:9.5px;margin-top:2px;">Weak-market sample</div>
+       </div>` : '';
+  return `<div data-v29114-weak-market="1" style="margin-top:10px;padding:9px;border-radius:12px;background:${C.yellow}10;border:1px solid ${C.yellow}55;">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:7px;">
+      <div style="color:${C.yellow};font-size:10px;font-weight:950;letter-spacing:.05em;">▼ ${headline}</div>
+      <div style="color:${C.textMuted};font-size:9px;font-weight:850;white-space:nowrap;">5-DAY BACKDROP</div>
+    </div>
+    <div style="display:flex;gap:7px;flex-wrap:wrap;">
+      <div style="flex:1;min-width:92px;background:${C.cardHigh};border:1px solid ${C.border};border-radius:10px;padding:8px;">
+        <div style="color:${C.textMuted};font-size:8.5px;font-weight:950;letter-spacing:.05em;">MARKET</div>
+        <div style="color:${C.yellow};font-size:13px;font-weight:950;margin-top:3px;">SPY ${pctFmt(m.spy)}</div>
+        <div style="color:${C.textSub};font-size:9.5px;margin-top:2px;">QQQ ${pctFmt(m.qqq)}</div>
+      </div>
+      ${sec?.change!=null?`<div style="flex:1;min-width:92px;background:${C.cardHigh};border:1px solid ${C.border};border-radius:10px;padding:8px;">
+        <div style="color:${C.textMuted};font-size:8.5px;font-weight:950;letter-spacing:.05em;">SECTOR</div>
+        <div style="color:${sec.change<0?C.yellow:C.green};font-size:13px;font-weight:950;margin-top:3px;">${sec.ticker} ${pctFmt(sec.change)}</div>
+        <div style="color:${C.textSub};font-size:9.5px;margin-top:2px;">Last 5 trading days</div>
+      </div>`:''}
+      ${own}
+    </div>
+    <div style="color:${C.text};font-size:10.5px;font-weight:850;line-height:1.4;margin-top:7px;">Market weakness alone does not change the BUY or SELL plan.</div>
+  </div>`;
+}
+
+// Inject the compact weak-market strip INSIDE WHAT TO DO NOW, but only when
+// the current 5-day broad-market condition is weak.
+const _v29114PositionTop=positionTop;
+positionTop=function(s,pb,st){
+  let html=_v29114PositionTop(s,pb,st);
+  const strip=v29114WeakMarketActionStrip(s,pb);
+  if(!strip) return html;
+  const marker='<div style="margin-top:12px;padding-top:11px;border-top:1px solid ${C.border};display:grid;grid-template-columns:1fr;gap:8px;">';
+  // The base HTML contains the rendered C.border value rather than the template
+  // token above, so use a stable structural fragment.
+  const needle='margin-top:12px;padding-top:11px;border-top:1px solid ';
+  const idx=html.indexOf(needle);
+  if(idx<0) return html;
+  const divStart=html.lastIndexOf('<div style="',idx);
+  if(divStart<0) return html;
+  return html.slice(0,divStart)+strip+html.slice(divStart);
+};
+
+// Final owned detail order:
+// WHAT TO DO NOW (+ weak-market strip only when needed)
+// -> Market/sector + down-market family memory + intraday context
+// -> THIS STOCK'S HISTORY visual cards
+// -> Risk/Exit -> Manage -> Health -> Earnings -> deeper research.
+const _v29114PreBuyRenderDetail=renderDetail;
+renderDetail=function(s){
+  s=withRecentDailyHistory(s);
+  if(!hasOpenPosition(s)) return _v29114PreBuyRenderDetail(s);
+  const el=document.getElementById('detail-content'); if(!el)return;
+  const pb=pbFor(s); if(!pb) return _v29114PreBuyRenderDetail(s);
+  const st=stockState(s);
+  let html=positionTop(s,pb,st);
+  html+=marketPanel(s,pb);
+  html+=v29114TickerFindingsPanel(s,pb);
+  html+=v2998OwnedRiskExitPanel(s,pb,st);
+  html+=v2998ManagePositionPanel(s);
+  html+=panel('Trade Health',positionHealthHTML(s));
+  html+=v2998OwnedEarningsPanel(s,pb);
+  html+=ownedResearchDetails(s,pb);
+  el.innerHTML=html;
+};
+
+const _v29114Version=document.getElementById('stockiq-version');
+if(_v29114Version)_v29114Version.textContent='StockIQ v2.9.114 · Ticker History + Conditional Down-Market Action';
+setTimeout(()=>{try{renderHome();if(detailStockId){const s=stocks.find(x=>String(x.id)===String(detailStockId));if(s)renderDetail(s);}}catch(e){console.warn('v2.9.114 refresh failed',e);}},300);
+</script>
+
+
+<script>
+// ── v2.9.115 SIMPLE DOWN-MARKET LANGUAGE ────────────────────────────────
+// DISPLAY WORDING ONLY. Keeps every v2.9.114 rule, calculation, threshold,
+// history result, BUY/SELL decision, and conditional visibility unchanged.
+// Goal: make the weak-market strip inside WHAT TO DO NOW instantly readable.
+
+v29114WeakMarketActionStrip=function(s,pb){
+  const m=v29112Market5Day();
+  if(!m?.known || !m.weak) return '';
+
+  const fam=v29112FamilyName(s,pb);
+  const ticker=String(s?.ticker||'').toUpperCase();
+  const ts=V29112_DOWN_MARKET_TICKER?.[ticker] || null;
+  const fs=V29112_DOWN_MARKET_FAMILY?.[fam] || null;
+  const sec=v29112Sector5Day(pb);
+
+  const setupFits=['Deep Pullback','EMA20 Reclaim','Regression Pullback'].includes(fam);
+  const headline=setupFits
+    ? 'MARKET IS DOWN — THIS CAN STILL FIT THE SETUP'
+    : 'MARKET IS DOWN — KEEP FOLLOWING THE TRADE PLAN';
+
+  const historyCard=ts&&Number(ts.n)>=5
+    ? `<div style="flex:1;min-width:105px;background:${C.cardHigh};border:1px solid ${C.teal}44;border-radius:10px;padding:8px;">
+         <div style="color:${C.textMuted};font-size:8.5px;font-weight:950;letter-spacing:.04em;">${ticker} IN DOWN MARKETS</div>
+         <div style="color:${C.teal};font-size:13px;font-weight:950;margin-top:3px;">${ts.win}% finished positive</div>
+         <div style="color:${C.textSub};font-size:9.5px;margin-top:2px;">${ts.n} past trades</div>
+       </div>`
+    : fs ? `<div style="flex:1;min-width:105px;background:${C.cardHigh};border:1px solid ${C.teal}44;border-radius:10px;padding:8px;">
+         <div style="color:${C.textMuted};font-size:8.5px;font-weight:950;letter-spacing:.04em;">THIS SETUP IN DOWN MARKETS</div>
+         <div style="color:${C.teal};font-size:13px;font-weight:950;margin-top:3px;">${fs.win.toFixed(1)}% finished positive</div>
+         <div style="color:${C.textSub};font-size:9.5px;margin-top:2px;">Past ${fam} trades</div>
+       </div>` : '';
+
+  const sectorCard=sec?.change!=null
+    ? `<div style="flex:1;min-width:105px;background:${C.cardHigh};border:1px solid ${C.border};border-radius:10px;padding:8px;">
+         <div style="color:${C.textMuted};font-size:8.5px;font-weight:950;letter-spacing:.04em;">SECTOR</div>
+         <div style="color:${sec.change<0?C.yellow:C.green};font-size:13px;font-weight:950;margin-top:3px;">${sec.ticker} ${sec.change<0?'down':'up'} ${Math.abs(sec.change).toFixed(1)}%</div>
+         <div style="color:${C.textSub};font-size:9.5px;margin-top:2px;">Last 5 trading days</div>
+       </div>` : '';
+
+  return `<div data-v29114-weak-market="1" style="margin-top:10px;padding:9px;border-radius:12px;background:${C.yellow}10;border:1px solid ${C.yellow}55;">
+    <div style="color:${C.yellow};font-size:10px;font-weight:950;letter-spacing:.04em;margin-bottom:7px;">▼ ${headline}</div>
+    <div style="display:flex;gap:7px;flex-wrap:wrap;">
+      <div style="flex:1;min-width:105px;background:${C.cardHigh};border:1px solid ${C.border};border-radius:10px;padding:8px;">
+        <div style="color:${C.textMuted};font-size:8.5px;font-weight:950;letter-spacing:.04em;">MARKET</div>
+        <div style="color:${C.yellow};font-size:13px;font-weight:950;margin-top:3px;">SPY down ${Math.abs(Number(m.spy)).toFixed(1)}%</div>
+        <div style="color:${C.textSub};font-size:9.5px;margin-top:2px;">QQQ down ${Math.abs(Number(m.qqq)).toFixed(1)}% · last 5 days</div>
+      </div>
+      ${sectorCard}
+      ${historyCard}
+    </div>
+    <div style="margin-top:7px;padding:7px 8px;border-radius:8px;background:${C.cardHigh};color:${C.text};font-size:10.5px;font-weight:900;line-height:1.4;">WHAT TO DO: Stay with the normal trade plan. A down market by itself is not a reason to sell.</div>
+  </div>`;
+};
+
+const _v29115Version=document.getElementById('stockiq-version');
+if(_v29115Version)_v29115Version.textContent='StockIQ v2.9.115 · Simple Down-Market Language';
+setTimeout(()=>{try{renderHome();if(detailStockId){const s=stocks.find(x=>String(x.id)===String(detailStockId));if(s)renderDetail(s);}}catch(e){console.warn('v2.9.115 refresh failed',e);}},350);
+</script>
+
 </body>
 </html>
