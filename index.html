@@ -13983,5 +13983,213 @@ if(_v29115Version)_v29115Version.textContent='StockIQ v2.9.115 · Simple Down-Ma
 setTimeout(()=>{try{renderHome();if(detailStockId){const s=stocks.find(x=>String(x.id)===String(detailStockId));if(s)renderDetail(s);}}catch(e){console.warn('v2.9.115 refresh failed',e);}},350);
 </script>
 
+
+<script>
+// ── v2.9.116 LIVE TICKER-HISTORY TRIGGERS ───────────────────────────────
+// DISPLAY / CONTEXT LAYER ONLY.
+// Watches only PREPARING, BUY/A+ BUY, and BOUGHT positions. WAIT/research
+// names stay quiet. A card appears only when a supported historical condition
+// is actually happening now. No card changes qualification, entry, stop,
+// sizing, re-entry, or exit logic.
+
+function v29116RelevantState(s){
+  try{
+    if(hasOpenPosition(s)) return 'BOUGHT';
+    const st=safeStockState(s);
+    return ['PREPARING','BUY','A+ BUY'].includes(String(st?.state||'')) ? st.state : null;
+  }catch(e){ return null; }
+}
+function v29116Num(v){ const n=Number(v); return Number.isFinite(n)?n:null; }
+function v29116LatestOpen(s){
+  const snaps=(s?.snapshots||[]).slice().sort((a,b)=>new Date(a.date)-new Date(b.date));
+  return v29116Num(snaps.length?snaps[snaps.length-1]?.open:s?.open);
+}
+function v29116EntryDaySma50(s){
+  const d=String(s?.position?.date||'').slice(0,10);
+  const snaps=(s?.snapshots||[]).slice().sort((a,b)=>new Date(a.date)-new Date(b.date));
+  if(!d||!snaps.length) return null;
+  let best=null;
+  for(const r of snaps){
+    const rd=snapshotDateOnly?.(r?.date)||String(r?.date||'').slice(0,10);
+    if(rd===d){ best=v29116Num(r?.ma50); break; }
+    if(rd<d) best=v29116Num(r?.ma50);
+  }
+  return best;
+}
+function v29116HigherSecondLow(r){
+  const b=r?.bars||[];
+  if(b.length<2) return null;
+  const a=v29116Num(b[0]?.low), c=v29116Num(b[1]?.low);
+  return a!=null&&c!=null ? c>a : null;
+}
+function v29116Card(tone,title,big,sub,foot=''){
+  const color=tone==='good'?C.green:(tone==='warn'?C.yellow:(tone==='bad'?C.red:C.teal));
+  return `<div style="background:${C.cardHigh};border:1px solid ${color}55;border-radius:11px;padding:9px;min-width:0;">
+    <div style="color:${color};font-size:9px;font-weight:950;letter-spacing:.04em;text-transform:uppercase;">${title}</div>
+    <div style="color:${C.text};font-size:14px;font-weight:950;line-height:1.2;margin-top:4px;">${big}</div>
+    <div style="color:${C.textSub};font-size:10px;line-height:1.4;margin-top:4px;">${sub}</div>
+    ${foot?`<div style="color:${C.textMuted};font-size:9px;line-height:1.35;margin-top:5px;">${foot}</div>`:''}
+  </div>`;
+}
+
+function v29116LiveTriggers(s,pb){
+  const state=v29116RelevantState(s);
+  if(!state) return [];
+  const cards=[];
+  const ticker=String(s?.ticker||'').toUpperCase();
+  const fam=v29112FamilyName(s,pb);
+  const owned=hasOpenPosition(s);
+  const day=owned?Number(positionDays(s)||1):null;
+  const px=v29116Num(curVal(s,'price'));
+  const entry=v29116Num(s?.position?.entry);
+  const gain=(owned&&px!=null&&entry)?((px/entry)-1)*100:null;
+  const market=v29112Market5Day();
+  const ownWeak=V29112_DOWN_MARKET_TICKER?.[ticker];
+  const famWeak=V29112_DOWN_MARKET_FAMILY?.[fam];
+
+  // Market card: candidate names get this only while the market condition is
+  // actually true. BOUGHT already receives the same idea inside WHAT TO DO NOW,
+  // so avoid showing a duplicate here.
+  if(!owned && market?.known && market?.weak){
+    if(ownWeak && Number(ownWeak.n)>=5){
+      cards.push(v29116Card('info','MARKET IS DOWN',`${ownWeak.win}% finished positive`,`${ticker} had ${ownWeak.n} past ${fam} trades in down markets. A down market by itself does not cancel this setup.`));
+    }else if(famWeak){
+      cards.push(v29116Card('info','MARKET IS DOWN',`${famWeak.win.toFixed(1)}% finished positive`,`Past ${fam} trades still worked when SPY and QQQ were falling. Keep using the normal setup rules.`));
+    }
+  }
+
+  // Ticker-specific, already-tested management checkpoints.
+  if(owned && gain!=null){
+    if(ticker==='VIST' && day>=5 && day<10){
+      cards.push(gain>=0
+        ? v29116Card('good','DAY 5 MATCH','VIST is above your buy price','Past VIST Deep Pullbacks were much stronger when they were positive by Day 5.','Good sign — not a sell or hold rule by itself.')
+        : v29116Card('warn','DAY 5 WARNING','VIST is still below your buy price','Past VIST Deep Pullbacks struggled more often when they were still negative by Day 5.','Warning only. Follow the normal Deep Pullback exit plan.'));
+    }
+    if(ticker==='ASX' && day>=5 && day<10){
+      cards.push(gain>=0
+        ? v29116Card('good','DAY 5 MATCH','ASX is making progress','Past ASX Regression Pullbacks did better when they were above the buy price by Day 5.')
+        : v29116Card('warn','SLOW START','ASX is still below your buy price','Past ASX trades were weaker when they started this slowly.','Selling automatically on Day 5 tested worse.'));
+    }
+    if(ticker==='ASX' && day>=10 && day<15){
+      cards.push(gain>=0
+        ? v29116Card('good','DAY 10 MATCH','ASX is above your buy price','Past ASX trades that were positive by Day 10 had a much better record.')
+        : v29116Card('warn','DAY 10 WARNING','ASX is still below your buy price','Past ASX trades struggled more often when they were still negative by Day 10.','Warning only — use the normal exit plan.'));
+    }
+    if(ticker==='TIGO' && day>=5 && day<10){
+      cards.push(gain>=0
+        ? v29116Card('good','DAY 5 MATCH','TIGO is above your buy price','Past TIGO Regression Pullbacks did much better when they were already positive by Day 5.')
+        : v29116Card('warn','SLOW START','TIGO is still below your buy price','Past TIGO trades were less successful when they were still negative by Day 5.','Do not sell just because of this warning.'));
+    }
+    if(ticker==='TIGO' && day>=10 && day<15){
+      cards.push(gain>=0
+        ? v29116Card('good','DAY 10 MATCH','TIGO is above your buy price','In the tested sample, every TIGO trade that was positive by Day 10 finished positive.','History is helpful, not a guarantee.')
+        : v29116Card('warn','DAY 10 WARNING','TIGO is still below your buy price','Past TIGO trades struggled much more often when they were still negative by Day 10.','Warning only — follow the normal trade plan.'));
+    }
+  }
+
+  // TIGO low-volume caution can matter while PREPARING/BUY is being evaluated.
+  if(ticker==='TIGO' && !owned){
+    const rv=v29116Num(relativeVolume(s));
+    if(rv!=null && rv<0.60){
+      cards.push(v29116Card('warn','VERY QUIET VOLUME',`${rv.toFixed(2)}× normal volume`,'TIGO\'s weakest historical group happened when trading volume was unusually quiet.','This does not cancel a valid Regression Pullback BUY.'));
+    }
+  }
+
+  // MTSI: after entry, compare the next-session open/current price with the
+  // 50-day level from around the entry. This is a warning only; the family-wide
+  // study already rejected automatic below-SMA50 selling.
+  if(ticker==='MTSI' && owned && day>=2 && day<=4){
+    const level=v29116EntryDaySma50(s);
+    const op=v29116LatestOpen(s);
+    if(level!=null && op!=null){
+      cards.push(op>=level
+        ? v29116Card('good','RECLAIM IS HOLDING',`Opened above ${money(level)}`,'MTSI historically did better when it kept holding the 50-day level after the BUY.')
+        : v29116Card('warn','RECLAIM UNDER PRESSURE',`Opened below ${money(level)}`,'Past MTSI trades were much weaker when the next session opened back below the reclaimed 50-day level.','Warning only. Automatic selling here tested worse.'));
+    }
+  }
+
+  // Live 30-minute family clues. Only trigger when enough bars exist AND a
+  // meaningful condition is currently visible. These are health/context cards,
+  // never a second entry engine (SMA50 Reclaim keeps its dedicated execution logic).
+  const r=v29112IntradayRead(s,pb);
+  if(r?.has && fam!=='SMA50 Reclaim'){
+    const higher2=v29116HigherSecondLow(r);
+    if(fam==='Momentum'){
+      if(r.buyingFirstHour===true && higher2===true)
+        cards.push(v29116Card('good','MORNING LOOKS HEALTHY','Buyers are taking control','The second 30-minute low held higher and more first-hour volume came on rising bars. Past Momentum trades did better when this happened.'));
+      else if(r.buyingFirstHour===false && higher2===false)
+        cards.push(v29116Card('warn','MORNING LOOKS WEAK','Selling is still in control','The stock made a lower second 30-minute low and selling volume was stronger.','The Daily setup still controls the trade.'));
+    }
+    if(fam==='EMA20 Reclaim'){
+      if(r.buyingFirstHour===true)
+        cards.push(v29116Card('good','BUYERS ARE SHOWING UP','Buying volume is stronger','Past EMA20 Reclaims did better when buyers handled more of the first-hour trading.','Do not wait for this before buying.'));
+      else if(r.buyingFirstHour===false)
+        cards.push(v29116Card('warn','WEAKER MORNING','Selling volume is stronger','Past EMA20 Reclaims were less successful when the first hour looked like this.','Warning only — not a sell signal.'));
+    }
+    if(fam==='Breakout'){
+      if(r.aboveBreakout===true && r.heldMorningLow===true && r.brokeMorningHigh===true)
+        cards.push(v29116Card('good','BREAKOUT IS HOLDING','Price held and pushed higher','The stock stayed above the breakout area, held its morning low, and later moved above the first-hour high. Past Breakouts did better when this happened.'));
+      else if(r.aboveBreakout===false)
+        cards.push(v29116Card('warn','BREAKOUT IS STRUGGLING','Price is back below the breakout level','Past Breakouts were weaker when they could not hold the breakout.','Warning only — use the normal exit plan.'));
+    }
+    if(fam==='Deep Pullback'){
+      if(r.heldMorningLow===true && r.buyingAll===true && r.brokeMorningHigh===true)
+        cards.push(v29116Card('good','BUYERS ARE TAKING CONTROL','The drop is starting to settle','The stock held its morning low, buying volume became stronger, and price later moved above the morning high. Past Deep Pullbacks did better when this happened.'));
+      else if(r.heldMorningLow===false && r.buyingAll===false)
+        cards.push(v29116Card('warn','SELLING IS STILL ACTIVE','The stock is still making lower lows','Selling volume is also stronger. Past Deep Pullbacks had more stop-outs when selling stayed this strong.','Do not sell from this card alone.'));
+    }
+    if(fam==='Regression Pullback'){
+      if(r.brokeMorningHigh===true && r.finalHourPositive===true)
+        cards.push(v29116Card('good','BUYERS STEPPED IN','Price recovered later in the day','The stock moved above its first-hour high and the final hour was positive. Past Regression Pullbacks did better when this happened.'));
+      else if(r.heldMorningLow===false && r.brokeMorningHigh===false)
+        cards.push(v29116Card('warn','SELLING IS STILL ACTIVE','No later-day recovery yet','The stock broke its morning low and has not recovered above the first-hour high.','Regression trades can look ugly. Follow the normal plan.'));
+    }
+  }
+
+  return cards;
+}
+
+function v29116LiveTriggerPanel(s,pb){
+  const cards=v29116LiveTriggers(s,pb);
+  if(!cards.length) return '';
+  return `<div data-v29116-live-trigger="1" style="margin:0 16px 12px;background:${C.card};border:1px solid ${C.teal}55;border-radius:16px;padding:12px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;">
+      <div><div class="v2lbl">HISTORY MATCH RIGHT NOW</div><div style="color:${C.text};font-size:13px;font-weight:900;margin-top:3px;">StockIQ noticed something that mattered in past trades.</div></div>
+      <div style="color:${C.teal};font-size:9px;font-weight:950;border:1px solid ${C.teal}55;background:${C.teal}12;border-radius:999px;padding:4px 7px;white-space:nowrap;">LIVE</div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(${Math.min(3,cards.length)},minmax(0,1fr));gap:7px;">${cards.slice(0,3).join('')}</div>
+    <div style="color:${C.textMuted};font-size:9.5px;line-height:1.4;margin-top:7px;">These cards are reminders only. The normal StockIQ BUY, stop, and exit rules still decide what to do.</div>
+  </div>`;
+}
+
+function v29116InsertAfterWhatToDo(s){
+  const root=document.getElementById('detail-content');
+  if(!root) return;
+  root.querySelectorAll('[data-v29116-live-trigger="1"]').forEach(x=>x.remove());
+  const pb=pbFor(s); if(!pb) return;
+  const html=v29116LiveTriggerPanel(s,pb); if(!html) return;
+  const tmp=document.createElement('div'); tmp.innerHTML=html; const node=tmp.firstElementChild;
+  if(!node) return;
+  // Find the visible WHAT TO DO NOW block. Owned views use it in the first
+  // position card; candidate views use a normal panel a little lower down.
+  let target=null;
+  for(const child of [...root.children]){
+    if(String(child.textContent||'').toUpperCase().includes('WHAT TO DO NOW')){ target=child; break; }
+  }
+  if(target) target.insertAdjacentElement('afterend',node);
+  else root.prepend(node);
+}
+
+const _v29116BaseRenderDetail=renderDetail;
+renderDetail=function(s){
+  _v29116BaseRenderDetail(s);
+  try{ v29116InsertAfterWhatToDo(s); }catch(e){ console.warn('v2.9.116 live-history trigger failed',e); }
+};
+
+const _v29116Version=document.getElementById('stockiq-version');
+if(_v29116Version)_v29116Version.textContent='StockIQ v2.9.116 · Live History Triggers';
+setTimeout(()=>{try{renderHome();if(detailStockId){const s=stocks.find(x=>String(x.id)===String(detailStockId));if(s)renderDetail(s);}}catch(e){console.warn('v2.9.116 refresh failed',e);}},400);
+</script>
+
 </body>
 </html>
