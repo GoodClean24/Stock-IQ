@@ -14191,5 +14191,193 @@ if(_v29116Version)_v29116Version.textContent='StockIQ v2.9.116 · Live History T
 setTimeout(()=>{try{renderHome();if(detailStockId){const s=stocks.find(x=>String(x.id)===String(detailStockId));if(s)renderDetail(s);}}catch(e){console.warn('v2.9.116 refresh failed',e);}},400);
 </script>
 
+<script>
+// ── v2.9.117 AUTOMATIC TICKER INTELLIGENCE ────────────────────────────────
+// Research/display layer only. The engine runs only for PREPARING, BUY/A+ BUY,
+// and BOUGHT stocks. It reconstructs historical setups with the CURRENT family
+// checklist, tests a small fixed set of plain-English tendencies, saves only
+// findings with enough examples, then shows a live card only when the current
+// stock actually matches one of those findings.
+// It NEVER changes BUY, PREPARING, stop, exit, sizing, re-entry, or ownership.
+
+const V29117_KEY='stockiq_auto_ticker_intelligence_v1';
+let V29117_CACHE={};
+function v29117Load(){ try{V29117_CACHE=JSON.parse(localStorage.getItem(V29117_KEY)||'{}')||{};}catch(e){V29117_CACHE={};} }
+function v29117Save(){ try{localStorage.setItem(V29117_KEY,JSON.stringify(V29117_CACHE));}catch(e){console.warn('Ticker intelligence save failed',e);} }
+v29117Load();
+
+function v29117Num(sn,...keys){ for(const k of keys){ const v=sn?.[k]; if(v!=null&&Number.isFinite(Number(v))) return Number(v); } return null; }
+function v29117Pseudo(s,snaps,i){
+  const sn=snaps[i]||{};
+  return {...s,position:null,intradayEntryArm:null,intradayEntrySignal:null,intradayBars:[],snapshots:snaps.slice(0,i+1),
+    price:v29117Num(sn,'price','close','Close'),rsi:v29117Num(sn,'rsi','RSI14'),vol:v29117Num(sn,'vol','volume','Volume'),avgvol:v29117Num(sn,'avgvol','AvgVol20'),
+    ma20:v29117Num(sn,'ma20','ema20','EMA20'),ema20:v29117Num(sn,'ema20','ma20','EMA20'),ma50:v29117Num(sn,'ma50','SMA50'),ma200:v29117Num(sn,'ma200','SMA200'),
+    atr:v29117Num(sn,'atr','ATR14','ATR14_Wilder'),macdLine:v29117Num(sn,'macdLine','MACD'),signalLine:v29117Num(sn,'signalLine','MACDSignal','MACD_Signal'),
+    hi52:v29117Num(sn,'hi52','High52W'),regZ126:v29117Num(sn,'regZ126','RegZ126'),regSlope126:v29117Num(sn,'regSlope126','RegSlope126'),
+    analyzed:sn.date||s.analyzed};
+}
+function v29117SetupReady(s,snaps,i){
+  if(i<5) return false;
+  try{
+    const q=v29117Pseudo(s,snaps,i), checks=setupChecks(q), req=checks.filter(x=>x.required);
+    return req.length>0 && req.every(x=>x.ok);
+  }catch(e){ return false; }
+}
+function v29117History(s){
+  return (s?.snapshots||[]).filter(x=>x&&x.date&&v29117Num(x,'price','close','Close')!=null).slice().sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+}
+function v29117Replay(s){
+  const a=v29117History(s), pb=pbFor(s)||{}, hold=Math.max(10,Math.min(25,Number(pb.maxHold||pb.hold||20))), stopPct=Number(pb.stopPct||12);
+  const trades=[]; let blockedUntil=-1;
+  for(let i=1;i<a.length-2;i++){
+    if(i<=blockedUntil || !v29117SetupReady(s,a,i)) continue;
+    // Fresh signal only: don't count every consecutive day of the same setup.
+    if(v29117SetupReady(s,a,i-1)) continue;
+    const entryIdx=i+1, entry=v29117Num(a[entryIdx],'open','Open') ?? v29117Num(a[entryIdx],'price','close','Close');
+    if(!(entry>0)) continue;
+    const end=Math.min(a.length-1,entryIdx+hold); let exitIdx=end, exit=v29117Num(a[end],'price','close','Close')||entry, stopped=false;
+    const hardStop=entry*(1-stopPct/100);
+    for(let j=entryIdx;j<=end;j++){
+      const lo=v29117Num(a[j],'low','Low') ?? v29117Num(a[j],'price','close','Close');
+      if(lo!=null && lo<=hardStop){ exitIdx=j; exit=hardStop; stopped=true; break; }
+    }
+    const sn=a[i], prev=a[i-1];
+    const p=v29117Num(sn,'price','close','Close'), pprev=v29117Num(prev,'price','close','Close'), m50=v29117Num(sn,'ma50','SMA50');
+    const rv=(()=>{const v=v29117Num(sn,'vol','volume','Volume'),av=v29117Num(sn,'avgvol','AvgVol20');return v!=null&&av? v/av:null;})();
+    const dayMove=(p&&pprev)?(p/pprev-1)*100:null;
+    const day5=(entryIdx+5<a.length && v29117Num(a[entryIdx+5],'price','close','Close')!=null)?(v29117Num(a[entryIdx+5],'price','close','Close')/entry-1)*100:null;
+    const day10=(entryIdx+10<a.length && v29117Num(a[entryIdx+10],'price','close','Close')!=null)?(v29117Num(a[entryIdx+10],'price','close','Close')/entry-1)*100:null;
+    trades.push({signalDate:sn.date,entryDate:a[entryIdx]?.date,entry,ret:(exit/entry-1)*100,win:exit>entry,stopped,
+      rsi:v29117Num(sn,'rsi','RSI14'),rv,dist50:(p&&m50)?(p/m50-1)*100:null,dayMove,regZ:v29117Num(sn,'regZ126','RegZ126'),day5,day10});
+    blockedUntil=exitIdx;
+  }
+  return {trades,bars:a.length,from:a[0]?.date||null,to:a[a.length-1]?.date||null};
+}
+function v29117Stats(rows){
+  const n=rows.length;if(!n)return null; const wins=rows.filter(x=>x.win).length, avg=rows.reduce((a,x)=>a+x.ret,0)/n, stops=rows.filter(x=>x.stopped).length;
+  return {n,win:wins/n*100,avg,stop:stops/n*100};
+}
+function v29117SplitFinding(trades,id,label,matchFn,currentFn,plainGood,plainWarn){
+  const yes=trades.filter(matchFn), no=trades.filter(x=>!matchFn(x)), ys=v29117Stats(yes), ns=v29117Stats(no);
+  if(!ys||!ns||ys.n<5||ns.n<5) return null;
+  const winGap=ys.win-ns.win, avgGap=ys.avg-ns.avg;
+  // Require a real separation. This deliberately rejects weak bucket noise.
+  if(winGap<10 && avgGap<2.0) return null;
+  return {id,label,n:ys.n,win:ys.win,avg:ys.avg,compareN:ns.n,compareWin:ns.win,compareAvg:ns.avg,currentFn,plainGood,plainWarn,score:Math.max(winGap,0)+Math.max(avgGap,0)*3};
+}
+function v29117Analyze(s,force=false){
+  const st=safeStockState(s)?.state||'', active=['PREPARING','BUY','A+ BUY','BOUGHT'].includes(st)||hasOpenPosition(s);
+  if(!active) return null;
+  const fam=v29112FamilyName(s,pbFor(s)), a=v29117History(s), sig=`${fam}|${a.length}|${a[a.length-1]?.date||''}`;
+  const old=V29117_CACHE[String(s.ticker||'').toUpperCase()]; if(!force&&old?.sig===sig) return old;
+  const replay=v29117Replay(s), t=replay.trades;
+  const result={ticker:String(s.ticker||'').toUpperCase(),family:fam,sig,bars:replay.bars,trades:t.length,findings:[],updated:today()};
+  // 8 total trades is the absolute minimum; under that, ticker-specific discovery stays OFF.
+  if(t.length<8){ result.status='NOT_ENOUGH_HISTORY'; V29117_CACHE[result.ticker]=result;v29117Save();return result; }
+  const f=[];
+  const add=x=>{if(x)f.push(x)};
+  add(v29117SplitFinding(t,'rsi40_45','RSI 40–45',x=>x.rsi!=null&&x.rsi>=40&&x.rsi<45,
+    q=>{const r=curVal(q,'rsi');return r!=null&&r>=40&&r<45;},'RSI is in this stock’s stronger historical range.','RSI is outside the range that worked better before.'));
+  add(v29117SplitFinding(t,'near50','Close to the 50-day average',x=>x.dist50!=null&&x.dist50>=-5&&x.dist50<=5,
+    q=>{const p=curVal(q,'price'),m=curVal(q,'ma50');return p&&m&&Math.abs((p/m-1)*100)<=5;},'Price is close to the 50-day average — a stronger area in this stock’s past setups.','Price is farther from the 50-day average than this stock’s better past setups.'));
+  add(v29117SplitFinding(t,'rvol06','Volume at least 0.6× normal',x=>x.rv!=null&&x.rv>=0.6,
+    q=>{const rv=relativeVolume(q);return rv!=null&&rv>=0.6;},'Trading volume is in the stronger historical range for this stock.','Trading volume is unusually quiet compared with this stock’s better past setups.'));
+  add(v29117SplitFinding(t,'red_day','Red setup day',x=>x.dayMove!=null&&x.dayMove<0,
+    q=>{const p=curVal(q,'price'),pr=prevSnap(q);const pp=snapVal(pr,'price','close');return p&&pp?p<pp:false;},'A red day has been normal in this stock’s better past setups.','This stock does not need a red day; follow the normal family plan.'));
+  add(v29117SplitFinding(t,'reg_pullback','Lower regression area',x=>x.regZ!=null&&x.regZ>=-2.5&&x.regZ<=-0.5,
+    q=>{const z=regressionStats(q).z;return z!=null&&z>=-2.5&&z<=-0.5;},'Price is in the regression area that worked better in this stock’s past setups.','Price is outside this stock’s stronger regression area.'));
+  add(v29117SplitFinding(t,'day5_positive','Positive by Day 5',x=>x.day5!=null&&x.day5>0,
+    q=>hasOpenPosition(q)&&positionDays(q)>=5&&displayPrice(q)>q.position.entry,'You are above your buy price by Day 5. Past trades did better when this happened.','This stock is still below your buy price on Day 5. Past trades struggled more often when this happened.'));
+  add(v29117SplitFinding(t,'day10_positive','Positive by Day 10',x=>x.day10!=null&&x.day10>0,
+    q=>hasOpenPosition(q)&&positionDays(q)>=10&&displayPrice(q)>q.position.entry,'You are above your buy price by Day 10. Past trades did better when this happened.','This stock is still below your buy price on Day 10. Past trades struggled more often when this happened.'));
+  result.findings=f.sort((a,b)=>b.score-a.score).slice(0,3).map(x=>({id:x.id,label:x.label,n:x.n,win:x.win,avg:x.avg,compareN:x.compareN,compareWin:x.compareWin,compareAvg:x.compareAvg,score:x.score}));
+  result.status=result.findings.length?'READY':'NO_STRONG_PATTERN';
+  V29117_CACHE[result.ticker]=result;v29117Save();return result;
+}
+function v29117CurrentMatch(s,id){
+  if(id==='rsi40_45'){const r=curVal(s,'rsi');return r!=null&&r>=40&&r<45;}
+  if(id==='near50'){const p=curVal(s,'price'),m=curVal(s,'ma50');return p&&m&&Math.abs((p/m-1)*100)<=5;}
+  if(id==='rvol06'){const rv=relativeVolume(s);return rv!=null&&rv>=0.6;}
+  if(id==='red_day'){const p=curVal(s,'price'),pp=snapVal(prevSnap(s),'price','close');return p&&pp?p<pp:false;}
+  if(id==='reg_pullback'){const z=regressionStats(s).z;return z!=null&&z>=-2.5&&z<=-0.5;}
+  if(id==='day5_positive')return hasOpenPosition(s)&&positionDays(s)>=5&&displayPrice(s)>s.position.entry;
+  if(id==='day10_positive')return hasOpenPosition(s)&&positionDays(s)>=10&&displayPrice(s)>s.position.entry;
+  return false;
+}
+function v29117Plain(id,match){
+  const m={
+    rsi40_45:['RSI IS IN A GOOD PAST RANGE','RSI is now in a range where this stock’s past setups did better.'],
+    near50:['PRICE IS IN A GOOD PAST AREA','Price is close to the 50-day average, where this stock’s past setups did better.'],
+    rvol06:['VOLUME LOOKS HEALTHIER','Trading volume is strong enough to match this stock’s better past setups.'],
+    red_day:['A RED DAY HAS BEEN NORMAL','This stock has still done well when the setup happened on a red day.'],
+    reg_pullback:['PRICE IS IN A GOOD PULLBACK AREA','Price is in a pullback area where this stock’s past setups did better.'],
+    day5_positive:['DAY 5 LOOKS GOOD','You are above your buy price by Day 5. Past trades did better when this happened.'],
+    day10_positive:['DAY 10 LOOKS GOOD','You are above your buy price by Day 10. Past trades did better when this happened.']
+  };
+  return m[id]||['HISTORY MATCH','This stock just matched one of its stronger historical patterns.'];
+}
+function v29117AutoCards(s){
+  const rec=v29117Analyze(s); if(!rec||rec.status!=='READY')return [];
+  const cards=[];
+  for(const f of rec.findings){
+    if(!v29117CurrentMatch(s,f.id)) continue;
+    const [title,msg]=v29117Plain(f.id,true);
+    cards.push(v29116Card('good',title,msg,`${Math.round(f.win)}% of ${f.n} matching past setups finished positive.`, 'History clue only — the normal trade plan still controls.'));
+  }
+  // Negative Day 5 / Day 10 triggers are useful too, but only if that exact
+  // historical split earned a saved finding.
+  for(const f of rec.findings){
+    if(f.id==='day5_positive'&&hasOpenPosition(s)&&positionDays(s)>=5&&positionDays(s)<10&&displayPrice(s)<=s.position.entry)
+      cards.push(v29116Card('warn','DAY 5 IS RUNNING SLOW','You are still below your buy price','Past trades were weaker when this stock was still negative by Day 5.','Warning only — do not sell from this card alone.'));
+    if(f.id==='day10_positive'&&hasOpenPosition(s)&&positionDays(s)>=10&&displayPrice(s)<=s.position.entry)
+      cards.push(v29116Card('warn','DAY 10 IS RUNNING SLOW','You are still below your buy price','Past trades were weaker when this stock was still negative by Day 10.','Warning only — follow the normal exit plan.'));
+  }
+  return cards.slice(0,2);
+}
+
+// Add automatic ticker findings to the existing live-trigger section.
+const _v29117BaseLiveTriggers=v29116LiveTriggers;
+v29116LiveTriggers=function(s,pb){
+  const base=_v29117BaseLiveTriggers(s,pb)||[];
+  let auto=[];try{auto=v29117AutoCards(s)||[];}catch(e){console.warn('Automatic ticker analysis failed',s?.ticker,e);}
+  return [...auto,...base].slice(0,3);
+};
+
+// Small visual status card in THIS STOCK'S HISTORY. It tells the user whether
+// StockIQ found enough evidence without dumping research text on the page.
+function v29117StatusPanel(s){
+  const st=safeStockState(s)?.state||''; if(!(['PREPARING','BUY','A+ BUY','BOUGHT'].includes(st)||hasOpenPosition(s)))return '';
+  const r=v29117Analyze(s); if(!r)return '';
+  let color=C.textMuted,title='USING FAMILY HISTORY',msg='There is not enough ticker history to trust a stock-specific pattern yet.';
+  if(r.status==='READY'){color=C.teal;title='STOCK HISTORY READY';msg=`StockIQ found ${r.findings.length} useful pattern${r.findings.length===1?'':'s'} from ${r.trades} past setup trades. It will only show one when it happens.`;}
+  else if(r.status==='NO_STRONG_PATTERN'){color=C.textSub;title='NO STRONG STOCK PATTERN';msg=`StockIQ checked ${r.trades} past setups but did not find a strong enough ticker-specific pattern. The family plan stays in charge.`;}
+  else if(r.status==='NOT_ENOUGH_HISTORY'){color=C.textMuted;title='NOT ENOUGH STOCK HISTORY';msg=`Only ${r.trades} usable past setups were found. StockIQ will use the family research instead.`;}
+  return `<div data-v29117-status="1" style="margin:0 16px 10px;border:1px solid ${color}55;background:${C.cardHigh};border-radius:12px;padding:9px 11px;display:flex;justify-content:space-between;gap:10px;align-items:center;"><div><div style="color:${color};font-size:9px;font-weight:950;letter-spacing:.07em;">${title}</div><div style="color:${C.textSub};font-size:10.5px;line-height:1.4;margin-top:3px;">${msg}</div></div><div style="color:${color};font-size:9px;font-weight:950;white-space:nowrap;">AUTO</div></div>`;
+}
+function v29117InsertStatus(s){
+  const root=document.getElementById('detail-content');if(!root)return;root.querySelectorAll('[data-v29117-status="1"]').forEach(x=>x.remove());
+  const html=v29117StatusPanel(s);if(!html)return;const tmp=document.createElement('div');tmp.innerHTML=html;const node=tmp.firstElementChild;if(!node)return;
+  // Put it near the first stock-history/live-history area, otherwise below WHAT TO DO NOW.
+  let target=[...root.children].find(x=>String(x.textContent||'').toUpperCase().includes("THIS STOCK'S HISTORY"));
+  if(!target) target=[...root.children].find(x=>String(x.textContent||'').toUpperCase().includes('WHAT TO DO NOW'));
+  if(target)target.insertAdjacentElement('afterend',node);else root.prepend(node);
+}
+
+const _v29117BaseRenderDetail=renderDetail;
+renderDetail=function(s){
+  _v29117BaseRenderDetail(s);
+  try{v29117InsertStatus(s);}catch(e){console.warn('v2.9.117 status failed',e);}
+};
+
+// Re-check actionable names after every render/update. Cached results mean this
+// is cheap unless new Daily history has actually arrived.
+function v29117RefreshActionable(){
+  try{for(const s of stocks){const st=safeStockState(s)?.state||'';if(['PREPARING','BUY','A+ BUY','BOUGHT'].includes(st)||hasOpenPosition(s))v29117Analyze(s);}}catch(e){console.warn('Ticker intelligence refresh failed',e);}
+}
+const _v29117Version=document.getElementById('stockiq-version');
+if(_v29117Version)_v29117Version.textContent='StockIQ v2.9.117 · Automatic Ticker Intelligence';
+setTimeout(()=>{try{v29117RefreshActionable();renderHome();if(detailStockId){const s=stocks.find(x=>String(x.id)===String(detailStockId));if(s)renderDetail(s);}}catch(e){console.warn('v2.9.117 refresh failed',e);}},500);
+</script>
+
 </body>
 </html>
