@@ -733,15 +733,18 @@ function splitBudget(budget, count) {
 // review; starred stocks still float to the top regardless, since that's
 // an explicit user signal the ranking engine doesn't try to second-guess.
 function getRanked() {
-  const rankMap = new Map(computeOpportunityRanking(stocks).map(item => [String(item.s.id), item]));
-  return [...stocks].sort((a,b) => {
+  // Single ranking authority. Market rows and archived rows do not participate
+  // in the opportunity list; starred remains an explicit user override.
+  const eligible = (stocks||[]).filter(s=>!isMarketStock(s) && !s.archived);
+  const rankMap = new Map(computeOpportunityRanking(eligible).map(item => [String(item.s.id), item]));
+  return [...eligible].sort((a,b) => {
     if(a.starred&&!b.starred) return -1;
     if(!a.starred&&b.starred) return 1;
     const itemA = rankMap.get(String(a.id)), itemB = rankMap.get(String(b.id));
     if(itemA && itemB) return compareOpportunityRank(itemA, itemB);
     if(itemA) return -1;
     if(itemB) return 1;
-    return 0;
+    return String(a.ticker||'').localeCompare(String(b.ticker||''));
   });
 }
 
@@ -1773,13 +1776,20 @@ function openDetail(id) {
 // the 4-point setup check, and the trade plan — every row tappable for a
 // plain-language explainer that uses THIS stock's live numbers.
 function planNumbers(s){
-  const entry=s.price, atr=s.atr;
-  const riskPerShare=(atr!=null)?2*atr:null;
+  // Tier 1 / Fix #2: one sizing authority everywhere.
+  // Normal StockIQ sizing = 0.75% planned account risk using THIS family's
+  // validated emergency-stop percentage. The old 1% + 2×ATR sizing path is gone.
+  const entry=Number(s?.price||0) || null;
+  const atr=Number(s?.atr||0) || null;
+  const pb=pbFor(s);
+  const stopPct=Number(pb?.stopPct||0) || null;
+  const riskPerShare=(entry!=null&&stopPct!=null)?entry*(stopPct/100):null;
   const stop=(entry!=null&&riskPerShare!=null)?entry-riskPerShare:null;
   const trailDist=(atr!=null)?3*atr:null;
-  const riskDollars=accountSize>0 ? accountSize*0.01 : null;
-  const shares=(riskDollars!=null && riskPerShare)? riskDollars/riskPerShare : null;
-  return {entry, atr, riskPerShare, stop, trailDist, riskDollars, shares};
+  const riskPct=evidenceRiskPct(s); // locked normal risk = 0.75%
+  const riskDollars=accountSize>0 ? accountSize*(riskPct/100) : null;
+  const shares=(riskDollars!=null && riskPerShare>0)?riskDollars/riskPerShare:null;
+  return {entry, atr, stopPct, riskPct, riskPerShare, stop, trailDist, riskDollars, shares};
 }
 // Live-number explainer text. Each returns a short, plain paragraph.
 const LEARN = {
@@ -1813,11 +1823,11 @@ const LEARN = {
   vol:(s)=>{const r=(s.vol!=null&&s.avgvol)?s.vol/s.avgvol:null; return `Volume at or above the 20-day average tells you people are actually stepping back in, not just watching it fall on thin trading. Yours is ${r!=null?r.toFixed(2)+'x':'—'} the 20-day average.`;},
   macd:(s)=>{const up=(s.macdLine!=null&&s.signalLine!=null)?s.macdLine>s.signalLine:null; return `MACD crossing up means short-term momentum just turned positive — the trigger that says \u201cnow,\u201d not \u201csomeday.\u201d Right now MACD is ${up===null?'unknown':(up?'above':'below')} its signal line.`;},
   entry:(s)=>{const p=planNumbers(s); if(getStrategyFor(s)==='Dip Buy') return `Buy at or near the current price, ${fmtP(p.entry)}. This strategy is built to catch the pullback itself — the dip is the entry, not a reason to wait for more.`; return `Buy at or near the current price, ${fmtP(p.entry)}. We don\u2019t wait for a lower price — the backtests showed waiting for a dip missed the best trades and kept the weak ones.`;},
-  stop:(s)=>{const p=planNumbers(s); return `Your bail-out price. If it falls to ${p.stop!=null?fmtP(p.stop):'—'} you sell, no debating it. It sits 2 ATR (about ${p.riskPerShare!=null?fmtP(p.riskPerShare):'—'} a share) below entry — far enough that normal daily wiggle won\u2019t hit it, close enough that a real breakdown does.`;},
+  stop:(s)=>{const p=planNumbers(s); return `Your bail-out price. If it falls to ${p.stop!=null?fmtP(p.stop):'—'} you sell, no debating it. This setup uses a ${p.stopPct!=null?p.stopPct.toFixed(1)+'%':'family'} emergency stop — about ${p.riskPerShare!=null?fmtP(p.riskPerShare):'—'} of risk per share.`;},
   exit:(s)=>{const p=planNumbers(s); const d=p.trailDist; return `How you leave a winner. No fixed target — as the stock climbs, this trails ${d!=null?fmtP(d):'—'} (3× ATR) below its highest point, and never drops. Example: buy at ${fmtP(s.price)}; if it runs to ${d!=null?fmtP(s.price+8* (d/3)):'—'}, your exit has ridden up to ${d!=null?fmtP(s.price+8*(d/3)-d):'—'}. You only sell when it falls ${d!=null?fmtP(d):'that much'} from its peak — so a winner runs instead of getting capped.`;},
   size:(s)=>{const p=planNumbers(s); return accountSize>0
-    ? `How many shares, sized so you risk 1% of your capital — ${fmtP(p.riskDollars)} on this trade. Divided by your ${p.riskPerShare!=null?fmtP(p.riskPerShare):'—'}-a-share stop, that\u2019s about ${p.shares!=null?p.shares.toFixed(1):'—'} shares (fractional is fine).`
-    : `Set your risk size and the app sizes every trade to risk 1% of it. The stop here is ${p.riskPerShare!=null?fmtP(p.riskPerShare):'—'} a share, so risking $100 would be about ${p.riskPerShare?(100/p.riskPerShare).toFixed(1):'—'} shares.`;},
+    ? `How many shares, sized so you plan to risk 0.75% of your capital — ${fmtP(p.riskDollars)} on this trade. Divided by your ${p.riskPerShare!=null?fmtP(p.riskPerShare):'—'}-a-share family stop, that\u2019s about ${p.shares!=null?p.shares.toFixed(1):'—'} shares (fractional is fine).`
+    : `Set your trading capital and the app sizes each normal trade at 0.75% planned account risk using this setup’s family stop. The stop risk here is ${p.riskPerShare!=null?fmtP(p.riskPerShare):'—'} per share.`;},
 };
 function showLearn(key, sid){
   const s=(stocks||[]).find(x=>String(x.id)===String(sid)); if(!s||!LEARN[key])return;
@@ -2510,9 +2520,9 @@ function riskRewardHTML(s){
   if(p.riskPerShare==null || !s.price) return '';
   const heldPos = s.position || null;
   const price = s.price;
-  const stopPS = p.riskPerShare;                 // 2×ATR per share
+  const stopPS = p.riskPerShare;                 // family stop risk per share
   const stopPrice = price - stopPS;
-  const recInvest = (p.shares!=null) ? p.shares*price : null;   // 1%-risk suggested $
+  const recInvest = (p.shares!=null) ? p.shares*price : null;   // 0.75%-risk suggested $
   const invest = heldPos ? heldPos.shares*heldPos.entry : (s.plannedInvest || recInvest || 0);
   const shares = heldPos ? heldPos.shares : (invest>0 ? invest/price : null);
   const curValue = shares!=null ? shares*price : 0;             // basis for forward climb
@@ -2532,8 +2542,8 @@ function riskRewardHTML(s){
        <span style="color:${C.green};font-size:14px;font-weight:800;">+${fmtP(curValue*pct/100)}</span>
      </div>`;
   const recHint = accountSize>0
-    ? `<div style="font-size:11px;color:#8FE0B8;margin-bottom:8px;">${(recInvest!=null && Math.abs((s.plannedInvest||recInvest)-recInvest)>1)?`Suggested size (1% risk) <button onclick="setPlannedInvest('${s.id}','${recInvest.toFixed(0)}')" style="all:unset;color:${C.green};font-weight:700;cursor:pointer;">${fmtP(recInvest)} →</button>`:''}</div>`
-    : `<div style="font-size:11px;color:#E8B45C;margin-bottom:8px;"><button onclick="setAccountSize()" style="all:unset;color:${C.green};font-weight:700;cursor:pointer;">Set risk size</button> to get the 1%-risk recommendation.</div>`;
+    ? `<div style="font-size:11px;color:#8FE0B8;margin-bottom:8px;">${(recInvest!=null && Math.abs((s.plannedInvest||recInvest)-recInvest)>1)?`Suggested size (0.75% risk) <button onclick="setPlannedInvest('${s.id}','${recInvest.toFixed(0)}')" style="all:unset;color:${C.green};font-weight:700;cursor:pointer;">${fmtP(recInvest)} →</button>`:''}</div>`
+    : `<div style="font-size:11px;color:#E8B45C;margin-bottom:8px;"><button onclick="setAccountSize()" style="all:unset;color:${C.green};font-weight:700;cursor:pointer;">Set risk size</button> to get the 0.75%-risk recommendation.</div>`;
   return `
    <div style="color:#AEB4C2;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;margin:18px 0 8px;">Risk &amp; reward</div>
    <div style="background:${C.cardHigh};border-radius:12px;padding:14px;">
@@ -2559,7 +2569,7 @@ function riskRewardHTML(s){
          ${line('Sell at', fmtP(stopPrice))}
          ${line('You lose', fmtP(riskTotal), C.red)}
          ${riskPctInv!=null?line('That\u2019s of your '+fmtP(invest), riskPctInv.toFixed(1)+'%', C.textSub):''}
-         ${riskPctAcct!=null&&riskPctAcct>1.5?`<div style="color:${C.yellow};font-size:11.5px;line-height:1.5;margin-top:6px;">Heads up — that's ${riskPctAcct.toFixed(1)}% of your risk size, more than the 1% guide.</div>`:''}
+         ${riskPctAcct!=null&&riskPctAcct>(p.riskPct+0.05)?`<div style="color:${C.yellow};font-size:11.5px;line-height:1.5;margin-top:6px;">Heads up — that's ${riskPctAcct.toFixed(2)}% of your account, above the normal ${p.riskPct.toFixed(2)}% planned-risk level.</div>`:''}
        </div>`}
      ` : ''}
    </div>
@@ -2641,7 +2651,7 @@ function openSimpleMentor(id){
       : `<div style="color:#C7CCD8;font-size:12.5px;line-height:1.75;">
           <b style="color:${C.text};">1. Get in.</b> ${strategy==='Dip Buy' ? `Buy near ${fmtP(p.entry)}, at market. This is the pullback itself — that's the entry, not a reason to wait for more.` : `Buy near ${fmtP(p.entry)}, at market. Don\u2019t wait for a dip — the good ones don\u2019t come back.`}<br>
           <b style="color:${C.text};">2. Set your stop.</b> ${p.stop!=null?fmtP(p.stop):'—'}. If it falls here, you\u2019re out, no debate. That\u2019s ${p.riskPerShare!=null?fmtP(p.riskPerShare):'—'} of risk per share.<br>
-          <b style="color:${C.text};">3. Size it.</b> ${accountSize>0?`About ${p.shares!=null?p.shares.toFixed(1):'—'} shares — that keeps risk to 1%.`:'Set your risk size and the app gives you the exact share count (1% risk).'}<br>
+          <b style="color:${C.text};">3. Size it.</b> ${accountSize>0?`About ${p.shares!=null?p.shares.toFixed(1):'—'} shares — that keeps planned risk to 0.75%.`:'Set your trading capital and the app gives you the exact share count (0.75% planned risk).'}<br>
           <b style="color:${C.text};">4. Let it run.</b> Use a trailing exit ${p.trailDist!=null?fmtP(p.trailDist):'—'} (3× ATR) below the highest price it reaches. As it climbs, that exit climbs with it and never drops. You only sell when it falls ${p.trailDist!=null?fmtP(p.trailDist):'that much'} from its peak — so a winner runs instead of getting capped.
         </div>`;
   }
@@ -5912,6 +5922,21 @@ const ENTRY_QUALITY_RANK = {'Excellent':3, 'Acceptable':2, 'Poor':1, 'Unavailabl
 const CONVICTION_RANK_MAP = {'High':3, 'Moderate':2, 'Low':1, 'Insufficient Evidence':0};
 const MS_STRENGTH_RANK = {Strong:3, Moderate:2, Weak:1, Unknown:0};
 
+// Modern evidence strength used by the live Opportunity Ranking Engine.
+// This is intentionally separate from computeConviction(): conviction describes
+// today's chart/market evidence; this tier describes the historical evidence for
+// the ticker + setup. Readiness still ranks first, then evidence strength.
+function modernEvidenceRank(s){
+  const pb = pbFor(s)||{};
+  const label = String(modernEvidenceLabel(s,pb)||'').trim().toUpperCase().replace(/_/g,' ').replace(/\s+/g,' ');
+  if(label==='PROVEN') return 4;
+  if(label==='HIGH') return 3;
+  if(label==='VALIDATED') return 2;
+  if(label==='VALIDATED RESEARCH') return 1;
+  // Legacy/other labels do not outrank a modern evidence class.
+  return 0;
+}
+
 function computeOpportunityRankItem(s) {
   const type = s.type;
   const opp = computeOpportunityStatus(s, type);
@@ -5924,17 +5949,22 @@ function computeOpportunityRankItem(s) {
     s, opp, conviction, aiSignal, ms, eliminated,
     oppRank: OPP_STATUS_RANK[opp.status] ?? 0,
     eqRank: ENTRY_QUALITY_RANK[opp.eq.quality] ?? 0,
+    evidenceRank: modernEvidenceRank(s),
     convRank: CONVICTION_RANK_MAP[conviction.level] ?? 0,
     aiRank: aiSignal.rank,
     msStrength: mapStateToStrength(ms.state),
   };
 }
-// Stage 2 — decision tree, not a weighted score. Ties break on Market State
-// strength, then liquidity, then ticker — never on reward:risk.
+// Stage 2 — decision tree, not a weighted score.
+// Priority: Opportunity Status > Entry Quality > Historical Evidence >
+// Current Conviction > AI Research > Market State > Liquidity > Ticker.
+// Evidence is a tie-breaker among similarly ready opportunities; it does not
+// turn a WAIT into a BUY or change any trading rule.
 function compareOpportunityRank(a, b) {
   if(a.eliminated!==b.eliminated) return a.eliminated ? 1 : -1;
   if(b.oppRank!==a.oppRank) return b.oppRank-a.oppRank;
   if(b.eqRank!==a.eqRank) return b.eqRank-a.eqRank;
+  if(b.evidenceRank!==a.evidenceRank) return b.evidenceRank-a.evidenceRank;
   if(b.convRank!==a.convRank) return b.convRank-a.convRank;
   if(b.aiRank!==a.aiRank) return b.aiRank-a.aiRank;
   const msA = MS_STRENGTH_RANK[a.msStrength]||0, msB = MS_STRENGTH_RANK[b.msStrength]||0;
@@ -8268,6 +8298,140 @@ const PLAYBOOKS = {
   PBF:{name:'Momentum',family:'MOMENTUM',tier:'BENCH',confidence:'VALIDATED · LEGACY',hold:20,maxHold:25,stopPct:12,cluster:'Energy',market:'XLE',earnings:'WAIT FOR REACTION',stats:{trades:24,win:67,avg:4.5,drawdown:'Recent > older',worst:'Wider downside'},teach:'Legacy validated playbook retained so an existing PBF position remains fully managed. It is not automatically in the current qualified universe.'},
 };
 
+// ── v2.9.127 · 6.8 GRADUATION RULE ENFORCEMENT ───────────────────────
+// ═══════════════════════════════════════════════════════════════════════
+// 6.8 GRADUATION RULE ENFORCEMENT — punch-list item 10
+// ═══════════════════════════════════════════════════════════════════════
+// Purpose: prevent a Core-11-style repeat. No ticker gets ticker-specific
+// tuning (custom stopPct, hold, regRange, or rsi band that differs from
+// its family's generic default) unless it has enough trade evidence to
+// support it. Mirrors the exact floor stockiq_validation_engine_v1_4.py
+// already uses at the family-parameter level (robustness(): `enough=[x for
+// x in vals if x[0]['n']>=8]`), applied here per-ticker instead.
+//
+// SCOPE — READ THIS BEFORE TRUSTING WHAT THIS DOES AND DOESN'T CATCH:
+// This is a SAMPLE-SIZE floor, not a reproducibility check. It answers
+// "is there enough evidence to support this many free parameters at all,"
+// not "is the reported number actually correct." Those are different
+// problems. TIGO (28 trades reported) and MTSI (20 trades reported) both
+// had PLENTY of stated trades — their problem, found in Section 6.2/6.5 of
+// the audit, was that the reported win rate didn't reproduce even under
+// the app's own current methodology, not that the sample was too thin.
+// That failure mode requires re-running a ticker through the actual
+// validation engine and comparing results — this code cannot detect it
+// and should never be described as if it does. What this DOES prevent:
+// a brand-new ticker getting hand-tuned parameters from a tiny sample
+// going forward, which is a real and distinct risk this rule closes.
+// ═══════════════════════════════════════════════════════════════════════
+
+// Generic family defaults — taken directly from FAMILIES in
+// stockiq_validation_engine_v1_4.py, confirmed unchanged by the
+// SOURCE_FAMILY_MAP fix earlier in this audit. stopPct here is stored as
+// a percentage number (14 = 14%) to match how PLAYBOOKS entries store it;
+// the engine's own `stop` field is a fraction (0.14), converted below.
+const GENERIC_FAMILY_DEFAULTS = {
+  REG_PULLBACK:  { hold: 20, stopPct: 10 },
+  MOMENTUM:      { hold: 20, stopPct: 12 },
+  EMA20_RECLAIM: { hold: 14, stopPct: 10 },
+  SMA50_RECLAIM: { hold: 14, stopPct: 10 },
+  DEEP_PULLBACK: { hold: 20, stopPct: 12 },
+  BREAKOUT:      { hold: 20, stopPct: 12 },
+};
+
+// The 11 original Core tickers (and a few older BENCH entries) store a
+// human-readable `name` instead of the machine `family` key newer BENCH
+// entries use. This maps both spellings seen in the actual file to the
+// correct family key so they can be checked against the same table above.
+const PLAYBOOK_NAME_TO_FAMILY = {
+  'regression pullback': 'REG_PULLBACK',
+  '50-day reclaim': 'SMA50_RECLAIM',
+  'sma50 reclaim': 'SMA50_RECLAIM',
+  'ema20 reclaim': 'EMA20_RECLAIM',
+  'momentum continuation': 'MOMENTUM',
+  'momentum': 'MOMENTUM',
+  'deep pullback': 'DEEP_PULLBACK',
+  'breakout': 'BREAKOUT',
+};
+
+const MIN_TRADES_FOR_TICKER_TUNING = 8; // same floor as robustness() in the engine
+
+function resolvePlaybookFamily(pb){
+  if(!pb) return null;
+  if(pb.family && GENERIC_FAMILY_DEFAULTS[pb.family]) return pb.family;
+  const key = String(pb.name||'').trim().toLowerCase();
+  return PLAYBOOK_NAME_TO_FAMILY[key] || null;
+}
+
+// Returns every parameter where this ticker's own playbook differs from
+// its family's generic default. Empty array = nothing to justify — this
+// entry is effectively already running the generic rule.
+function tickerSpecificDeviations(pb, family){
+  const generic = GENERIC_FAMILY_DEFAULTS[family];
+  if(!generic) return null;
+  const deviations = [];
+  if(typeof pb.hold === 'number' && pb.hold !== generic.hold){
+    deviations.push({ param: 'hold', tickerValue: pb.hold, genericValue: generic.hold });
+  }
+  if(typeof pb.stopPct === 'number' && pb.stopPct !== generic.stopPct){
+    deviations.push({ param: 'stopPct', tickerValue: pb.stopPct, genericValue: generic.stopPct });
+  }
+  // A custom regRange or rsi band is itself the deviation — the generic
+  // test bands live in setupChecks()/signal_mask(), never duplicated here,
+  // so any band present on a PLAYBOOKS entry is by definition ticker-specific.
+  if(pb.regRange) deviations.push({ param: 'regRange', tickerValue: pb.regRange });
+  if(pb.rsi) deviations.push({ param: 'rsi', tickerValue: pb.rsi });
+  return deviations;
+}
+
+// The actual gate. One ticker in, one verdict out.
+function validateTickerSpecificPlaybook(ticker, pb){
+  if(!pb) return { valid: true, ticker, reason: 'no playbook to validate' };
+
+  const family = resolvePlaybookFamily(pb);
+  if(!family){
+    return {
+      valid: false, ticker, family: null, deviations: null, trades: null,
+      reason: `Unrecognized family/name "${pb.name}" — cannot verify against a generic default at all.`,
+    };
+  }
+
+  const deviations = tickerSpecificDeviations(pb, family);
+  if(!deviations.length){
+    return { valid: true, ticker, family, deviations, reason: 'matches generic family defaults — no ticker-specific tuning to justify' };
+  }
+
+  const trades = (pb.stats && typeof pb.stats.trades === 'number') ? pb.stats.trades : 0;
+  if(trades >= MIN_TRADES_FOR_TICKER_TUNING){
+    return {
+      valid: true, ticker, family, deviations, trades,
+      reason: `${trades} trades on record — meets the >=${MIN_TRADES_FOR_TICKER_TUNING}-trade floor for ticker-specific tuning on ${deviations.map(d=>d.param).join(', ')}`,
+    };
+  }
+
+  return {
+    valid: false, ticker, family, deviations, trades,
+    reason: `Ticker-specific tuning on ${deviations.map(d=>d.param).join(', ')} is backed by only ${trades} trade(s) — below the >=${MIN_TRADES_FOR_TICKER_TUNING}-trade floor required by the 6.8 graduation rule. Falls back to the generic ${family} playbook until enough evidence accumulates.`,
+  };
+}
+
+// Runs once at load (and can be re-run any time PLAYBOOKS changes).
+// Never just warns and moves on — callers use `violatingTickers` to
+// actually neutralize the bad entries (see pbFor() wrapper below).
+function auditAllPlaybooks(PLAYBOOKS_OBJ){
+  const results = Object.keys(PLAYBOOKS_OBJ).map(t => validateTickerSpecificPlaybook(t, PLAYBOOKS_OBJ[t]));
+  const violations = results.filter(r => !r.valid);
+  if(violations.length){
+    console.warn(
+      `[6.8 GRADUATION RULE] ${violations.length} PLAYBOOKS entr${violations.length===1?'y':'ies'} `+
+      `carrying ticker-specific tuning without enough trade evidence. Falling back to the generic `+
+      `family playbook for: ${violations.map(v=>v.ticker).join(', ')}`
+    );
+    violations.forEach(v => console.warn(`  ${v.ticker}: ${v.reason}`));
+  } else {
+    console.log('[6.8 GRADUATION RULE] All PLAYBOOKS entries pass — every deviation from generic defaults has >=8 trades behind it.');
+  }
+  return { results, violations, violatingTickers: new Set(violations.map(v => v.ticker)) };
+}
 
 // ── REGRESSION CONTEXT EVIDENCE · v2.9.38 ──────────────────────────────────
 // Research-only display layer. These ranges NEVER change BUY/PREPARING/A+ logic.
@@ -9215,14 +9379,17 @@ function clusterExposure(){ const open=capitalOpenPositions(); const counts={}; 
 function portfolioConflict(s){ if(!isValidatedStock(s)||s.position)return null; const pb=pbFor(s), exp=clusterExposure(), n=exp[pb.cluster]||0; if(pb.cluster==='Energy'&&n>=1)return 'Energy exposure is already full. DVN and MPC often move together.'; if(pb.cluster==='Tech / AI / Semis'&&n>=2)return 'Tech / AI exposure is already full. Consider replacing a weaker similar trade instead of adding.'; if(pb.cluster==='Industrial / Aerospace'&&n>=1)return 'You already hold a similar industrial/aerospace trade. Consider reduced size or choose the stronger setup.'; return null; }
 
 // ── v2 HOME ─────────────────────────────────────────────────────────────────
-function getRanked(){ return stocks.filter(s=>!isMarketStock(s)).sort((a,b)=>{ const sa=stockState(a)?.state||'', sb=stockState(b)?.state||''; const d=statePriority(sa)-statePriority(sb); if(d)return d; return String(a.ticker).localeCompare(String(b.ticker)); }); }
-function renderMarket(){
+// getRanked() shadow override removed in v2.9.121. The Opportunity Ranking Engine above is the single ranking authority.
+renderMarket = function(){
   const el=document.getElementById('market-items'); if(!el)return;
   const items=['SPY','QQQ','SOXX'].map(t=>{const s=marketStock(t); const p=s?changeN(s,20):null; return {l:t,v:p==null?'—':pctFmt(p),ok:p!=null&&p>0};});
   el.innerHTML=items.map(it=>`<div style="display:flex;align-items:center;gap:5px;"><span style="color:${it.ok?C.green:C.textSub};font-size:11px;font-weight:800;">${it.l}</span><span style="color:${C.text};font-size:11px;font-weight:700;">${it.v}</span></div>`).join('');
 }
-function renderPortfolioBox(){
-  const el=document.getElementById('portfolio-box'); if(!el)return; const open=stocks.filter(s=>hasOpenPosition(s)&&isValidatedStock(s)); if(!open.length){el.innerHTML='';return;}
+renderPortfolioBox = function(){
+  const el=document.getElementById('portfolio-box'); if(!el)return;
+  // Tier 1 / Fix #3: portfolio visibility follows canonical ownership, not current validation status.
+  // A position you still own must remain in the portfolio summary even if the ticker rotates out of the validated universe.
+  const open=capitalOpenPositions(); if(!open.length){el.innerHTML='';return;}
   const val=open.reduce((a,s)=>a+(displayPrice(s)||0)*(s.position.shares||0),0), cost=open.reduce((a,s)=>a+(s.position.entry||0)*(s.position.shares||0),0), pl=val-cost, risk=open.reduce((a,s)=>a+(plannedRisk(s)||0),0), exp=clusterExposure();
   el.innerHTML=`<div style="margin:14px 16px;"><div style="background:${C.card};border:1.5px solid ${C.border};border-radius:20px;padding:16px 18px;">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:10px;"><span style="color:${C.textMuted};font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.1em;">Portfolio</span><div style="display:flex;align-items:center;gap:9px;"><span style="color:${open.length>=DEFAULT_MAX_POSITIONS?C.yellow:C.textSub};font-size:12px;font-weight:800;">${open.length} / ${DEFAULT_MAX_POSITIONS} positions</span><button onclick="clearOpenPaperPositions()" title="Remove all current paper positions and start fresh. Completed trade history and the Signal Log are kept." style="border:1px solid ${C.border};background:${C.cardHigh};color:${C.textSub};border-radius:8px;padding:5px 8px;font-size:9.5px;font-weight:850;cursor:pointer;white-space:nowrap;">Start Fresh</button></div></div>
@@ -9382,11 +9549,11 @@ function capitalPlanBox(){
   return `<div style="background:${C.card};border-radius:16px;border:1px solid ${C.blue}55;padding:15px 16px;margin:0 16px 12px;"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:6px;"><div><div style="color:${C.blue};font-size:10px;text-transform:uppercase;letter-spacing:.09em;font-weight:950;">Capital Plan · Fund the best, not all</div><div style="color:${C.textSub};font-size:11px;line-height:1.45;margin-top:4px;">Up to ${DEFAULT_MAX_POSITIONS} normal positions · ${MAX_PORTFOLIO_RISK_PCT.toFixed(2)}% maximum total planned risk · each normal trade starts at 0.75% planned risk.</div></div><button onclick="setAccountSize()" style="background:none;border:1px solid ${C.border};border-radius:8px;color:${C.textSub};padding:6px 8px;font-size:10px;font-weight:800;cursor:pointer;">${money(accountSize)}</button></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0 4px;"><div style="background:${C.cardHigh};border-radius:9px;padding:8px 9px;"><div class="v2lbl">Capital committed</div><div style="color:${C.text};font-size:12px;font-weight:900;">${money(committedCash)} / ${money(accountSize)}</div></div><div style="background:${C.cardHigh};border-radius:9px;padding:8px 9px;"><div class="v2lbl">Stop risk committed</div><div style="color:${C.text};font-size:12px;font-weight:900;">${money(committedRisk)} / ${money(plan.maxRisk)}</div></div></div>${plan.rows.map(row).join('')}<div style="color:${C.textMuted};font-size:10px;line-height:1.45;margin-top:8px;">Wide validated stops can intentionally leave cash unused. Do not increase size just to deploy cash. Planned stop risk uses the position's active stop, but gaps can still execute below it and create a larger loss.</div></div>`;
 }
 
-function renderTonightsOpportunities(){
+renderTonightsOpportunities = function(){
   const el=document.getElementById('tonights-opportunities');
   if(!el)return;
 
-  const owned=stocks.filter(s=>isValidatedStock(s)&&hasOpenPosition(s)).map(s=>({s,state:safeStockState(s)}))
+  const owned=capitalOpenPositions().map(s=>({s,state:safeStockState(s)}))
     .sort((a,b)=>statePriority(a.state?.state)-statePriority(b.state?.state));
 
   const live=liveCandidateItems();
@@ -9406,12 +9573,12 @@ function renderTonightsOpportunities(){
   const quiet=(!buys.length&&!preparing.length)?`<div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:16px;margin:0 16px 14px;color:${C.textSub};font-size:13px;">NO NEW QUALIFIED STOCKS. Nothing is close enough to act on right now; WAIT names remain monitored in the validated library.</div>`:'';
   el.innerHTML=ownedBox+capitalPlanBox()+buyBox+quiet;
 }
-function renderFilterBar(){
+renderFilterBar = function(){
   const el=document.getElementById('filter-bar'); if(!el)return;
   const opts=['Ready Now','Buy','Preparing','Positions','Validated Library','Research'];
   el.innerHTML=`<div style="display:flex;gap:7px;overflow-x:auto;">${opts.map(t=>`<button onclick="setTag('${t}')" style="padding:7px 14px;border-radius:22px;font-size:11.5px;font-weight:800;border:1px solid ${activeTag===t?C.green:C.border};background:${activeTag===t?C.greenDim:'none'};color:${activeTag===t?C.green:C.textSub};cursor:pointer;white-space:nowrap;">${t}</button>`).join('')}</div>`;
 }
-function renderListHeader(){
+renderListHeader = function(){
   const el=document.getElementById('list-header'); if(!el)return;
   const validated=stocks.filter(s=>isValidatedStock(s)&&String(s.ticker||'').toUpperCase()!=='PBF');
   const live=liveCandidateItems();
@@ -9452,14 +9619,14 @@ function renderEvidenceOnlySearchCard(x){
     ${x.qualified?`<button onclick="downloadQualifiedUniverse()" style="margin-top:11px;padding:8px 11px;border-radius:9px;border:1px solid ${C.teal}66;background:${C.tealDim};color:${C.teal};font-size:10.5px;font-weight:900;cursor:pointer;">Download Daily Refresh Universe</button>`:''}
   </div>`;
 }
-function renderStockList(){
+renderStockList = function(){
   const el=document.getElementById('stock-list'); if(!el)return;
   let list=getRanked(); const q=searchQuery||'';
   if(q) list=list.filter(s=>String(s.ticker).toLowerCase().includes(q)||String(s.name||'').toLowerCase().includes(q));
 
   if(activeTag==='Buy') list=liveCandidateItems().filter(x=>['BUY','A+ BUY'].includes(x.state?.state)).map(x=>x.s);
   else if(activeTag==='Preparing') list=liveCandidateItems().filter(x=>x.state?.state==='PREPARING').map(x=>x.s);
-  else if(activeTag==='Positions') list=list.filter(s=>hasOpenPosition(s)&&isValidatedStock(s));
+  else if(activeTag==='Positions') list=capitalOpenPositions();
   else if(activeTag==='Validated Library') list=list.filter(s=>isValidatedStock(s)&&String(s.ticker||'').toUpperCase()!=='PBF');
   else if(activeTag==='Research') list=list.filter(isResearchStock);
   else list=liveCandidateItems().map(x=>x.s);
@@ -9477,7 +9644,7 @@ function renderStockList(){
     el.innerHTML=stockHtml+evidenceHtml || `<div style="color:${C.textSub};font-size:13px;padding:20px 4px;">Nothing in this view.</div>`;
   }
 }
-function renderStockCard(s){
+renderStockCard = function(s){
   const st=safeStockState(s), pb=pbFor(s), price=displayPrice(s), reg=regressionStats(s), conflict=portfolioConflict(s); if(!pb){ const ev=evidenceFor(s), rp=researchPromotionLabel(s); return `<div onclick="openDetail('${s.id}')" style="background:${C.card};border:1px solid ${ev?rp.color+'55':C.border};border-radius:15px;padding:14px 16px;cursor:pointer;"><div style="display:flex;justify-content:space-between;gap:10px;"><div><div style="display:flex;align-items:center;gap:8px;"><span style="color:${C.text};font-weight:900;">${s.ticker}</span><span style="color:${rp.color};font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:.05em;">${rp.label}</span></div>${ev?`<div style="color:${C.textMuted};font-size:10px;margin-top:4px;">${ev.family?trendTypeLabel(s,{family:ev.family,name:ev.family}):'Research'} · ${displayEvidenceTag(ev.grade||'Unrated')}</div>`:''}</div><span style="color:${C.text};font-weight:800;">${money(price)}</span></div><div style="color:${C.textSub};font-size:11px;line-height:1.45;margin-top:7px;">${ev?.summary||'No validated StockIQ playbook yet. Current technical readiness cannot promote this ticker by itself.'}</div></div>`;}
   const pos=s.position; const plPct=pos&&price&&pos.entry?((price/pos.entry)-1)*100:null; const stop=pos?suggestedStop(s):null;
   return `<div onclick="openDetail('${s.id}')" style="background:${C.card};border:1px solid ${C.border};border-radius:15px;padding:14px 16px;cursor:pointer;">
@@ -9487,7 +9654,7 @@ function renderStockCard(s){
     </div>${conflict?`<div style="color:${C.yellow};font-size:11px;margin-top:9px;font-weight:700;">Portfolio conflict: ${conflict}</div>`:''}
   </div>`;
 }
-function renderHome(){
+renderHome = function(){
   reconcileClosedPositionsInMemory(); ensureCorePlaceholders(); renderMarket(); renderPortfolioBox(); const pw=document.getElementById('position-watch'); if(pw)pw.innerHTML=''; renderTonightsOpportunities(); renderFilterBar(); renderListHeader(); renderStockList(); }
 
 // ── v2 DETAIL ───────────────────────────────────────────────────────────────
@@ -10224,8 +10391,11 @@ function plainEntryAction(s,pb,st){
 
 function chartWatchMeta(s,pb,st){
   const trend=trendTypeLabel(s,pb);
-  // Daily remains the authority for setup/state. 30-minute is a watch/execution view only.
-  if(!s.position && /SMA50 Reclaim/i.test(trend) && (st?.intraday?.arm || st?.state==='PREPARING')){
+  const state=String(st?.state||'').toUpperCase();
+  const armed=!!st?.intraday?.arm;
+  // Daily remains the authority for setup/state. Show 30-minute only when a
+  // CURRENT SMA50 Reclaim is genuinely armed and still awaiting execution/verification.
+  if(!s.position && /SMA50 Reclaim/i.test(trend) && armed && ['PREPARING','TRIGGERED / VERIFY'].includes(state)){
     return {chart:'30-Min',color:C.yellow,reason:`The completed daily setup is armed. 30-minute/live data is now used only to execute the frozen SMA50 reclaim trigger.`};
   }
   return {chart:'Daily',color:C.teal,reason:s.position?'Position management remains based on the validated daily plan.':'Use the Daily chart unless StockIQ specifically calls for intraday execution.'};
@@ -10344,7 +10514,7 @@ function stockIQBackFromDetail(){
   window.scrollTo(0,0);
   return false;
 }
-function renderDetail(s){
+renderDetail = function(s){
   s=withRecentDailyHistory(s);
   const el=document.getElementById('detail-content'); if(!el)return; const pb=pbFor(s); if(!pb){ const ev=evidenceFor(s), rp=researchPromotionLabel(s); el.innerHTML=`<div style="padding:16px;"><button onclick="stockIQBackFromDetail()" style="background:none;border:none;color:${C.textSub};padding:0 0 12px;">← Back</button><h2 style="color:${C.text};margin:0;">${s.ticker}</h2>${companyNameFor(s)?`<div style="color:${C.textSub};font-size:13px;margin-top:4px;">${companyNameFor(s)}</div>`:''}<div style="margin-top:12px;color:${rp.color};font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;">${displayEvidenceTag(rp.label)}${ev?.grade?` · ${displayEvidenceTag(ev.grade)}`:''}</div>${ev?.family?`<div style="color:${C.text};font-size:13px;font-weight:800;margin-top:8px;">Candidate family: ${trendTypeLabel(s,{family:ev.family,name:ev.family})}</div>`:''}<p style="color:${C.textSub};font-size:13px;line-height:1.65;">${ev?.summary||'This ticker can show indicators, but StockIQ will not issue trading signals until it has a validated playbook.'}</p><div style="background:${C.card};border:1px solid ${C.border};border-radius:14px;padding:13px 14px;margin:12px 0;"><div style="color:${C.yellow};font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;margin-bottom:7px;">Promotion gate</div><div style="color:${C.textSub};font-size:12px;line-height:1.6;">Current readiness is not enough. Promotion requires useful trade frequency, positive friction-adjusted expectancy, older/newer or OOS survival, parameter-neighborhood robustness, and tolerable downside. Until that evidence is explicitly approved, this stock stays research-only.</div></div>${indicatorPanel(s,{})}</div>`; return; }
   const st=stockState(s),checks=(Array.isArray(st?.checks)&&st.checks.length)?st.checks:setupChecks(s),conflict=portfolioConflict(s);
@@ -10361,7 +10531,7 @@ function renderDetail(s){
   else { html+=setupEducationPanel(s,pb,st); html+=panel('Setup Requirements',checklistHTML(checks)); if(['BUY','A+ BUY','TRIGGERED / VERIFY','ENTRY MISSED','ENTRY SIGNAL PASSED'].includes(st.state) || st?.intraday?.arm)html+=entryPanel(s,pb,st); html+=riskPanel(s,pb); html+=regressionPanel(s,pb); html+=earningsPanel(s,pb); html+=marketPanel(s,pb); if(conflict)html+=panel('Portfolio Conflict',`<div style="color:${C.yellow};font-size:12.5px;line-height:1.55;font-weight:700;">${conflict}</div>`); html+=historyPanel(s,pb); html+=yourTradeProofPanel(s,pb); html+=sweetSpotPanel(s,pb); html+=indicatorPanel(s,pb); }
   el.innerHTML=html;
 }
-function openDetail(id){
+openDetail = function(id){
   const s=stocks.find(x=>String(x.id)===String(id)); if(!s)return;
   const from=stockIQActiveScreen();
   if(from && from!=='detail') stockIQDetailReturnScreen=from;
@@ -10717,7 +10887,7 @@ async function applyV2Daily(){
 
 // ── Swing-only add / research labels ────────────────────────────────────────
 const _origShowAddFlow = typeof showAddFlow==='function'?showAddFlow:null;
-function showAddFlow(){ if(_origShowAddFlow)_origShowAddFlow(); setTimeout(()=>{ const root=document.getElementById('modal-content'); if(root){ root.innerHTML=root.innerHTML.replace(/Add Stock/g,'Add Research Ticker').replace(/Position Trade|Long-Term Hold/g,'Swing Trade').replace(/Choose.*strategy/gi,'Research ticker'); }},0); }
+showAddFlow = function(){ if(_origShowAddFlow)_origShowAddFlow(); setTimeout(()=>{ const root=document.getElementById('modal-content'); if(root){ root.innerHTML=root.innerHTML.replace(/Add Stock/g,'Add Research Ticker').replace(/Position Trade|Long-Term Hold/g,'Swing Trade').replace(/Choose.*strategy/gi,'Research ticker'); }},0); }
 
 
 // ── DAILY DATA ARCHITECTURE · v2.9.38 ───────────────────────────────────────
@@ -11559,7 +11729,7 @@ function loadDynamicEvidence(){
 function saveDynamicEvidence(){try{localStorage.setItem(DYNAMIC_EVIDENCE_STORAGE_KEY,JSON.stringify(DYNAMIC_RESEARCH_EVIDENCE));}catch(e){console.warn('Dynamic evidence save failed',e);} scheduleResearchStateCloudSave();}
 loadDynamicEvidence();
 
-function evidenceFor(s){
+evidenceFor = function(s){
   const t=String(s?.ticker||'').toUpperCase();
   if(DYNAMIC_RESEARCH_EVIDENCE[t]) return DYNAMIC_RESEARCH_EVIDENCE[t];
   if(RESEARCH_PROMOTION_EVIDENCE[t]) return RESEARCH_PROMOTION_EVIDENCE[t];
@@ -11575,13 +11745,27 @@ function evidenceFor(s){
   }
   return null;
 }
-function pbFor(s){
+pbFor = function(s){
   if(!s) return null;
   const t=String(s.ticker||'').toUpperCase();
   const dyn=DYNAMIC_RESEARCH_EVIDENCE[t];
   return PLAYBOOKS[t] || genericPromotedPlaybook(t,dyn||RESEARCH_PROMOTION_EVIDENCE[t]) || null;
 }
-function isValidatedStock(s){
+
+// 6.8 graduation-rule wrapper. This intentionally wraps the FINAL live pbFor
+// implementation above; placing it only beside the original declaration near
+// PLAYBOOKS would be unsafe because this later override would otherwise erase it.
+const _preGraduationRulePbFor = pbFor;
+const PLAYBOOK_AUDIT = auditAllPlaybooks(PLAYBOOKS);
+pbFor = function(s){
+  if(!s) return null;
+  const t = String(s.ticker||'').toUpperCase();
+  if(PLAYBOOK_AUDIT.violatingTickers.has(t)){
+    return genericPromotedPlaybook(t, RESEARCH_PROMOTION_EVIDENCE[t]) || null;
+  }
+  return _preGraduationRulePbFor(s);
+};
+isValidatedStock = function(s){
   const t=String(s?.ticker||'').toUpperCase();
   const dyn=DYNAMIC_RESEARCH_EVIDENCE[t];
   if(dyn && dyn.promotionReady===true && pbFor(s) && !s.archived) return true;
@@ -11590,7 +11774,7 @@ function isValidatedStock(s){
   const promoted=!!(ev?.promotionReady && pbFor(s));
   return (isCoreStock(s)||isBenchStock(s)||promoted) && !s.archived;
 }
-function sundayTickerClass(ticker){
+sundayTickerClass = function(ticker){
   const t=String(ticker||'').trim().toUpperCase();
   const dyn=DYNAMIC_RESEARCH_EVIDENCE[t]||null;
   if(dyn){
@@ -11611,7 +11795,7 @@ function mergeScannerSource(oldSource,newSource){
   const vals=[...(String(oldSource||'').split('|')),...(String(newSource||'').split('|'))].map(x=>x.trim()).filter(Boolean);
   return [...new Set(vals)].join(' | ');
 }
-function applySundayDiscovery(){
+applySundayDiscovery = function(){
   const p=window._v2PendingSunday; if(!p)return;
   loadSundayDiscoveryState();
   const byTicker=new Map(sundayResearchQueue.map(x=>[x.ticker,x]));
@@ -11631,7 +11815,7 @@ function applySundayDiscovery(){
   saveSundayDiscoveryState(); window._v2PendingSunday=null;
   showModal(`<div style="background:${C.card};border-radius:20px;padding:24px;border:1px solid ${C.green}55;"><div style="color:${C.green};font-size:19px;font-weight:950;margin-bottom:7px;">Sunday discovery loaded ✓</div><div style="color:${C.textSub};font-size:12.5px;line-height:1.65;margin-bottom:14px;">${p.rows.length} scan names reviewed. <b style="color:${C.text};">${added.length}</b> genuinely new ticker${added.length===1?'':'s'} added. If a queued ticker appeared in more than one official Sunday scan, StockIQ retained all scanner sources for source-aware validation.</div>${sundayResearchQueue.length?`<button onclick="downloadSundayResearchQueue()" style="width:100%;padding:12px;border-radius:10px;border:none;background:${C.teal};color:#000;font-weight:950;cursor:pointer;">Download 6-Year Research Queue (${sundayResearchQueue.length})</button>`:''}<button onclick="closeAllOverlays()" style="width:100%;padding:11px;margin-top:9px;border-radius:10px;border:1px solid ${C.border};background:transparent;color:${C.textSub};font-weight:850;cursor:pointer;">Done</button></div>`);
 }
-function downloadSundayResearchQueue(){
+downloadSundayResearchQueue = function(){
   loadSundayDiscoveryState(); if(!sundayResearchQueue.length)return;
   const hdr=['Symbol','DiscoveryDate','ScannerSource','Status','Company','Sector','Industry'];
   const lines=[hdr.join(',')].concat(sundayResearchQueue.map(x=>[x.ticker,x.discoveredOn,x.source,x.status,x.description,x.sector,x.industry].map(csvEscape).join(',')));
@@ -11681,7 +11865,7 @@ function downloadQualifiedUniverse(){
   const lines=['Symbol,Source'].concat(syms.map(t=>`${csvEscape(t)},${csvEscape(DYNAMIC_RESEARCH_EVIDENCE[t]?'Sunday Validation':'StockIQ Library')}`));
   const blob=new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`StockIQ_Daily_Refresh_Universe_${today()}.csv`;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},0);
 }
-function showSundayDiscoveryFlow(){
+showSundayDiscoveryFlow = function(){
   loadSundayDiscoveryState(); loadDynamicEvidence();
   const q=sundayResearchQueue; const last=sundayDiscoveryHistory.length?sundayDiscoveryHistory[sundayDiscoveryHistory.length-1]:null;
   const dynVals=Object.entries(DYNAMIC_RESEARCH_EVIDENCE);
@@ -11913,7 +12097,7 @@ function researchVisibleStock(s){
 }
 
 // Override the generic label so genuine queue names are unmistakable.
-function researchPromotionLabel(s){
+researchPromotionLabel = function(s){
   const t=researchTicker(s?.ticker);
   if(queueRecordForTicker(t)) return {label:'WAITING FOR 6-YEAR HISTORY',color:C.teal};
   const ev=evidenceFor(s);
@@ -11927,20 +12111,20 @@ function researchPromotionLabel(s){
 }
 
 // Keep the top row for data-input buttons. Research Audit lives beside the view tags.
-function renderFilterBar(){
+renderFilterBar = function(){
   const el=document.getElementById('filter-bar'); if(!el)return;
   const opts=['Ready Now','Buy','Preparing','Positions','Validated Library','Research'];
   el.innerHTML=`<div style="display:flex;gap:7px;overflow-x:auto;align-items:center;">${opts.map(t=>`<button onclick="setTag('${t}')" style="padding:7px 14px;border-radius:22px;font-size:11.5px;font-weight:800;border:1px solid ${activeTag===t?C.green:C.border};background:${activeTag===t?C.greenDim:'none'};color:${activeTag===t?C.green:C.textSub};cursor:pointer;white-space:nowrap;">${t}</button>`).join('')}<button onclick="showResearchReconciliation()" title="Audit research queue" style="padding:5px 8px;border-radius:8px;font-size:9.5px;font-weight:850;border:1px solid ${C.border};background:${C.cardHigh};color:${C.textMuted};cursor:pointer;white-space:nowrap;">Research Audit</button></div>`;
 }
 
-function renderStockList(){
+renderStockList = function(){
   const el=document.getElementById('stock-list'); if(!el)return;
   let list=getRanked(); const q=searchQuery||'';
   if(q) list=list.filter(s=>String(s.ticker).toLowerCase().includes(q)||String(s.name||'').toLowerCase().includes(q));
 
   if(activeTag==='Buy') list=liveCandidateItems().filter(x=>['BUY','A+ BUY'].includes(x.state?.state)).map(x=>x.s);
   else if(activeTag==='Preparing') list=liveCandidateItems().filter(x=>x.state?.state==='PREPARING').map(x=>x.s);
-  else if(activeTag==='Positions') list=list.filter(s=>hasOpenPosition(s)&&isValidatedStock(s));
+  else if(activeTag==='Positions') list=capitalOpenPositions();
   else if(activeTag==='Validated Library') list=list.filter(s=>isValidatedStock(s)&&String(s.ticker||'').toUpperCase()!=='PBF');
   else if(activeTag==='Research') list=list.filter(researchVisibleStock);
   else list=liveCandidateItems().map(x=>x.s);
@@ -12202,8 +12386,7 @@ const _v2965Version=document.getElementById('stockiq-version'); if(_v2965Version
 <script>
 // ── v2.9.93 FINAL HOME CONTROLS + SOLD POSITION HARDENING ───────────────────
 // This block is intentionally last so older renderFilterBar definitions cannot overwrite it.
-const _v2993BaseRenderStockList = renderStockList;
-
+// v2.9.125: removed dead _v2993BaseRenderStockList capture; the final renderer below is an intentional full replacement.
 function familyNameForStock(s){
   try{ const pb=pbFor(s); return pb ? trendTypeLabel(s,pb) : ''; }
   catch(e){ return ''; }
@@ -12242,7 +12425,7 @@ renderFilterBar=function(){
 
 // Apply family filter/sort to the final v2 stock-list renderer without changing
 // its BUY/PREPARING/Research semantics.
-renderStockList=function(){
+function renderStockList_v2993Final(){
   updateAndCaptureSignals();
   const el=document.getElementById('stock-list'); if(!el)return;
   let list=getRanked(); const q=searchQuery||'';
@@ -12250,7 +12433,7 @@ renderStockList=function(){
 
   if(activeTag==='Buy') list=liveCandidateItems().filter(x=>['BUY','A+ BUY'].includes(x.state?.state)).map(x=>x.s);
   else if(activeTag==='Preparing') list=liveCandidateItems().filter(x=>x.state?.state==='PREPARING').map(x=>x.s);
-  else if(activeTag==='Positions') list=list.filter(s=>hasOpenPosition(s)&&isValidatedStock(s));
+  else if(activeTag==='Positions') list=capitalOpenPositions();
   else if(activeTag==='Validated Library') list=list.filter(s=>isValidatedStock(s)&&String(s.ticker||'').toUpperCase()!=='PBF');
   else if(activeTag==='Research') list=list.filter(researchVisibleStock);
   else list=liveCandidateItems().map(x=>x.s);
@@ -12279,7 +12462,8 @@ renderStockList=function(){
     const evidenceHtml=evidenceOnly.map(renderEvidenceOnlySearchCard).join('');
     el.innerHTML=stockHtml+evidenceHtml || `<div style="color:${C.textSub};font-size:13px;padding:20px 4px;">Nothing in this view.</div>`;
   }
-};
+}
+renderStockList = renderStockList_v2993Final;
 
 // Re-render with final controls and persist any stale closed positions after auth/data load.
 setTimeout(()=>{ try{ reconcileClosedPositionsInMemory(); renderHome(); }catch(e){ console.warn('v2.9.93 final home refresh failed',e); } },1100);
@@ -12294,11 +12478,16 @@ function thirtyMinuteTickersNeeded(){
   const out=[];
   for(const s of (stocks||[])){
     try{
-      if(!s || isMarketStock(s) || hasOpenPosition(s) || !isValidatedStock(s)) continue;
+      // Copy only tickers that need a 30-minute file RIGHT NOW.
+      // WAIT, expired/passed signals, inactive setups, and already-owned names
+      // are intentionally excluded from this entry-execution list.
+      if(!s || isMarketStock(s) || hasOpenPosition(s)) continue;
       const pb=pbFor(s); if(!pb) continue;
       const st=safeStockState(s);
-      const cw=chartWatchMeta(s,pb,st);
-      if(cw?.chart==='30-Min') out.push(String(s.ticker||'').toUpperCase());
+      const state=String(st?.state||'').toUpperCase();
+      const armed=!!st?.intraday?.arm;
+      const needsSma50Execution=isSma50ReclaimStock(s) && armed && ['PREPARING','TRIGGERED / VERIFY'].includes(state);
+      if(needsSma50Execution) out.push(String(s.ticker||'').toUpperCase());
     }catch(e){ console.warn('30-minute ticker check failed',s?.ticker,e); }
   }
   return [...new Set(out)].filter(Boolean).sort();
@@ -12721,9 +12910,9 @@ capitalPlanBox=function(){
 };
 
 // Home priority sections: show Sector + Evidence + Family consistently.
-renderTonightsOpportunities=function(){
+function renderTonightsOpportunities_v2998Final(){
   const el=document.getElementById('tonights-opportunities'); if(!el)return;
-  const owned=stocks.filter(s=>isValidatedStock(s)&&hasOpenPosition(s)).map(s=>({s,state:safeStockState(s)}))
+  const owned=capitalOpenPositions().map(s=>({s,state:safeStockState(s)}))
     .sort((a,b)=>statePriority(a.state?.state)-statePriority(b.state?.state));
   const live=liveCandidateItems();
   const buys=live.filter(x=>['A+ BUY','BUY'].includes(x.state?.state));
@@ -12738,7 +12927,8 @@ renderTonightsOpportunities=function(){
   const buyBox=buys.length?`<div style="background:${C.card};border-radius:16px;border:1px solid ${C.green}66;padding:16px;margin:0 16px 12px;"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;"><div style="color:${C.green};font-size:10px;text-transform:uppercase;letter-spacing:.09em;font-weight:950;">Buy / A+ Buy</div><div style="color:${C.textMuted};font-size:10px;">Actionable now · ${buys.length} · max ${LIVE_CANDIDATE_CAP}</div></div>${buys.map(row).join('')}${evidenceLegendHTML(buys)}</div>`:'';
   const quiet=(!buys.length&&!preparing.length)?`<div style="background:${C.card};border-radius:16px;border:1px solid ${C.border};padding:16px;margin:0 16px 14px;color:${C.textSub};font-size:13px;">NO NEW QUALIFIED STOCKS. Nothing is close enough to act on right now; WAIT names remain monitored in the validated library.</div>`:'';
   el.innerHTML=ownedBox+capitalPlanBox()+buyBox+quiet;
-};
+}
+renderTonightsOpportunities = renderTonightsOpportunities_v2998Final;
 
 // Lower sorted/filter list: same metadata order.
 const _v2998BaseRenderStockCard=renderStockCard;
@@ -14568,6 +14758,152 @@ v29116LiveTriggers=function(s,pb){
 const _v29118Version=document.getElementById('stockiq-version');
 if(_v29118Version)_v29118Version.textContent='StockIQ v2.9.118 · Clean Weak-Market Layout';
 setTimeout(()=>{try{renderHome();if(detailStockId){const s=stocks.find(x=>String(x.id)===String(detailStockId));if(s)renderDetail(s);}}catch(e){console.warn('v2.9.118 refresh failed',e);}},550);
+
+// ── v2.9.121 · TIER 1 FIX #1 — OPPORTUNITY RANKING ENGINE ───────────────
+// Removed duplicate getRanked() override that reduced home ranking to
+// state + alphabetical order. Restored the evidence-aware decision tree and
+// added modern historical-evidence tiers: Proven > High > Validated >
+// Validated Research. No setup, entry, exit, stop, sizing, or backtest rule
+// changed in this patch.
+const _v29119Version=document.getElementById('stockiq-version');
+if(_v29119Version)_v29119Version.textContent='StockIQ v2.9.121 · Tier 1 Fix 1 · Ranking Engine';
+</script>
+
+<script>
+// v2.9.124 · Tier 1 Fix #5 — duplicate named function declarations normalized to explicit sequential overrides.
+(function(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.125 · Full Override Audit + Canonical Ownership';})();
+</script>
+
+
+
+
+<!--
+StockIQ v2.9.125 MECHANICAL FUNCTION/OVERRIDE AUDIT
+Generated by scanning BOTH `function NAME(` declarations and `NAME = function(` assignments, plus explicit final renderer assignments.
+This replaces the incomplete v2.9.123/v2.9.124 declaration-only catalog.
+Override/name chains found: 37
+  applySundayDiscovery: 10946:declaration, 11650:function-assignment
+  canonApply: 12920:declaration, 13165:function-assignment
+  capitalPlanBox: 9407:declaration, 12745:function-assignment
+  detailMetaStrip: 10269:declaration, 12479:function-assignment
+  downloadSundayResearchQueue: 10962:declaration, 11670:function-assignment
+  evidenceFor: 8136:declaration, 11598:function-assignment
+  hasOpenPosition: 1455:declaration, 12608:function-assignment, 13015:function-assignment, 13211:function-assignment
+  isValidatedStock: 8381:declaration, 11620:function-assignment
+  liveCandidateItems: 9319:declaration, 12434:function-assignment
+  marketPanel: 10072:declaration, 12509:function-assignment, 13699:function-assignment, 13711:function-assignment, 14587:function-assignment
+  openDetail: 1766:declaration, 10400:function-assignment
+  ownedResearchDetails: 10349:declaration, 13744:function-assignment
+  pbFor: original declaration, dynamic-evidence function-assignment, v2.9.127 graduation-rule function-assignment
+  plainEntryAction: 10242:declaration, 13469:function-assignment, 13535:function-assignment
+  positionMatchesPortfolioGeneration: 12597:declaration, 13009:function-assignment
+  positionTop: 10278:declaration, 12490:function-assignment, 12801:function-assignment, 13924:function-assignment
+  preTop: 10341:declaration, 12469:function-assignment, 13546:function-assignment
+  reconcileClosedPositionsInMemory: 1459:declaration, 13010:function-assignment
+  reconcilePortfolioGenerationLocal: 12613:declaration, 13008:function-assignment
+  renderDetail: 2958:declaration, 10383:function-assignment, 12403:function-assignment, 12517:function-assignment, 12858:function-assignment, 13028:function-assignment, 13763:function-assignment, 13945:function-assignment, 14226:function-assignment, 14409:function-assignment
+  renderFilterBar: 1093:declaration, 9442:function-assignment, 11966:function-assignment, 12198:function-assignment, 12247:function-assignment
+  renderHome: 1026:declaration, 9523:function-assignment, 13023:function-assignment
+  renderListHeader: 1125:declaration, 9447:function-assignment
+  renderMarket: 1041:declaration, 9249:function-assignment
+  renderPortfolioBox: 1056:declaration, 9254:function-assignment, 13233:function-assignment
+  renderStockCard: 1594:declaration, 9513:function-assignment, 12787:function-assignment
+  renderStockList: 1189:declaration, 9488:function-assignment, 11972:function-assignment, 12211:function-assignment, 12318:direct-assignment
+  renderTonightsOpportunities: 6018:declaration, 9418:function-assignment, 12783:direct-assignment
+  researchPromotionLabel: 8151:declaration, 11952:function-assignment
+  showAddFlow: 7095:declaration, 10756:function-assignment
+  showSundayDiscoveryFlow: 10904:declaration, 11720:function-assignment
+  stockState: 9221:declaration, 13433:function-assignment
+  sundayTickerClass: 10887:declaration, 11629:function-assignment
+  v29108LatestSameFamilyStop: 13324:declaration, 13526:function-assignment
+  v29114TickerFindingsPanel: 13856:declaration, 14492:function-assignment
+  v29114WeakMarketActionStrip: 13879:declaration, 13974:function-assignment, 14451:function-assignment
+  v29116LiveTriggers: 14077:declaration, 14382:function-assignment, 14599:function-assignment
+
+Ownership invariant checked in v2.9.125:
+  - No owned-position renderer/filter may use isValidatedStock() as an ownership gate.
+  - Home Bought Positions uses capitalOpenPositions().
+  - Positions tab uses capitalOpenPositions().
+  - Final renderTonightsOpportunities and renderStockList full rewrites are named, explicit implementations rather than anonymous bare rewrites.
+  - No strategy/backtest thresholds changed in this repair.
+
+v2.9.127 graduation-rule audit addition:
+  - graduation_rule.js runtime enforcement added after PLAYBOOKS (CommonJS module.exports footer omitted for browser safety).
+  - pbFor receives one additional documented safe-wrapper assignment AFTER the final existing live pbFor override, so later overrides cannot erase enforcement.
+  - The wrapper falls back to genericPromotedPlaybook() only for PLAYBOOK_AUDIT.violatingTickers.
+  - This is a sample-size/ticker-personalization gate only; it does not claim to verify reproducibility of legacy headline stats.
+-->
+
+<script>
+// ── v2.9.126 CANONICAL PORTFOLIO LOAD GUARD ─────────────────────────────
+// Never render an owned-position view as empty merely because canonical
+// ownership has not finished loading yet. Ownership remains canonical-only;
+// we do NOT fall back to legacy stock.position fields.
+let canonPortfolioLoadInFlight = null;
+function ensureCanonicalPortfolioReady(){
+  if(canonPortfolioReady) return Promise.resolve(true);
+  if(!currentUser) return Promise.resolve(false);
+  if(canonPortfolioLoadInFlight) return canonPortfolioLoadInFlight;
+  canonPortfolioLoadInFlight = Promise.resolve()
+    .then(()=>canonSync())
+    .catch(e=>{ console.warn('Canonical portfolio load guard failed',e); return false; })
+    .finally(()=>{ canonPortfolioLoadInFlight=null; });
+  return canonPortfolioLoadInFlight;
+}
+
+const _v29126RenderPortfolioBox = renderPortfolioBox;
+renderPortfolioBox=function(...args){
+  const el=document.getElementById('portfolio-box');
+  if(currentUser && !canonPortfolioReady){
+    if(el){
+      el.innerHTML=`<div class="card" style="padding:14px 16px;">
+        <div style="font-weight:900;font-size:13px;">Loading your open trades…</div>
+        <div style="margin-top:4px;font-size:12px;opacity:.72;">StockIQ is checking your saved portfolio before showing positions.</div>
+      </div>`;
+    }
+    ensureCanonicalPortfolioReady().then(ok=>{ if(ok) try{ _v29126RenderPortfolioBox.apply(this,args); }catch(e){ console.warn(e); } });
+    return;
+  }
+  return _v29126RenderPortfolioBox.apply(this,args);
+};
+
+const _v29126RenderTonightsOpportunities = renderTonightsOpportunities;
+renderTonightsOpportunities=function(...args){
+  if(currentUser && !canonPortfolioReady){
+    // Do not render "0 open" while ownership is unresolved. The portfolio
+    // box above shows a loading state; rerender once canonical sync finishes.
+    ensureCanonicalPortfolioReady().then(ok=>{ if(ok) try{ _v29126RenderTonightsOpportunities.apply(this,args); }catch(e){ console.warn(e); } });
+    return;
+  }
+  return _v29126RenderTonightsOpportunities.apply(this,args);
+};
+
+const _v29126RenderStockList = renderStockList;
+renderStockList=function(...args){
+  if(activeTag==='Positions' && currentUser && !canonPortfolioReady){
+    const target=document.getElementById('stock-list');
+    if(target){
+      target.innerHTML=`<div class="card" style="padding:14px 16px;">
+        <div style="font-weight:900;font-size:13px;">Loading your open trades…</div>
+        <div style="margin-top:4px;font-size:12px;opacity:.72;">StockIQ is checking your saved portfolio before showing this list.</div>
+      </div>`;
+    }
+    ensureCanonicalPortfolioReady().then(ok=>{ if(ok) try{ _v29126RenderStockList.apply(this,args); }catch(e){ console.warn(e); } });
+    return;
+  }
+  return _v29126RenderStockList.apply(this,args);
+};
+
+// Start canonical sync immediately after auth rather than relying on a delayed
+// render race. Existing auth listeners remain safe because ensure... dedupes calls.
+auth.onAuthStateChanged(user=>{ if(user) ensureCanonicalPortfolioReady(); });
+
+const _v29126Version=document.getElementById('stockiq-version');
+if(_v29126Version)_v29126Version.textContent='StockIQ v2.9.126 · Canonical Portfolio Load Guard';
+</script>
+
+<script>
+(function(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.127 · Graduation Rule Enforcement';})();
 </script>
 </body>
 </html>
