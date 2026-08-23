@@ -13571,25 +13571,108 @@ if(_v29111Version)_v29111Version.textContent='StockIQ v2.9.111 · SMA50 30-Min P
 // weak, and translate 30-minute behavior into simple family-specific context.
 
 const V29112_DOWN_MARKET_FAMILY = {
-  'Regression Pullback': {n:'large sample', avg:2.43, win:56.6, tone:'good', text:'A falling market was not a reason to avoid this setup. Regression Pullbacks still worked well when SPY and QQQ had both been falling.'},
-  'Deep Pullback':       {n:'large sample', avg:4.10, win:59.1, tone:'strong', text:'This family handled falling markets especially well. Market weakness often creates the deeper pullback this setup is built to buy.'},
-  'EMA20 Reclaim':       {n:'large sample', avg:2.20, win:58.3, tone:'strong', text:'Fresh EMA20 Reclaims continued to work well after the market had been falling. A weak market alone was not a reason to skip the trade.'},
-  'Momentum':            {n:'large sample', avg:1.85, win:54.5, tone:'neutral', text:'Momentum trades still worked in falling markets, but weakness did not improve this family enough to change the trade plan.'},
-  'Breakout':            {n:'large sample', avg:2.43, win:56.6, tone:'neutral', text:'Breakouts still worked during recent market weakness. The benefit was not consistent enough to treat a down market as an advantage.'},
-  'SMA50 Reclaim':       {n:'daily proxy', avg:2.52, win:58.1, tone:'neutral', text:'A weak market did not automatically hurt the Daily SMA50 setup. The 30-minute reclaim still decides whether there is an actual entry.'}
+  'Regression Pullback': {n:836, avg:2.17, win:53.1, tone:'neutral', text:'Across 836 down-market Regression Pullback trades in the historical replay, the setup held up (53.1% win rate) but did not show a special edge from market weakness. Keep using the normal setup rules.'},
+  'Deep Pullback':       {n:34,  avg:1.90, win:50.0, tone:'neutral', text:'Across 34 down-market Deep Pullback trades, the win rate was close to a coin flip (50.0%). Weaker than earlier assumed — treat a down market as neutral, not a tailwind, for this family.'},
+  'EMA20 Reclaim':       {n:162, avg:2.51, win:58.6, tone:'good',    text:'Across 162 down-market EMA20 Reclaim trades, the setup performed well (58.6% win rate). A weak market was not a reason to skip this trade.'},
+  'Momentum':            {n:306, avg:2.48, win:54.6, tone:'neutral', text:'Across 306 down-market Momentum trades, the setup held up (54.6% win rate) without a distinct edge from the weak market. Keep using the normal setup rules.'},
+  'Breakout':            {n:9,   avg:-3.83,win:22.2, tone:'caution', text:'Only 9 down-market Breakout trades exist in the historical replay, and they performed poorly (22.2% win rate, -3.83% average return). The sample is too small to call this proven weak, but it does NOT support treating a down market as fine for this setup — be more cautious than usual with Breakout entries during market weakness.'},
+  'SMA50 Reclaim':       {n:51,  avg:2.67, win:60.8, tone:'good',    text:'Across 51 down-market SMA50 Reclaim trades, the setup performed well (60.8% win rate). A weak market was not a reason to skip this trade.'}
 };
 
 // Ticker-specific weak-market replays from the 6-year Daily history.
 // Weak market = both SPY and QQQ down over the prior 5 trading days.
-// Only rows with at least 5 historical trades are displayed. These are context,
+// Only CSV rows with Status=OK (n>=8) are loaded/displayed. These are context,
 // not a new signal engine and never alter BUY/WAIT/exit decisions.
 const V29112_DOWN_MARKET_TICKER = {
-  DVN:{n:16,win:69,avg:5.5}, LQDA:{n:14,win:50,avg:4.3}, VIST:{n:21,win:67,avg:12.3},
-  TIGO:{n:23,win:65,avg:4.5}, NESR:{n:5,win:60,avg:7.8}, ASX:{n:20,win:55,avg:3.4},
-  LTH:{n:6,win:50,avg:2.9}, PRM:{n:8,win:88,avg:10.1}, HPE:{n:14,win:64,avg:3.1},
-  PARR:{n:20,win:55,avg:8.6}, ACHC:{n:6,win:83,avg:17.7}, COGT:{n:22,win:45,avg:5.6},
-  ZETA:{n:11,win:64,avg:5.3}, DYN:{n:12,win:58,avg:3.8}, RELY:{n:5,win:60,avg:-3.0},
-  GTES:{n:11,win:64,avg:2.6}, ROIV:{n:14,win:71,avg:6.4}, PBF:{n:21,win:43,avg:3.4}
+  AAPL:{family:'REG_PULLBACK',n:20,win:50,avg:0.12},
+  ADM:{family:'REG_PULLBACK',n:11,win:72.7,avg:2.5},
+  AFRM:{family:'REG_PULLBACK',n:13,win:23.1,avg:-3.62},
+  ANET:{family:'EMA20_RECLAIM',n:13,win:53.8,avg:-0.42},
+  APA:{family:'MOMENTUM',n:10,win:50,avg:3.06},
+  APH:{family:'REG_PULLBACK',n:22,win:63.6,avg:3.23},
+  BAC:{family:'REG_PULLBACK',n:9,win:44.4,avg:1.44},
+  BCS:{family:'REG_PULLBACK',n:13,win:53.8,avg:1.47},
+  BNY:{family:'REG_PULLBACK',n:12,win:83.3,avg:4.85},
+  BWA:{family:'REG_PULLBACK',n:8,win:62.5,avg:0.77},
+  CCEP:{family:'EMA20_RECLAIM',n:10,win:70,avg:1.63},
+  CF:{family:'BREAKOUT',n:9,win:22.2,avg:-3.83},
+  CFG:{family:'REG_PULLBACK',n:10,win:50,avg:5.68},
+  CNC:{family:'REG_PULLBACK',n:9,win:66.7,avg:-0.63},
+  CNK:{family:'MOMENTUM',n:9,win:44.4,avg:-0.25},
+  COLB:{family:'REG_PULLBACK',n:9,win:44.4,avg:-0.6},
+  COP:{family:'MOMENTUM',n:10,win:60,avg:3.41},
+  CRDO:{family:'REG_PULLBACK',n:10,win:50,avg:3.98},
+  CRWD:{family:'REG_PULLBACK',n:14,win:42.9,avg:1.21},
+  CUBE:{family:'REG_PULLBACK',n:10,win:50,avg:1.36},
+  CVX:{family:'MOMENTUM',n:8,win:37.5,avg:-1.19},
+  DAL:{family:'REG_PULLBACK',n:11,win:36.4,avg:0.23},
+  DDOG:{family:'REG_PULLBACK',n:13,win:38.5,avg:1.76},
+  DELL:{family:'REG_PULLBACK',n:15,win:73.3,avg:3.44},
+  DINO:{family:'MOMENTUM',n:9,win:44.4,avg:-2.55},
+  DVN:{family:'MOMENTUM',n:8,win:50,avg:1.59},
+  ENTG:{family:'REG_PULLBACK',n:13,win:38.5,avg:1.76},
+  EQH:{family:'REG_PULLBACK',n:13,win:69.2,avg:5.12},
+  ETN:{family:'REG_PULLBACK',n:17,win:70.6,avg:2.08},
+  ETSY:{family:'REG_PULLBACK',n:10,win:30,avg:1.52},
+  EXEL:{family:'REG_PULLBACK',n:10,win:40,avg:-1.54},
+  FHN:{family:'REG_PULLBACK',n:17,win:64.7,avg:2.83},
+  FITB:{family:'REG_PULLBACK',n:15,win:73.3,avg:5.39},
+  FTNT:{family:'REG_PULLBACK',n:11,win:45.5,avg:-2.7},
+  GE:{family:'REG_PULLBACK',n:17,win:76.5,avg:6.9},
+  GNTX:{family:'REG_PULLBACK',n:9,win:22.2,avg:-2.02},
+  HLT:{family:'REG_PULLBACK',n:20,win:65,avg:1.44},
+  HPE:{family:'REG_PULLBACK',n:9,win:44.4,avg:0.18},
+  HWM:{family:'REG_PULLBACK',n:20,win:70,avg:5.3},
+  IBKR:{family:'EMA20_RECLAIM',n:11,win:81.8,avg:6.06},
+  ING:{family:'EMA20_RECLAIM',n:15,win:80,avg:5.84},
+  INVH:{family:'REG_PULLBACK',n:10,win:60,avg:0.21},
+  IOT:{family:'DEEP_PULLBACK',n:13,win:61.5,avg:6.89},
+  JCI:{family:'REG_PULLBACK',n:17,win:82.4,avg:6.18},
+  KEY:{family:'REG_PULLBACK',n:13,win:69.2,avg:4.59},
+  KNX:{family:'REG_PULLBACK',n:11,win:45.5,avg:-0.27},
+  LRCX:{family:'REG_PULLBACK',n:18,win:61.1,avg:7.48},
+  LYV:{family:'REG_PULLBACK',n:10,win:50,avg:2.98},
+  M:{family:'REG_PULLBACK',n:12,win:41.7,avg:-1.59},
+  MAC:{family:'REG_PULLBACK',n:13,win:38.5,avg:2.03},
+  MAS:{family:'REG_PULLBACK',n:11,win:18.2,avg:-3.35},
+  MET:{family:'REG_PULLBACK',n:9,win:44.4,avg:-0.1},
+  MFC:{family:'REG_PULLBACK',n:14,win:35.7,avg:-1},
+  MMM:{family:'EMA20_RECLAIM',n:9,win:77.8,avg:3.92},
+  MPC:{family:'MOMENTUM',n:14,win:64.3,avg:2.89},
+  MRVL:{family:'REG_PULLBACK',n:15,win:46.7,avg:0.27},
+  MS:{family:'REG_PULLBACK',n:15,win:53.3,avg:2.99},
+  MU:{family:'REG_PULLBACK',n:16,win:56.2,avg:10.24},
+  MUFG:{family:'REG_PULLBACK',n:9,win:66.7,avg:0.26},
+  NDAQ:{family:'MOMENTUM',n:9,win:77.8,avg:2.98},
+  NET:{family:'EMA20_RECLAIM',n:11,win:72.7,avg:13.99},
+  NOV:{family:'EMA20_RECLAIM',n:8,win:37.5,avg:-0.95},
+  NVO:{family:'REG_PULLBACK',n:11,win:54.5,avg:0.06},
+  NWSA:{family:'MOMENTUM',n:8,win:50,avg:1.4},
+  OKTA:{family:'REG_PULLBACK',n:13,win:38.5,avg:-0.52},
+  ONB:{family:'REG_PULLBACK',n:17,win:41.2,avg:-0.18},
+  P:{family:'MOMENTUM',n:8,win:37.5,avg:-0.77},
+  PANW:{family:'REG_PULLBACK',n:20,win:60,avg:3.06},
+  PBF:{family:'MOMENTUM',n:15,win:53.3,avg:5.39},
+  PCAR:{family:'EMA20_RECLAIM',n:18,win:38.9,avg:-0.82},
+  PINS:{family:'EMA20_RECLAIM',n:8,win:75,avg:3.5},
+  PLD:{family:'REG_PULLBACK',n:12,win:50,avg:0.46},
+  PR:{family:'MOMENTUM',n:14,win:50,avg:5.91},
+  RF:{family:'REG_PULLBACK',n:14,win:50,avg:1.83},
+  ROST:{family:'EMA20_RECLAIM',n:9,win:44.4,avg:-0.97},
+  SBUX:{family:'EMA20_RECLAIM',n:9,win:66.7,avg:4.48},
+  SLM:{family:'REG_PULLBACK',n:14,win:50,avg:2.49},
+  SWKS:{family:'DEEP_PULLBACK',n:8,win:25,avg:-3.33},
+  SYF:{family:'SMA50_RECLAIM',n:9,win:88.9,avg:7.62},
+  TENB:{family:'REG_PULLBACK',n:11,win:18.2,avg:-5.1},
+  TFC:{family:'REG_PULLBACK',n:12,win:58.3,avg:2.98},
+  TGTX:{family:'EMA20_RECLAIM',n:11,win:27.3,avg:-2.93},
+  TSM:{family:'REG_PULLBACK',n:20,win:65,avg:1.91},
+  TWLO:{family:'REG_PULLBACK',n:12,win:58.3,avg:8.28},
+  UAL:{family:'REG_PULLBACK',n:8,win:50,avg:-0.53},
+  UDR:{family:'REG_PULLBACK',n:8,win:50,avg:-0.49},
+  UMAC:{family:'REG_PULLBACK',n:14,win:35.7,avg:16.57},
+  VSAT:{family:'REG_PULLBACK',n:12,win:41.7,avg:2.76},
+  XOM:{family:'MOMENTUM',n:15,win:53.3,avg:1.86}
 };
 
 function v29112FamilyName(s,pb){
@@ -13613,7 +13696,7 @@ function v29112Sector5Day(pb){
   const m=t?marketStock(t):null, c=m?changeN(m,5):null;
   return {ticker:t||null,change:c,weak:c!=null?c<0:null};
 }
-function v29112ToneColor(t){ return t==='strong'?C.green:(t==='good'?C.teal:C.yellow); }
+function v29112ToneColor(t){ return t==='strong'?C.green:(t==='good'?C.teal:(t==='caution'?C.red:C.yellow)); }
 
 function downMarketHistoryPanel(s,pb){
   const fam=v29112FamilyName(s,pb), fs=V29112_DOWN_MARKET_FAMILY[fam];
@@ -13626,7 +13709,7 @@ function downMarketHistoryPanel(s,pb){
       : `The market is not in the weak 5-day condition right now (SPY ${pctFmt(market.spy)} · QQQ ${pctFmt(market.qqq)}).`;
   const sectorNow=sec.change==null?'':` ${sec.ticker} is ${sec.change<0?'down':'up'} ${Math.abs(sec.change).toFixed(1)}% over the same 5 days.`;
   const tc=v29112ToneColor(fs.tone);
-  const tickerBlock=ts && ts.n>=5
+  const tickerBlock=ts && ts.n>=8
     ? `<div style="margin-top:11px;padding:11px 12px;border-radius:11px;background:${C.cardHigh};border:1px solid ${C.border};"><div class="v2lbl">${s.ticker}'S OWN DOWN-MARKET HISTORY</div><div style="color:${ts.avg>=0?C.green:C.red};font-size:14px;font-weight:950;margin-top:4px;">${ts.win}% finished positive · ${ts.avg>=0?'+':''}${ts.avg.toFixed(1)}% average</div><div style="color:${C.textSub};font-size:11.5px;line-height:1.55;margin-top:5px;">Based on ${ts.n} past ${fam} setup trades when both SPY and QQQ had been falling over the prior 5 trading days.</div></div>`
     : `<div style="margin-top:11px;padding:10px 11px;border-radius:10px;background:${C.cardHigh};color:${C.textSub};font-size:11.5px;line-height:1.55;">There are not enough past ${s.ticker} trades in falling markets to judge this ticker by itself, so use the family history below.</div>`;
   return panel('How This Setup Has Done In Down Markets',`
@@ -14433,11 +14516,10 @@ setTimeout(()=>{try{v29117RefreshActionable();renderHome();if(detailStockId){con
 
 // These manually validated ticker replays override older broad-replay values.
 // Everything else falls back to the existing StockIQ weak-market table.
-const V29118_VALIDATED_WEAK_TICKER = {
-  VIST:{n:11,win:82,avg:13.7},
-  ASX:{n:9,win:66.7,avg:9.3},
-  TIGO:{n:10,win:90,avg:6.5}
-};
+// v2.9.132: retired the old manual VIST/ASX/TIGO replay overrides.
+// The reproducible StockIQ_Down_Market_Performance_2026-08-23.csv OK rows
+// in V29112_DOWN_MARKET_TICKER are now the single ticker-level source of truth.
+const V29118_VALIDATED_WEAK_TICKER = {};
 function v29118WeakTickerStats(s){
   const t=String(s?.ticker||'').toUpperCase();
   return V29118_VALIDATED_WEAK_TICKER[t] || V29112_DOWN_MARKET_TICKER?.[t] || null;
