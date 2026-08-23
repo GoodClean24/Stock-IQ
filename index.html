@@ -8764,60 +8764,9 @@ function setupChecks(s){
     }
   }
 
-  if(['ONTO','HWM','FTAI','MOD','PLTR','MPC'].includes(s.ticker)){
-    add('Price above 200-day average',longTrend,`Current ${p==null?'—':money(p)} · 200-day ${m200==null?'—':money(m200)}${p!=null&&m200!=null&&!longTrend?` · needs ${pctFmt((m200/p-1)*100)} to reclaim`:''}`);
-    add('50-day above 200-day',stack,`50-day ${m50==null?'—':money(m50)} · 200-day ${m200==null?'—':money(m200)}`);
-    add('Regression trend rising',regUp,'The stock’s 126-day regression path is still moving higher.');
-  }
-
-  if(['ONTO','HWM','FTAI','MPC'].includes(s.ticker)){
-    const sweet=pb.regRange, buy=pb.buyRegRange||sweet;
-    add('Regression inside BUY range',reg.z!=null&&reg.z>=buy[0]&&reg.z<=buy[1],`Current ${reg.z==null?'—':reg.z.toFixed(2)} · BUY range ${buy[0]} to ${buy[1]}`);
-    if(buy[0]!==sweet[0] || buy[1]!==sweet[1]) add('Regression in A+ Sweet Spot',reg.z!=null&&reg.z>=sweet[0]&&reg.z<=sweet[1],`Best historical zone ${sweet[0]} to ${sweet[1]}`,false,'A+');
-    add('RSI in preferred range',rsi!=null&&rsi>=pb.rsi[0]&&rsi<=pb.rsi[1],`Current RSI ${rsi==null?'—':rsi.toFixed(1)}`);
-  }
-
-  if(s.ticker==='MOD'){
-    add('At least 14% below 52-week high',offHi!=null&&offHi<=-14,`Current ${offHi==null?'—':offHi.toFixed(1)+'%'} · BUY begins at 14% below the high`);
-    add('15%+ below high — A+ depth',offHi!=null&&offHi<=-15,'The strongest historical MOD zone started around 15% below the high.',false,'A+');
-    add('RSI in 35–60 range',rsi!=null&&rsi>=35&&rsi<=60,`Current RSI ${rsi==null?'—':rsi.toFixed(1)}`);
-  }
-  if(s.ticker==='PLTR'){
-    add('At least 22% below 52-week high',offHi!=null&&offHi<=-22,`Current ${offHi==null?'—':offHi.toFixed(1)+'%'} · this deep pullback remains required`);
-    add('RSI in 25–50 range',rsi!=null&&rsi>=25&&rsi<=50,`Current RSI ${rsi==null?'—':rsi.toFixed(1)}`);
-  }
-
-  if(s.ticker==='MTSI'){
-    add('Price above 200-day average',longTrend,`Current ${p==null?'—':money(p)} · 200-day ${m200==null?'—':money(m200)}${p!=null&&m200!=null&&!longTrend?` · needs ${pctFmt((m200/p-1)*100)} to reclaim`:''}`);
-    add('Regression trend rising',regUp,'The 126-day regression path is still moving higher.');
-    add('RSI in 35–60 range',rsi!=null&&rsi>=35&&rsi<=60,`Current RSI ${rsi==null?'—':rsi.toFixed(1)}`);
-    add('Fresh reclaim above 50-day average',crossUp(s,'price','ma50'),`Completed daily close ${p==null?'—':money(p)} · 50-day ${m50==null?'—':money(m50)}${p!=null&&m50!=null&&p<m50?` · needs ${pctFmt((m50/p-1)*100)} to reclaim`:' · daily reclaim must be a fresh cross'}`);
-    add('MACD histogram improving',hist!=null&&prevHist!=null&&hist>prevHist,`Helpful confirmation, but it no longer blocks a valid BUY.`,false,'A+');
-  }
-
-  if(s.ticker==='THC'){
-    add('Price above 200-day average',longTrend,`Current ${p==null?'—':money(p)} · 200-day ${m200==null?'—':money(m200)}${p!=null&&m200!=null&&!longTrend?` · needs ${pctFmt((m200/p-1)*100)} to reclaim`:''}`);
-    add('Regression trend rising',regUp,'The 126-day regression path is still moving higher.');
-    add('RSI in 30–57 BUY range',rsi!=null&&rsi>=30&&rsi<=57,`Current RSI ${rsi==null?'—':rsi.toFixed(1)}`);
-    add('RSI 30–55 — A+ range',rsi!=null&&rsi>=30&&rsi<=55,'The tighter historical sweet spot remains 30–55.',false,'A+');
-    add('Price reclaimed 20-day average',crossUp(s,'price','ma20'),`Current ${p==null?'—':money(p)} · 20-day ${e20==null?'—':money(e20)}${p!=null&&e20!=null&&p<e20?` · needs ${pctFmt((e20/p-1)*100)} to reclaim`:' · waiting for a fresh cross above'}`);
-  }
-
-  if(['DELL','VRT','DVN'].includes(s.ticker)){
-    const buyMom=s.ticker==='DELL'?8:s.ticker==='DVN'?7:4;
-    const sweetMom=s.ticker==='DELL'?8:s.ticker==='DVN'?8:5;
-    const buyRV=s.ticker==='DELL'?0.9:0.7;
-    const sweetRV=s.ticker==='DELL'?1.0:0.8;
-    add('Price above 20-day average',p!=null&&e20!=null&&p>e20,`Current ${p==null?'—':money(p)} · 20-day ${e20==null?'—':money(e20)}${p!=null&&e20!=null&&p<=e20?` · needs ${pctFmt((e20/p-1)*100)} to reclaim`:''}`);
-    add('20-day above 50-day',e20!=null&&m50!=null&&e20>m50,`20-day ${e20==null?'—':money(e20)} · 50-day ${m50==null?'—':money(m50)}`);
-    add('50-day above 200-day',stack,`50-day ${m50==null?'—':money(m50)} · 200-day ${m200==null?'—':money(m200)}`);
-    add('Regression trend rising',regUp,'The stock’s 126-day regression path is moving higher.');
-    add(`RSI in ${pb.rsi[0]}–${pb.rsi[1]} range`,rsi!=null&&rsi>=pb.rsi[0]&&rsi<=pb.rsi[1],`Current RSI ${rsi==null?'—':rsi.toFixed(1)}`);
-    add(`20-day momentum at least +${buyMom}%`,ch20!=null&&ch20>=buyMom,`Current 20-day change ${ch20==null?'—':pctFmt(ch20)}`);
-    if(sweetMom>buyMom) add(`A+ momentum +${sweetMom}% or better`,ch20!=null&&ch20>=sweetMom,'Stronger historical momentum zone.',false,'A+');
-    add(`Volume at least ${buyRV.toFixed(1)}× normal`,rv!=null&&rv>=buyRV,`Current relative volume ${rv==null?'—':rv.toFixed(2)+'×'}`);
-    if(sweetRV>buyRV) add(`A+ volume ${sweetRV.toFixed(1)}× or better`,rv!=null&&rv>=sweetRV,'Stronger historical participation.',false,'A+');
-  }
+  // v2.9.131: Legacy ticker-specific setup rules were retired with the hardcoded
+  // playbooks. All dynamically validated names now fall through the generic
+  // family logic above so stale per-ticker parameters cannot shadow fresh evidence.
   return out;
 }
 
@@ -9812,56 +9761,8 @@ function sweetSpotTiles(s,pb){
   const longTrend=p!=null&&m200!=null&&p>m200, stack=m50!=null&&m200!=null&&m50>m200, regUp=reg.slope!=null&&reg.slope>0;
   const tiles=[];
   const add=(sweet,label,today,ok,desc)=>tiles.push({sweet,label,today,ok,desc});
-  switch(s.ticker){
-    case 'ONTO': case 'HWM': case 'FTAI': case 'MPC': {
-      const [lo,hi]=pb.regRange;
-      add('ABOVE','Price vs SMA200', longTrend?(p!=null&&m200!=null?`${money(p)} > ${money(m200)}`:'Above'): (p!=null&&m200!=null?`${money(p)} < ${money(m200)}`:'Below'), longTrend, 'Long-term trend should stay intact.');
-      add('50 > 200','Trend Structure', stack?(m50!=null&&m200!=null?`${money(m50)} > ${money(m200)}`:'Yes'):(m50!=null&&m200!=null?`${money(m50)} < ${money(m200)}`:'No'), stack, 'The 50-day should stay above the 200-day.');
-      add('RISING','Regression Trend', reg.slope==null?'—':(regUp?'Rising':'Falling'), regUp, 'Direction mattered more than a flat or falling trend.');
-      add(`${lo} to ${hi}`,'Regression Z', reg.z==null?'—':reg.z.toFixed(2), reg.z!=null&&reg.z>=lo&&reg.z<=hi, 'This was the historical sweet spot.');
-      add(`${pb.rsi[0]}–${pb.rsi[1]}`,'RSI', rsi==null?'—':rsi.toFixed(1), rsi!=null&&rsi>=pb.rsi[0]&&rsi<=pb.rsi[1], 'Pullback momentum should stay controlled.');
-      add(`~${pb.hold} DAYS`,'Typical Hold', `Playbook: ${pb.hold}d`, null, 'Normal swing-trade window from the backtest.');
-      break; }
-    case 'MOD': case 'PLTR': {
-      const threshold=s.ticker==='MOD'?-15:-22;
-      add('ABOVE','Price vs SMA200', longTrend?(p!=null&&m200!=null?`${money(p)} > ${money(m200)}`:'Above'):(p!=null&&m200!=null?`${money(p)} < ${money(m200)}`:'Below'), longTrend, 'Long-term trend should stay intact.');
-      add('50 > 200','Trend Structure', stack?(m50!=null&&m200!=null?`${money(m50)} > ${money(m200)}`:'Yes'):(m50!=null&&m200!=null?`${money(m50)} < ${money(m200)}`:'No'), stack, 'The 50-day should stay above the 200-day.');
-      add('RISING','Regression Trend', reg.slope==null?'—':(regUp?'Rising':'Falling'), regUp, 'A rising regression trend mattered.');
-      add('NO PATTERN','Regression Z', reg.z==null?'—':reg.z.toFixed(2), null, 'Exact Z did not improve results for this ticker.');
-      add(`${Math.abs(threshold)}%+ BELOW HIGH`,'52W Pullback', offHi==null?'—':pctFmt(offHi), offHi!=null&&offHi<=threshold, 'The pullback needed to be deep enough.');
-      add(`${pb.rsi[0]}–${pb.rsi[1]}`,'RSI', rsi==null?'—':rsi.toFixed(1), rsi!=null&&rsi>=pb.rsi[0]&&rsi<=pb.rsi[1], 'RSI needed to be in the pullback range.');
-      add(`~${pb.hold} DAYS`,'Typical Hold', `Playbook: ${pb.hold}d`, null, 'Normal swing-trade window from the backtest.');
-      break; }
-    case 'MTSI': {
-      add('ABOVE','Price vs SMA200', longTrend?(p!=null&&m200!=null?`${money(p)} > ${money(m200)}`:'Above'):(p!=null&&m200!=null?`${money(p)} < ${money(m200)}`:'Below'), longTrend, 'Keeps the larger trend healthy.');
-      add('RISING','Regression Trend', reg.slope==null?'—':(regUp?'Rising':'Falling'), regUp, 'The larger path should still be moving higher.');
-      add('35–60','RSI', rsi==null?'—':rsi.toFixed(1), rsi!=null&&rsi>=35&&rsi<=60, 'Preferred pullback momentum range.');
-      add('IMPROVING','MACD Momentum', hist==null||prevHist==null?'—':`${hist.toFixed(2)} vs ${prevHist.toFixed(2)}`, hist!=null&&prevHist!=null&&hist>prevHist, 'Momentum should be improving.');
-      add('CROSS ABOVE','Price vs SMA50', p==null||m50==null?'—':`${money(p)} vs ${money(m50)}`, crossUp(s,'price','ma50'), 'This is the actual trigger for MTSI.');
-      add(`~${pb.hold} DAYS`,'Typical Hold', `Playbook: ${pb.hold}d`, null, 'Normal swing-trade window from the backtest.');
-      break; }
-    case 'THC': {
-      add('ABOVE','Price vs SMA200', longTrend?(p!=null&&m200!=null?`${money(p)} > ${money(m200)}`:'Above'):(p!=null&&m200!=null?`${money(p)} < ${money(m200)}`:'Below'), longTrend, 'Keeps the larger trend healthy.');
-      add('RISING','Regression Trend', reg.slope==null?'—':(regUp?'Rising':'Falling'), regUp, 'The larger path should still be moving higher.');
-      add('30–55','RSI', rsi==null?'—':rsi.toFixed(1), rsi!=null&&rsi>=30&&rsi<=55, 'Preferred pullback momentum range.');
-      add('CROSS ABOVE','Price vs EMA20', p==null||e20==null?'—':`${money(p)} vs ${money(e20)}`, crossUp(s,'price','ma20'), 'This is the actual trigger for THC.');
-      add(`~${pb.hold} DAYS`,'Typical Hold', `Playbook: ${pb.hold}d`, null, 'Normal swing-trade window from the backtest.');
-      break; }
-    case 'DELL': case 'VRT': case 'DVN': {
-      const minCh=s.ticker==='DELL'?8:s.ticker==='DVN'?8:5, minRV=s.ticker==='DELL'?1:0.8;
-      add('ABOVE','Price vs EMA20', p!=null&&e20!=null?`${money(p)} vs ${money(e20)}`:'—', p!=null&&e20!=null&&p>e20, 'Price should hold above the short-term trend.');
-      add('20 > 50','EMA20 vs SMA50', e20!=null&&m50!=null?`${money(e20)} vs ${money(m50)}`:'—', e20!=null&&m50!=null&&e20>m50, 'Short-term trend should lead the medium trend.');
-      add('50 > 200','Trend Structure', m50!=null&&m200!=null?`${money(m50)} vs ${money(m200)}`:'—', stack, 'The larger trend stack should stay healthy.');
-      add('RISING','Regression Trend', reg.slope==null?'—':(regUp?'Rising':'Falling'), regUp, 'Normal path should still be moving higher.');
-      add(`${pb.rsi[0]}–${pb.rsi[1]}`,'RSI', rsi==null?'—':rsi.toFixed(1), rsi!=null&&rsi>=pb.rsi[0]&&rsi<=pb.rsi[1], 'Momentum should stay in the proven range.');
-      add(`+${minCh}%+`,'20-Day Change', ch20==null?'—':pctFmt(ch20), ch20!=null&&ch20>=minCh, 'Momentum needed to be strong enough.');
-      add(`${minRV.toFixed(1)}×+`,'Relative Volume', rv==null?'—':`${rv.toFixed(2)}×`, rv!=null&&rv>=minRV, 'Participation should be strong enough.');
-      add(`~${pb.hold} DAYS`,'Typical Hold', `Playbook: ${pb.hold}d`, null, 'Normal swing-trade window from the backtest.');
-      break; }
-  }
-  // Newer/promoted playbooks may not have old ticker-specific display rows.
-  // Build an evidence-based entry comparison from the actual playbook family instead
-  // of rendering an empty table. These are display/context rows only.
+  // v2.9.131: No ticker-name display overrides remain. The generic family
+  // fallback below is the single source of truth for entry/sweet-spot tiles.
   if(!tiles.length && pb){
     const fam=String(pb.family||'').toUpperCase();
     const ctx=regressionContextFor(s,pb);
