@@ -10897,6 +10897,26 @@ showAddFlow = function(){ if(_origShowAddFlow)_origShowAddFlow(); setTimeout(()=
 
 
 
+// ── HISTORY STATUS STATE · v2.9.128 ORDERING FIX ─────────────────────────────
+// Must be initialized before researchStatePayload()/syncResearchStateFromCloud()
+// or any import/reconciliation path can reference it. This prevents TDZ errors
+// such as: Cannot access 'RESEARCH_HISTORY_STATUS' before initialization.
+const RESEARCH_RECON_VERSION='2';
+const HISTORY_STATUS_STORAGE_KEY='stockiq_history_status_v1';
+let RESEARCH_HISTORY_STATUS={};
+function loadResearchHistoryStatus(){
+  try{RESEARCH_HISTORY_STATUS=JSON.parse(localStorage.getItem(HISTORY_STATUS_STORAGE_KEY)||'{}')||{};}catch(e){RESEARCH_HISTORY_STATUS={};}
+}
+function saveResearchHistoryStatus(){
+  try{localStorage.setItem(HISTORY_STATUS_STORAGE_KEY,JSON.stringify(RESEARCH_HISTORY_STATUS));}catch(e){console.warn('Research history status save failed',e);}
+  scheduleResearchStateCloudSave();
+}
+function historyStatusForTicker(t){
+  loadResearchHistoryStatus();
+  return RESEARCH_HISTORY_STATUS[String(t||'').trim().toUpperCase()]||null;
+}
+loadResearchHistoryStatus();
+
 // ── CROSS-DEVICE RESEARCH STATE SYNC · v2.9.64 ───────────────────────────────
 // Daily market data and portfolio capital already sync through Firestore. The
 // Sunday queue, imported validation evidence, and history-status lifecycle used
@@ -11904,24 +11924,9 @@ showSundayDiscoveryFlow = function(){
 }
 (function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.94 · Sector + 30-Min Copy + Start Fresh';})();
 
-// ── v2.9.54 HISTORY LIFECYCLE ──────────────────────────────────────
-// Research is no longer a catch-all. The visible Research tab contains only:
-//   1) genuine Sunday discoveries still waiting for 6-year validation, and
-//   2) completed validation names kept as research/shadow.
-// Rejected, qualified, stale queue records, and legacy unclassified names stay
-// out of the normal Research view. Legacy names are preserved for audit rather
-// than silently deleted because their original scanner source is unknown.
-const RESEARCH_RECON_VERSION='2';
-const HISTORY_STATUS_STORAGE_KEY='stockiq_history_status_v1';
-let RESEARCH_HISTORY_STATUS={};
-function loadResearchHistoryStatus(){
-  try{RESEARCH_HISTORY_STATUS=JSON.parse(localStorage.getItem(HISTORY_STATUS_STORAGE_KEY)||'{}')||{};}catch(e){RESEARCH_HISTORY_STATUS={};}
-}
-function saveResearchHistoryStatus(){
-  try{localStorage.setItem(HISTORY_STATUS_STORAGE_KEY,JSON.stringify(RESEARCH_HISTORY_STATUS));}catch(e){console.warn('Research history status save failed',e);}
-  scheduleResearchStateCloudSave();
-}
-function historyStatusForTicker(t){ loadResearchHistoryStatus(); return RESEARCH_HISTORY_STATUS[String(t||'').trim().toUpperCase()]||null; }
+// ── v2.9.54 HISTORY LIFECYCLE (state declarations moved earlier in v2.9.128) ──
+// Parser/import helpers remain here; RESEARCH_HISTORY_STATUS is initialized
+// before the cross-device research sync code that references it.
 function parseGenericCSVRecords(text){
   const lines=String(text||'').trim().split(/\r?\n/).filter(Boolean);
   if(lines.length<2) return [];
@@ -14903,7 +14908,10 @@ if(_v29126Version)_v29126Version.textContent='StockIQ v2.9.126 · Canonical Port
 </script>
 
 <script>
-(function(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.127 · Graduation Rule Enforcement';})();
+(function(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.128 · Graduation Rule Enforcement';})();
 </script>
+
+<!-- v2.9.128 audit note: RESEARCH_HISTORY_STATUS declaration + loader moved above
+     cross-device research sync/import references. Single declaration only. -->
 </body>
 </html>
