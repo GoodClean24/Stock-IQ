@@ -95,7 +95,7 @@ input[type=number]{-moz-appearance:textfield;}
   <div id="portfolio-box"></div>
   <div id="position-watch"></div>
   <!-- Tonight's Best Opportunities — the ranking engine -->
-  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">v2.9.94 · Sector + 30-Min Copy + Start Fresh</div>
+  <div id="stockiq-version" style="position:fixed;bottom:8px;right:10px;z-index:9999;font-size:11px;color:#5A6072;background:rgba(17,20,28,0.85);padding:3px 8px;border-radius:6px;border:1px solid #1E2230;pointer-events:none;font-family:monospace;">v2.9.136 · Entry Reason Display Fix</div>
   <div id="tonights-opportunities"></div>
   <!-- Filter tags + sort -->
   <div id="filter-bar" style="background:#11141C;border-bottom:1px solid #1E2230;padding:9px 20px;"></div>
@@ -10223,6 +10223,7 @@ function plainOwnedAction(s,pb,st){
 }
 
 function plainEntryAction(s,pb,st){
+  // v2.9.136: keep the specific setup-state reason visible (earnings, proximity, extension, etc.) instead of masking it with generic WAIT copy.
   const state=String(st?.state||'WAIT').toUpperCase();
   const max=buyUpTo(s);
   if(state==='A+ BUY' || state==='BUY') return {
@@ -10231,11 +10232,17 @@ function plainEntryAction(s,pb,st){
     why:'All required setup rules are ready.',
     next:'If the price moves above the allowed entry range, do not chase it.'
   };
-  if(state==='ENTRY MISSED') return {label:'DO NOT BUY',color:C.orange,action:'Do not buy this stock now.',why:'The stock has already moved too far above the safe entry area.',next:'Wait for a new setup. Do not chase the old one.'};
+  if(state==='ENTRY MISSED') return {label:'DO NOT BUY',color:C.orange,action:'Do not buy this stock now.',
+    why: st?.reason || 'The stock has already moved too far above the safe entry area.',
+    next:'Wait for a new setup. Do not chase the old one.'};
   if(state==='ENTRY SIGNAL PASSED') return {label:'DO NOT BUY',color:C.textSub,action:'Do not treat this as a new buy.',why:'A prior valid buy signal already happened and has passed.',next:'Wait for a new setup.'};
   if(state==='TRIGGERED / VERIFY') return {label:'CHECK ENTRY NOW',color:C.purple,action:'Upload or verify the 30-minute data before buying.',why:'The daily setup qualified and the required reclaim trigger may have happened.',next:'Buy only if StockIQ verifies the trigger and the price is still inside the allowed entry range.'};
-  if(state==='PREPARING') return {label:'WAIT',color:C.yellow,action:'Do not buy yet.',why:'The setup is close, but one required trigger still has to happen.',next:'StockIQ will change this to BUY when the required trigger is confirmed.'};
-  return {label:'WAIT',color:C.textSub,action:'Do not buy yet.',why:'The setup is not ready.',next:'Wait until StockIQ changes the action to BUY.'};
+  if(state==='PREPARING') return {label:'WAIT',color:C.yellow,action:'Do not buy yet.',
+    why: st?.reason || 'The setup is close, but one required trigger still has to happen.',
+    next:'StockIQ will change this to BUY when the required trigger is confirmed.'};
+  return {label:'WAIT',color:C.textSub,action:'Do not buy yet.',
+    why: st?.reason || 'The setup is not ready.',
+    next:'Wait until StockIQ changes the action to BUY.'};
 }
 
 function chartWatchMeta(s,pb,st){
@@ -11574,7 +11581,7 @@ async function applyV2IntradayFile(input){
 // ── v2 initialization ────────────────────────────────────────────────────────
 (function initStockIQV2(){
   const style=document.createElement('style'); style.textContent=`.v2lbl{color:${C.textSub};font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}.v2val{color:${C.text};font-size:14px;font-weight:900}.v2big{color:${C.text};font-size:18px;font-weight:950}`; document.head.appendChild(style);
-  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.94 · Sector + 30-Min Copy + Start Fresh';
+  const version=document.getElementById('stockiq-version'); if(version)version.textContent='StockIQ v2.9.136 · Entry Reason Display Fix';
   const topButtons=[...document.querySelectorAll('button')]; const add=topButtons.find(b=>b.textContent.includes('Add Stock')); if(add){ add.style.display='none'; add.setAttribute('aria-hidden','true'); add.tabIndex=-1; } const scan=topButtons.find(b=>b.textContent.includes('Import Scan')); if(scan){scan.textContent='Daily Data';scan.onclick=showDailyDataFlow;scan.setAttribute('aria-label','Upload daily multi-ticker data');}
   if(scan && !document.getElementById('intraday-data-btn')){ const b=document.createElement('button'); b.id='intraday-data-btn'; b.textContent='Intraday Data'; b.onclick=showIntradayDataFlow; b.setAttribute('aria-label','Upload current 30-minute execution data'); b.style.cssText=scan.style.cssText; b.style.borderColor=C.yellow; b.style.color=C.yellow; scan.parentNode.insertBefore(b,scan.nextSibling); }
   if(scan && !document.getElementById('sunday-discovery-btn')){ const b=document.createElement('button'); b.id='sunday-discovery-btn'; b.textContent='Sunday Discovery'; b.onclick=showSundayDiscoveryFlow; b.setAttribute('aria-label','Upload Sunday scanner discovery report'); b.style.cssText=scan.style.cssText; b.style.borderColor=C.purple; b.style.color=C.purple; const anchor=document.getElementById('intraday-data-btn')||scan; anchor.parentNode.insertBefore(b,anchor.nextSibling); }
@@ -11771,7 +11778,7 @@ showSundayDiscoveryFlow = function(){
     </div>
   </div>`);
 }
-(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.94 · Sector + 30-Min Copy + Start Fresh';})();
+(function v2947Init(){const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.136 · Entry Reason Display Fix';})();
 
 // ── v2.9.54 HISTORY LIFECYCLE (state declarations moved earlier in v2.9.128) ──
 // Parser/import helpers remain here; RESEARCH_HISTORY_STATUS is initialized
@@ -12002,7 +12009,7 @@ renderStockList = function(){
 }
 
 (function v2953Init(){
-  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.94 · Sector + 30-Min Copy + Start Fresh';
+  const v=document.getElementById('stockiq-version');if(v)v.textContent='StockIQ v2.9.136 · Entry Reason Display Fix';
   // Safe cleanup on load: de-duplicate queue and remove only records that already
   // have evidence. Genuine pending Sunday names are never deleted automatically.
   try{ applyResearchReconciliation(true); }catch(e){ console.warn('Research reconciliation init failed',e); }
@@ -12235,7 +12242,7 @@ saveV2Close=async function(id){
 auth.onAuthStateChanged(user=>{ if(user){ loadSignalLedger(); syncSignalLedgerFromCloud(); } else { SIGNAL_LEDGER=[]; } });
 loadSignalLedger();
 setTimeout(()=>{ try{ updateAndCaptureSignals(); renderFilterBar(); }catch(e){ console.warn('Signal ledger init failed',e); } },800);
-const _v2965Version=document.getElementById('stockiq-version'); if(_v2965Version)_v2965Version.textContent='StockIQ v2.9.94 · Sector + 30-Min Copy + Start Fresh';
+const _v2965Version=document.getElementById('stockiq-version'); if(_v2965Version)_v2965Version.textContent='StockIQ v2.9.136 · Entry Reason Display Fix';
 // v2.9.82: preserves the v2.9.81 verified-entry persistence logic; fixes canonical daily CSV dates, filename/date validation, and Detail Back navigation.
 [...document.querySelectorAll('button')].filter(b=>/^(\+\s*)?(Add Stock|Research)$/i.test((b.textContent||'').trim())).forEach(b=>{ if(!b.closest('#tag-bar')){ b.style.display='none'; b.setAttribute('aria-hidden','true'); b.tabIndex=-1; } });
 </script>
@@ -12325,7 +12332,7 @@ renderStockList = renderStockList_v2993Final;
 
 // Re-render with final controls and persist any stale closed positions after auth/data load.
 setTimeout(()=>{ try{ reconcileClosedPositionsInMemory(); renderHome(); }catch(e){ console.warn('v2.9.93 final home refresh failed',e); } },1100);
-const _v2993Version=document.getElementById('stockiq-version'); if(_v2993Version)_v2993Version.textContent='StockIQ v2.9.94 · Sector + 30-Min Copy + Start Fresh';
+const _v2993Version=document.getElementById('stockiq-version'); if(_v2993Version)_v2993Version.textContent='StockIQ v2.9.136 · Entry Reason Display Fix';
 </script>
 
 
@@ -12427,7 +12434,7 @@ renderDetail=function(s){
 };
 
 const _v2994Version=document.getElementById('stockiq-version');
-if(_v2994Version)_v2994Version.textContent='StockIQ v2.9.94 · Sector + 30-Min Copy + Start Fresh';
+if(_v2994Version)_v2994Version.textContent='StockIQ v2.9.136 · Entry Reason Display Fix';
 </script>
 
 
