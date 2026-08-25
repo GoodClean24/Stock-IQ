@@ -8775,6 +8775,26 @@ function setupChecks(s){
   // family logic above so stale per-ticker parameters cannot shadow fresh evidence.
   return out;
 }
+function weakEntryCaution(s,pb){
+  const CAUTION_FAMILIES = { REG_PULLBACK: 45, DEEP_PULLBACK: 47.5, EMA20_RECLAIM: 47.5 };
+  // RSI midpoints are taken from the frozen signal_mask() required bands:
+  // REG_PULLBACK 35-55, DEEP_PULLBACK 35-60, EMA20_RECLAIM 35-60.
+  // This is a NON-GATING caution: it can deny A+ but never changes BUY/WAIT/PREPARING.
+  const fam=pb?.family;
+  if(!fam || !(fam in CAUTION_FAMILIES)) return null;
+  const p=curVal(s,'price'), e20=curVal(s,'ema20','ma20'), rsi=curVal(s,'rsi14','rsi');
+  if(p==null || e20==null || rsi==null) return null;
+  const belowEMA20 = p < e20;
+  const rsiElevated = rsi >= CAUTION_FAMILIES[fam];
+  if(!belowEMA20 || !rsiElevated) return null;
+  return {
+    flag: true,
+    reason: `Price is below its 20-day average while RSI (${rsi.toFixed(1)}) is still in the upper half of the required range. `
+      + `This specific combination has historically underperformed across two families in backtesting -- price breaking down `
+      + `before RSI confirms it. This does not block the trade, but this setup should not qualify for A+.`
+  };
+}
+
 function sweetSpotFit(s,checks=null){
   checks=checks||setupChecks(s);
   const preferred=checks.filter(x=>!x.required && x.tier==='A+');
@@ -9033,14 +9053,17 @@ function preEntryState(s){
     const ext=entryExtensionGate(s,pb);
     if(!ext.ok) return {state:'ENTRY MISSED',reason:ext.reason,checks,extension:ext};
     const tail=marketTailwind(s), sweet=sweetSpotFit(s,checks);
-    const aplus=tail.ok&&sweet&&evidenceAllowsAPlus(s);
+    const weakCaution=weakEntryCaution(s,pb);
+    const aplus=tail.ok&&sweet&&evidenceAllowsAPlus(s)&&!weakCaution?.flag;
     const reason=aplus
       ? 'Required setup is ready, the historical sweet spot is aligned, the market/sector tailwind is supportive, and the playbook has enough evidence to earn A+.'
-      : (sweet&&tail.ok&&!evidenceAllowsAPlus(s))
-        ? 'Required setup is ready and the technical sweet spot/tailwind are aligned, but the evidence tier is not strong enough for A+. Treat this as a normal BUY.'
-        : sweet
-          ? 'Required setup is ready. Sweet spot is aligned; market/sector boost is not required.'
-          : 'Required setup is ready. Some A+ preferences are not aligned, but they do not block the trade.';
+      : (weakCaution?.flag && sweet && tail.ok && evidenceAllowsAPlus(s))
+        ? 'Required setup is ready, but the weak-entry caution prevents A+. Treat this as a normal BUY.'
+        : (sweet&&tail.ok&&!evidenceAllowsAPlus(s))
+          ? 'Required setup is ready and the technical sweet spot/tailwind are aligned, but the evidence tier is not strong enough for A+. Treat this as a normal BUY.'
+          : sweet
+            ? 'Required setup is ready. Sweet spot is aligned; market/sector boost is not required.'
+            : 'Required setup is ready. Some A+ preferences are not aligned, but they do not block the trade.';
     return {state:aplus?'A+ BUY':'BUY',reason,checks};
   }
 
@@ -14856,5 +14879,58 @@ if(_v29126Version)_v29126Version.textContent='StockIQ v2.9.126 · Canonical Port
 
 <!-- v2.9.128 audit note: RESEARCH_HISTORY_STATUS declaration + loader moved above
      cross-device research sync/import references. Single declaration only. -->
+
+<script>
+// ── v2.9.138 WEAK-ENTRY CAUTION ─────────────────────────────────────────
+// Cross-validated research caution for REG_PULLBACK and DEEP_PULLBACK, with
+// lower-confidence supporting evidence for EMA20_RECLAIM. This NEVER changes
+// BUY/WAIT/PREPARING. It only prevents A+ and adds a clearly separated note.
+function v29138WeakEntryCautionNote(s){
+  if(hasOpenPosition(s)) return;
+  const pb=pbFor(s); if(!pb) return;
+  const caution=weakEntryCaution(s,pb);
+  const root=document.getElementById('detail-content'); if(!root) return;
+  root.querySelectorAll('[data-v29138-weak-entry-caution="1"]').forEach(x=>x.remove());
+  if(!caution?.flag) return;
+  let target=null;
+  for(const child of [...root.children]){
+    if(String(child.textContent||'').toUpperCase().includes('WHAT TO DO NOW')){ target=child; break; }
+  }
+  if(!target) return;
+  const note=document.createElement('div');
+  note.setAttribute('data-v29138-weak-entry-caution','1');
+  note.style.cssText=`margin-top:10px;padding:9px 10px;border-radius:10px;background:${C.yellowDim};border:1px solid ${C.yellow}55;color:${C.textSub};font-size:11.5px;line-height:1.5;`;
+  note.innerHTML=`<div style="color:${C.yellow};font-size:9.5px;font-weight:950;letter-spacing:.06em;text-transform:uppercase;margin-bottom:4px;">Entry Caution · Does Not Block BUY</div><div>${caution.reason}</div>`;
+  target.appendChild(note);
+}
+
+const _v29138BaseRenderDetail=renderDetail;
+renderDetail=function(s){
+  _v29138BaseRenderDetail(s);
+  try{ v29138WeakEntryCautionNote(s); }catch(e){ console.warn('v2.9.138 weak-entry caution display failed',e); }
+};
+</script>
+
+<script>
+// ── v2.9.138 AUTHORITATIVE VERSION BADGE ───────────────────────────────
+// This must remain the final executable script in the file. Older historical
+// patches contain their own version-label assignments; placing the current
+// build setter last prevents those legacy assignments from overwriting the
+// version shown in the bottom-right corner.
+(function stockIQAuthoritativeVersionBadge(){
+  const CURRENT_STOCKIQ_VERSION = 'StockIQ v2.9.138 · Weak Entry Caution';
+  function applyCurrentVersion(){
+    const v=document.getElementById('stockiq-version');
+    if(v) v.textContent=CURRENT_STOCKIQ_VERSION;
+  }
+  applyCurrentVersion();
+  if(document.readyState==='loading'){
+    document.addEventListener('DOMContentLoaded',applyCurrentVersion,{once:true});
+  }
+  // Re-assert once after legacy startup timers have finished.
+  setTimeout(applyCurrentVersion,1800);
+})();
+</script>
+
 </body>
 </html>
