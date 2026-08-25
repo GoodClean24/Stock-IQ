@@ -10822,9 +10822,13 @@ function normalizeResearchQueue(queue,evidence,status){
   for(const q of (queue||[])){
     const t=String(q?.ticker||'').trim().toUpperCase(); if(!t) continue;
     const ev=evidence?.[t]; const hs=status?.[t];
-    // Once a validation result exists or a terminal history status exists, the
-    // ticker no longer belongs in the waiting-for-history queue.
-    if(ev || (hs && ['INSUFFICIENT_HISTORY','DATA_ERROR'].includes(String(hs.status||'').toUpperCase()))) continue;
+    // v2.9.139: a research/shadow validation result is NOT terminal. PROMISING /
+    // REGIME-STRONG names are allowed back into the queue when rediscovered so
+    // they can accumulate evidence and be re-tested. Only PROVEN qualification,
+    // genuine REJECTED evidence, or terminal history failure removes the ticker.
+    const evGrade=String(ev?.grade||'').toUpperCase();
+    const evTerminal=!!ev && (ev.promotionReady===true || evGrade==='REJECTED');
+    if(evTerminal || (hs && ['INSUFFICIENT_HISTORY','DATA_ERROR'].includes(String(hs.status||'').toUpperCase()))) continue;
     const prev=by.get(t);
     if(!prev) by.set(t,{...q,ticker:t});
     else{
@@ -11703,9 +11707,17 @@ applySundayDiscovery = function(){
   // carries both sources into the validator, preventing blind six-family shopping.
   for(const r of p.rows){
     const t=r.ticker; const cls=sundayTickerClass(t);
-    if(cls.bucket==='new'){
-      const rec={ticker:t,description:r.description||'',sector:r.sector||'',industry:r.industry||'',discoveredOn:today(),source:p.source,status:'NEEDS_6YR_VALIDATION'};
-      sundayResearchQueue.push(rec); byTicker.set(t,rec); added.push(t);
+    if(cls.bucket==='new' || cls.bucket==='research'){
+      // v2.9.139: 'research' = non-terminal research/shadow evidence. Give these
+      // tickers another validation shot when they reappear. REJECTED is a
+      // separate bucket and is intentionally excluded. If already queued, merge
+      // the new scan source instead of creating a duplicate queue record.
+      if(byTicker.has(t)){
+        const rec=byTicker.get(t); rec.source=mergeScannerSource(rec.source,p.source);
+      } else {
+        const rec={ticker:t,description:r.description||'',sector:r.sector||'',industry:r.industry||'',discoveredOn:today(),source:p.source,status:'NEEDS_6YR_VALIDATION'};
+        sundayResearchQueue.push(rec); byTicker.set(t,rec); added.push(t);
+      }
     } else if(byTicker.has(t)){
       const rec=byTicker.get(t); rec.source=mergeScannerSource(rec.source,p.source);
     }
@@ -11869,7 +11881,14 @@ function researchReconciliationSnapshot(){
     if(hs?.status==='DATA_ERROR'){ dataErrors.push({...hs,ticker:t}); continue; }
     const existing=stocks.find(s=>researchTicker(s.ticker)===t)||null;
     const validated=existing?isValidatedStock(existing):(dyn?.promotionReady===true || builtin?.promotionReady===true || !!VALIDATED_EVIDENCE_CLASS[t]);
-    if(dyn){ stale.push({ticker:t,reason:`Validation already imported · ${dyn.grade||'EVIDENCE'}`}); continue; }
+    if(dyn){
+      // v2.9.139: queued research/shadow grades are intentional re-validation
+      // candidates. Only terminal dynamic outcomes are stale here.
+      if(dyn.promotionReady===true){ stale.push({ticker:t,reason:`Already qualified · ${dyn.grade||'PROVEN'}`}); continue; }
+      if(isRejectedGrade(dyn.grade)){ stale.push({ticker:t,reason:`Previously rejected · ${dyn.grade||'REJECTED'}`}); continue; }
+      pending.push({...raw,ticker:t,status:'NEEDS_6YR_VALIDATION'});
+      continue;
+    }
     if(builtin){ stale.push({ticker:t,reason:`Existing research evidence · ${builtin.grade||'EVIDENCE'}`}); continue; }
     if(validated){ stale.push({ticker:t,reason:'Already qualified'}); continue; }
     pending.push({...raw,ticker:t,status:'NEEDS_6YR_VALIDATION'});
@@ -14912,13 +14931,13 @@ renderDetail=function(s){
 </script>
 
 <script>
-// ── v2.9.138 AUTHORITATIVE VERSION BADGE ───────────────────────────────
+// ── v2.9.139 AUTHORITATIVE VERSION BADGE ───────────────────────────────
 // This must remain the final executable script in the file. Older historical
 // patches contain their own version-label assignments; placing the current
 // build setter last prevents those legacy assignments from overwriting the
 // version shown in the bottom-right corner.
 (function stockIQAuthoritativeVersionBadge(){
-  const CURRENT_STOCKIQ_VERSION = 'StockIQ v2.9.138 · Weak Entry Caution';
+  const CURRENT_STOCKIQ_VERSION = 'StockIQ v2.9.139 · Research Revalidation Queue Fix';
   function applyCurrentVersion(){
     const v=document.getElementById('stockiq-version');
     if(v) v.textContent=CURRENT_STOCKIQ_VERSION;
